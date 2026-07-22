@@ -5,7 +5,7 @@
 //! to a [`TaskRollout`]; verification uses the adapter's [`crate::verifier::Verifier`].
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use crate::adapter::{BenchmarkAdapter, TaskSpec};
 use crate::error::{EvalError, EvalResult};
-use crate::result::{AggregateMetrics, RunRecord, TaskResult, TaskStatus};
+use crate::result::{
+    AggregateMetrics, RunRecord, TaskResult, TaskStatus, TaskTelemetry, Telemetry,
+};
 use crate::verifier::VerificationOutcome;
 
 /// Configuration for a benchmark run.
@@ -47,10 +49,50 @@ impl Default for RunnerConfig {
     }
 }
 
-/// Drives a single task: produce an agent final state blob for verification.
+/// Typed terminal state of a rollout before benchmark verification.
+///
+/// The verifier receives only `verifier_state`; telemetry is carried separately
+/// and is never derived from JSON that a verifier returns or echoes.
+#[derive(Debug, Clone)]
+pub enum RolloutState {
+    Completed { verifier_state: serde_json::Value },
+    Failed { error: String },
+}
+
+/// Authoritative state and telemetry produced by one task rollout.
+///
+/// Implementations that observe telemetry before a handled execution failure
+/// should return [`TaskRolloutResult::execution_failure`] so the runner can
+/// retain it. A bare [`EvalError`] has no observed telemetry and is recorded as
+/// explicitly unavailable.
+#[derive(Debug, Clone)]
+pub struct TaskRolloutResult {
+    pub state: RolloutState,
+    pub telemetry: TaskTelemetry,
+}
+
+impl TaskRolloutResult {
+    pub fn completed(verifier_state: serde_json::Value, telemetry: TaskTelemetry) -> Self {
+        Self {
+            state: RolloutState::Completed { verifier_state },
+            telemetry,
+        }
+    }
+
+    pub fn execution_failure(error: impl Into<String>, telemetry: TaskTelemetry) -> Self {
+        Self {
+            state: RolloutState::Failed {
+                error: error.into(),
+            },
+            telemetry,
+        }
+    }
+}
+
+/// Drives a single task and returns verifier state plus authoritative telemetry.
 #[async_trait]
 pub trait TaskRollout: Send + Sync {
-    async fn execute(&self, task: &TaskSpec) -> EvalResult<serde_json::Value>;
+    async fn execute(&self, task: &TaskSpec) -> EvalResult<TaskRolloutResult>;
 }
 
 /// Benchmark runner.
@@ -149,81 +191,97 @@ where
     let start = Instant::now();
 
     match tokio::time::timeout(task.timeout, rollout.execute(&task)).await {
-        Err(_) => TaskResult {
-            task_id: task.task_id.clone(),
-            category: task.category.clone(),
-            status: TaskStatus::Timeout,
-            outcome: VerificationOutcome::fail("rollout timed out"),
-            agent_turns: 0,
-            duration: start.elapsed(),
-            tokens_input: 0,
-            tokens_output: 0,
-            cost_usd: 0.0,
-            error: Some(format!("timeout after {:?}", task.timeout)),
-        },
-        Ok(Err(e)) => TaskResult {
-            task_id: task.task_id.clone(),
-            category: task.category.clone(),
-            status: TaskStatus::Error,
-            outcome: VerificationOutcome::fail(e.to_string()),
-            agent_turns: 0,
-            duration: start.elapsed(),
-            tokens_input: 0,
-            tokens_output: 0,
-            cost_usd: 0.0,
-            error: Some(e.to_string()),
-        },
-        Ok(Ok(state)) => {
-            let verifier = adapter.verifier();
-            match verifier.verify(&task, &state).await {
-                Err(e) => TaskResult {
-                    task_id: task.task_id.clone(),
-                    category: task.category.clone(),
-                    status: TaskStatus::Error,
-                    outcome: VerificationOutcome::fail(e.to_string()),
-                    agent_turns: 0,
-                    duration: start.elapsed(),
-                    tokens_input: 0,
-                    tokens_output: 0,
-                    cost_usd: 0.0,
-                    error: Some(e.to_string()),
-                },
-                Ok(mut outcome) => match adapter.post_process(&task, outcome.clone()).await {
-                    Err(e) => TaskResult {
-                        task_id: task.task_id.clone(),
-                        category: task.category.clone(),
-                        status: TaskStatus::Error,
-                        outcome,
-                        agent_turns: 0,
-                        duration: start.elapsed(),
-                        tokens_input: 0,
-                        tokens_output: 0,
-                        cost_usd: 0.0,
-                        error: Some(e.to_string()),
-                    },
-                    Ok(o) => {
-                        outcome = o;
-                        let status = if outcome.passed {
-                            TaskStatus::Passed
-                        } else {
-                            TaskStatus::Failed
-                        };
-                        TaskResult {
-                            task_id: task.task_id.clone(),
-                            category: task.category.clone(),
-                            status,
-                            outcome,
-                            agent_turns: 1,
-                            duration: start.elapsed(),
-                            tokens_input: 0,
-                            tokens_output: 0,
-                            cost_usd: 0.0,
-                            error: None,
-                        }
+        Err(_) => task_result(
+            &task,
+            TaskStatus::Timeout,
+            VerificationOutcome::fail("rollout timed out"),
+            start.elapsed(),
+            TaskTelemetry::default(),
+            Some(format!("timeout after {:?}", task.timeout)),
+        ),
+        Ok(Err(error)) => task_result(
+            &task,
+            TaskStatus::Error,
+            VerificationOutcome::fail(error.to_string()),
+            start.elapsed(),
+            TaskTelemetry::default(),
+            Some(error.to_string()),
+        ),
+        Ok(Ok(rollout_result)) => {
+            let TaskRolloutResult { state, telemetry } = rollout_result;
+            match state {
+                RolloutState::Failed { error } => task_result(
+                    &task,
+                    TaskStatus::Error,
+                    VerificationOutcome::fail(error.clone()),
+                    start.elapsed(),
+                    telemetry,
+                    Some(error),
+                ),
+                RolloutState::Completed { verifier_state } => {
+                    let verifier = adapter.verifier();
+                    match verifier.verify(&task, &verifier_state).await {
+                        Err(error) => task_result(
+                            &task,
+                            TaskStatus::Error,
+                            VerificationOutcome::fail(error.to_string()),
+                            start.elapsed(),
+                            telemetry,
+                            Some(error.to_string()),
+                        ),
+                        Ok(outcome) => match adapter.post_process(&task, outcome.clone()).await {
+                            Err(error) => task_result(
+                                &task,
+                                TaskStatus::Error,
+                                outcome,
+                                start.elapsed(),
+                                telemetry,
+                                Some(error.to_string()),
+                            ),
+                            Ok(outcome) => {
+                                let status = if outcome.passed {
+                                    TaskStatus::Passed
+                                } else {
+                                    TaskStatus::Failed
+                                };
+                                task_result(
+                                    &task,
+                                    status,
+                                    outcome,
+                                    start.elapsed(),
+                                    telemetry,
+                                    None,
+                                )
+                            }
+                        },
                     }
-                },
+                }
             }
         }
+    }
+}
+
+fn task_result(
+    task: &TaskSpec,
+    status: TaskStatus,
+    outcome: VerificationOutcome,
+    duration: Duration,
+    telemetry: TaskTelemetry,
+    error: Option<String>,
+) -> TaskResult {
+    TaskResult {
+        task_id: task.task_id.clone(),
+        category: task.category.clone(),
+        status,
+        outcome,
+        agent_turns: telemetry.total_turns,
+        retry_count: telemetry.retry_count,
+        duration,
+        tokens_input: telemetry.tokens_input,
+        tokens_output: telemetry.tokens_output,
+        cost_usd: telemetry.cost_usd,
+        provenance: telemetry.provenance,
+        error,
     }
 }
 
@@ -258,17 +316,11 @@ fn aggregate_metrics(tasks: &[TaskResult]) -> AggregateMetrics {
     let mut timeout = 0u32;
     let mut error = 0u32;
     let mut skipped = 0u32;
-    let mut total_duration = std::time::Duration::ZERO;
-    let mut total_tokens_in = 0u64;
-    let mut total_tokens_out = 0u64;
-    let mut total_cost = 0.0f64;
+    let mut total_duration = Duration::ZERO;
 
-    for t in tasks {
-        total_duration += t.duration;
-        total_tokens_in += t.tokens_input;
-        total_tokens_out += t.tokens_output;
-        total_cost += t.cost_usd;
-        match t.status {
+    for task in tasks {
+        total_duration += task.duration;
+        match task.status {
             TaskStatus::Passed => passed += 1,
             TaskStatus::Failed => failed += 1,
             TaskStatus::Timeout => timeout += 1,
@@ -292,10 +344,78 @@ fn aggregate_metrics(tasks: &[TaskResult]) -> AggregateMetrics {
         skipped,
         pass_at_1,
         total_duration,
-        total_tokens_input: total_tokens_in,
-        total_tokens_output: total_tokens_out,
-        total_cost_usd: total_cost,
+        total_tokens_input: sum_u64_telemetry(tasks.iter().map(|task| &task.tokens_input)),
+        total_tokens_output: sum_u64_telemetry(tasks.iter().map(|task| &task.tokens_output)),
+        total_cost_usd: sum_cost_telemetry(tasks),
+        total_agent_turns: sum_u32_telemetry(tasks.iter().map(|task| &task.agent_turns)),
+        total_retries: sum_u32_telemetry(tasks.iter().map(|task| &task.retry_count)),
     }
+}
+
+fn sum_u64_telemetry<'a>(
+    values: impl Iterator<Item = &'a Telemetry<u64>>,
+) -> Telemetry<u64> {
+    let mut total = 0_u64;
+    let mut any = false;
+    for value in values {
+        let Some(value) = value.value() else {
+            return Telemetry::Unavailable;
+        };
+        any = true;
+        let Some(next) = total.checked_add(value) else {
+            return Telemetry::Unavailable;
+        };
+        total = next;
+    }
+    if any {
+        Telemetry::Available(total)
+    } else {
+        Telemetry::Unavailable
+    }
+}
+
+fn sum_u32_telemetry<'a>(
+    values: impl Iterator<Item = &'a Telemetry<u32>>,
+) -> Telemetry<u64> {
+    let mut total = 0_u64;
+    let mut any = false;
+    for value in values {
+        let Some(value) = value.value() else {
+            return Telemetry::Unavailable;
+        };
+        any = true;
+        let Some(next) = total.checked_add(u64::from(value)) else {
+            return Telemetry::Unavailable;
+        };
+        total = next;
+    }
+    if any {
+        Telemetry::Available(total)
+    } else {
+        Telemetry::Unavailable
+    }
+}
+
+fn sum_cost_telemetry(tasks: &[TaskResult]) -> Telemetry<f64> {
+    if tasks.is_empty() {
+        return Telemetry::Unavailable;
+    }
+
+    let mut total = 0.0_f64;
+    for task in tasks {
+        let Telemetry::Available(cost) = &task.cost_usd else {
+            return Telemetry::Unavailable;
+        };
+        let cost = cost.usd();
+        if !cost.is_finite() || cost.is_sign_negative() {
+            return Telemetry::Unavailable;
+        }
+        total += cost;
+        if !total.is_finite() || total.is_sign_negative() {
+            return Telemetry::Unavailable;
+        }
+    }
+    Telemetry::Available(total)
 }
 
 fn num_cpus_fallback() -> u32 {
@@ -308,12 +428,32 @@ fn num_cpus_fallback() -> u32 {
 mod tests {
     use super::*;
     use crate::adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
+    use crate::result::{CostUsd, PricingProvenance, PricingSource};
     use crate::verifier::{VerificationOutcome, Verifier};
 
-    struct EmptyAdapter;
+    struct TestAdapter {
+        tasks: Vec<TaskSpec>,
+        verifier_error: bool,
+    }
+
+    impl TestAdapter {
+        fn new(tasks: Vec<TaskSpec>) -> Self {
+            Self {
+                tasks,
+                verifier_error: false,
+            }
+        }
+
+        fn with_verifier_error(tasks: Vec<TaskSpec>) -> Self {
+            Self {
+                tasks,
+                verifier_error: true,
+            }
+        }
+    }
 
     #[async_trait]
-    impl BenchmarkAdapter for EmptyAdapter {
+    impl BenchmarkAdapter for TestAdapter {
         fn metadata(&self) -> BenchmarkMetadata {
             BenchmarkMetadata {
                 id: "test".into(),
@@ -324,31 +464,107 @@ mod tests {
         }
 
         async fn load_tasks(&self) -> EvalResult<Vec<TaskSpec>> {
-            Ok(vec![])
+            Ok(self.tasks.clone())
         }
 
         fn verifier(&self) -> Box<dyn Verifier> {
-            struct V;
-            #[async_trait]
-            impl Verifier for V {
-                async fn verify(
-                    &self,
-                    _: &TaskSpec,
-                    _: &serde_json::Value,
-                ) -> EvalResult<VerificationOutcome> {
-                    Ok(VerificationOutcome::pass())
-                }
-            }
-            Box::new(V)
+            Box::new(TestVerifier {
+                fail: self.verifier_error,
+            })
         }
     }
 
-    struct OkRollout;
+    struct TestVerifier {
+        fail: bool,
+    }
 
     #[async_trait]
-    impl TaskRollout for OkRollout {
-        async fn execute(&self, _: &TaskSpec) -> EvalResult<serde_json::Value> {
-            Ok(serde_json::json!({}))
+    impl Verifier for TestVerifier {
+        async fn verify(
+            &self,
+            _: &TaskSpec,
+            _: &serde_json::Value,
+        ) -> EvalResult<VerificationOutcome> {
+            if self.fail {
+                Err(EvalError::Verification("injected verifier failure".into()))
+            } else {
+                Ok(VerificationOutcome::pass())
+            }
+        }
+    }
+
+    fn task(task_id: &str, timeout: Duration) -> TaskSpec {
+        TaskSpec {
+            task_id: task_id.into(),
+            category: None,
+            instruction: "test task".into(),
+            context: serde_json::json!({}),
+            timeout,
+        }
+    }
+
+    fn valid_cost(usd: f64) -> CostUsd {
+        CostUsd::new(
+            usd,
+            PricingProvenance::new(
+                PricingSource::ExternalEstimate,
+                Telemetry::Unavailable,
+                Telemetry::Unavailable,
+            ),
+        )
+        .expect("valid cost")
+    }
+
+    #[derive(Clone)]
+    struct StaticRollout(TaskRolloutResult);
+
+    #[async_trait]
+    impl TaskRollout for StaticRollout {
+        async fn execute(&self, _: &TaskSpec) -> EvalResult<TaskRolloutResult> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct ErrorRollout;
+
+    #[async_trait]
+    impl TaskRollout for ErrorRollout {
+        async fn execute(&self, _: &TaskSpec) -> EvalResult<TaskRolloutResult> {
+            Err(EvalError::TaskExecution("injected rollout error".into()))
+        }
+    }
+
+    struct TimeoutRollout;
+
+    #[async_trait]
+    impl TaskRollout for TimeoutRollout {
+        async fn execute(&self, _: &TaskSpec) -> EvalResult<TaskRolloutResult> {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(TaskRolloutResult::completed(
+                serde_json::json!({}),
+                TaskTelemetry::default(),
+            ))
+        }
+    }
+
+    struct TurnRetryRollout;
+
+    #[async_trait]
+    impl TaskRollout for TurnRetryRollout {
+        async fn execute(&self, task: &TaskSpec) -> EvalResult<TaskRolloutResult> {
+            let (turns, retries) = if task.task_id == "first" {
+                (2, 1)
+            } else {
+                (3, 2)
+            };
+            Ok(TaskRolloutResult::completed(
+                serde_json::json!({}),
+                TaskTelemetry {
+                    total_turns: Telemetry::Available(turns),
+                    retry_count: Telemetry::Available(retries),
+                    ..TaskTelemetry::default()
+                },
+            ))
         }
     }
 
@@ -359,9 +575,224 @@ mod tests {
             ..Default::default()
         });
         let err = runner
-            .run(Arc::new(EmptyAdapter), Arc::new(OkRollout))
+            .run(
+                Arc::new(TestAdapter::new(vec![task(
+                    "present",
+                    Duration::from_secs(1),
+                )])),
+                Arc::new(StaticRollout(TaskRolloutResult::completed(
+                    serde_json::json!({}),
+                    TaskTelemetry::default(),
+                ))),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, EvalError::DatasetLoad(_)));
+    }
+
+    #[tokio::test]
+    async fn typed_telemetry_reaches_task_and_aggregate_and_ignores_verifier_json() {
+        let telemetry = TaskTelemetry {
+            tokens_input: Telemetry::Available(11),
+            tokens_output: Telemetry::Available(7),
+            cost_usd: Telemetry::Available(valid_cost(0.25)),
+            total_turns: Telemetry::Available(4),
+            retry_count: Telemetry::Available(1),
+            ..TaskTelemetry::default()
+        };
+        let rollout = StaticRollout(TaskRolloutResult::completed(
+            serde_json::json!({
+                "usage": {
+                    "prompt_tokens": 999_999,
+                    "completion_tokens": 999_999,
+                    "estimated_cost": 999.0,
+                },
+                "total_turns": 999_999,
+                "retry_count": 999_999,
+            }),
+            telemetry,
+        ));
+        let record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![task("one", Duration::from_secs(1))])),
+                Arc::new(rollout),
+            )
+            .await
+            .expect("run");
+
+        let task = &record.tasks[0];
+        assert_eq!(task.tokens_input, Telemetry::Available(11));
+        assert_eq!(task.tokens_output, Telemetry::Available(7));
+        assert_eq!(task.agent_turns, Telemetry::Available(4));
+        assert_eq!(task.retry_count, Telemetry::Available(1));
+        assert!(matches!(
+            task.cost_usd.as_ref(),
+            Telemetry::Available(cost) if (cost.usd() - 0.25).abs() < f64::EPSILON
+        ));
+        assert_eq!(record.metrics.total_tokens_input, Telemetry::Available(11));
+        assert_eq!(record.metrics.total_tokens_output, Telemetry::Available(7));
+        assert_eq!(record.metrics.total_agent_turns, Telemetry::Available(4));
+        assert_eq!(record.metrics.total_retries, Telemetry::Available(1));
+        assert!(matches!(
+            record.metrics.total_cost_usd,
+            Telemetry::Available(cost) if (cost - 0.25).abs() < f64::EPSILON
+        ));
+    }
+
+    #[tokio::test]
+    async fn unavailable_telemetry_stays_unavailable_not_zero() {
+        let record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![task("one", Duration::from_secs(1))])),
+                Arc::new(StaticRollout(TaskRolloutResult::completed(
+                    serde_json::json!({
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                        "total_turns": 3,
+                    }),
+                    TaskTelemetry::default(),
+                ))),
+            )
+            .await
+            .expect("run");
+
+        let task = &record.tasks[0];
+        assert!(matches!(task.tokens_input, Telemetry::Unavailable));
+        assert!(matches!(task.tokens_output, Telemetry::Unavailable));
+        assert!(matches!(task.cost_usd.as_ref(), Telemetry::Unavailable));
+        assert!(matches!(task.agent_turns, Telemetry::Unavailable));
+        assert!(matches!(task.retry_count, Telemetry::Unavailable));
+        assert!(matches!(
+            record.metrics.total_tokens_input,
+            Telemetry::Unavailable
+        ));
+        assert!(matches!(
+            record.metrics.total_tokens_output,
+            Telemetry::Unavailable
+        ));
+        assert!(matches!(record.metrics.total_cost_usd, Telemetry::Unavailable));
+        assert!(matches!(
+            record.metrics.total_agent_turns,
+            Telemetry::Unavailable
+        ));
+        assert!(matches!(record.metrics.total_retries, Telemetry::Unavailable));
+    }
+
+    #[test]
+    fn invalid_cost_is_rejected() {
+        let pricing = PricingProvenance::agent_result_usage_estimate();
+        assert!(CostUsd::new(f64::NAN, pricing.clone()).is_err());
+        assert!(CostUsd::new(-0.0, pricing.clone()).is_err());
+        assert!(CostUsd::new(-0.01, pricing).is_err());
+        assert!(serde_json::from_value::<CostUsd>(serde_json::json!({
+            "usd": -0.01,
+            "pricing": {"source": "external_estimate"},
+        }))
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn handled_execution_failure_preserves_observed_telemetry() {
+        let telemetry = TaskTelemetry {
+            tokens_input: Telemetry::Available(5),
+            total_turns: Telemetry::Available(2),
+            retry_count: Telemetry::Available(1),
+            ..TaskTelemetry::default()
+        };
+        let record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![task("one", Duration::from_secs(1))])),
+                Arc::new(StaticRollout(TaskRolloutResult::execution_failure(
+                    "handled execution failure",
+                    telemetry,
+                ))),
+            )
+            .await
+            .expect("run");
+
+        let task = &record.tasks[0];
+        assert_eq!(task.status, TaskStatus::Error);
+        assert_eq!(task.tokens_input, Telemetry::Available(5));
+        assert_eq!(task.agent_turns, Telemetry::Available(2));
+        assert_eq!(task.retry_count, Telemetry::Available(1));
+    }
+
+    #[tokio::test]
+    async fn verifier_failure_preserves_rollout_telemetry() {
+        let telemetry = TaskTelemetry {
+            tokens_input: Telemetry::Available(8),
+            tokens_output: Telemetry::Available(3),
+            total_turns: Telemetry::Available(2),
+            ..TaskTelemetry::default()
+        };
+        let record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::with_verifier_error(vec![task(
+                    "one",
+                    Duration::from_secs(1),
+                )])),
+                Arc::new(StaticRollout(TaskRolloutResult::completed(
+                    serde_json::json!({}),
+                    telemetry,
+                ))),
+            )
+            .await
+            .expect("run");
+
+        let task = &record.tasks[0];
+        assert_eq!(task.status, TaskStatus::Error);
+        assert_eq!(task.tokens_input, Telemetry::Available(8));
+        assert_eq!(task.tokens_output, Telemetry::Available(3));
+        assert_eq!(task.agent_turns, Telemetry::Available(2));
+    }
+
+    #[tokio::test]
+    async fn timeout_and_bare_rollout_error_do_not_invent_zero_telemetry() {
+        let timeout_record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![task(
+                    "timeout",
+                    Duration::from_millis(1),
+                )])),
+                Arc::new(TimeoutRollout),
+            )
+            .await
+            .expect("timeout record");
+        let error_record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![task(
+                    "error",
+                    Duration::from_secs(1),
+                )])),
+                Arc::new(ErrorRollout),
+            )
+            .await
+            .expect("error record");
+
+        for task in [&timeout_record.tasks[0], &error_record.tasks[0]] {
+            assert!(matches!(task.tokens_input, Telemetry::Unavailable));
+            assert!(matches!(task.tokens_output, Telemetry::Unavailable));
+            assert!(matches!(task.cost_usd.as_ref(), Telemetry::Unavailable));
+            assert!(matches!(task.agent_turns, Telemetry::Unavailable));
+            assert!(matches!(task.retry_count, Telemetry::Unavailable));
+        }
+        assert_eq!(timeout_record.tasks[0].status, TaskStatus::Timeout);
+        assert_eq!(error_record.tasks[0].status, TaskStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn retry_and_turn_counts_aggregate() {
+        let record = Runner::new(RunnerConfig::default())
+            .run(
+                Arc::new(TestAdapter::new(vec![
+                    task("first", Duration::from_secs(1)),
+                    task("second", Duration::from_secs(1)),
+                ])),
+                Arc::new(TurnRetryRollout),
+            )
+            .await
+            .expect("run");
+
+        assert_eq!(record.metrics.total_agent_turns, Telemetry::Available(5));
+        assert_eq!(record.metrics.total_retries, Telemetry::Available(3));
     }
 }

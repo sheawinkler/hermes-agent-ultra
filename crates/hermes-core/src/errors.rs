@@ -10,6 +10,9 @@ pub enum AgentError {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    #[error("Policy blocked: {0}")]
+    PolicyBlocked(String),
+
     #[error("Gateway error: {0}")]
     Gateway(String),
 
@@ -52,6 +55,10 @@ pub enum ToolError {
 
     #[error("Tool timed out: {0}")]
     Timeout(String),
+    /// Handler invocation began, but no trustworthy completion outcome exists.
+    #[error("Tool execution outcome unknown: {0}")]
+    OutcomeUnknown(String),
+
 
     #[error("Schema violation: {0}")]
     SchemaViolation(String),
@@ -188,6 +195,76 @@ pub fn classify_send_error_text(error_text: &str) -> SendErrorKind {
     SendErrorKind::Unknown
 }
 
+/// Durable information needed to account for a response whose prefix was
+/// accepted by a provider. `remaining_text` is replayable only when
+/// `retryable` is true; transport ambiguity must remain operator-visible until
+/// the provider offers idempotency.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PartialDelivery {
+    pub platform: String,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub reply_to_message_id: Option<String>,
+    pub reply_to_mode: String,
+    pub non_conversational: bool,
+    /// Index in the original split response of the first unsent chunk.
+    pub next_chunk_index: usize,
+    pub remaining_text: String,
+    pub accepted_message_ids: Vec<String>,
+    pub accepted_chunks: usize,
+    /// True only when the provider proved that `remaining_text` was not
+    /// accepted (for example, a 429 before the request could be accepted).
+    pub retryable: bool,
+    /// Provider-authoritative pacing for the retryable suffix. This remains
+    /// structured so durable replay never has to parse a display string or
+    /// round a fractional server hint to whole seconds.
+    #[serde(default)]
+    pub retry_after: Option<std::time::Duration>,
+    pub failure: String,
+    /// Local state repair required before a retained suffix may be replayed.
+    /// This is separate from the provider failure so durable spool consumers
+    /// cannot accidentally treat an accepted prefix as an ordinary retry.
+    #[serde(default)]
+    pub repair_required: Option<String>,
+}
+
+impl std::fmt::Display for PartialDelivery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} accepted chunk(s) on {} before delivery stopped: {}",
+            self.accepted_chunks, self.platform, self.failure
+        )
+    }
+}
+
+/// A local media check that failed before any provider request was started.
+///
+/// This deliberately contains only a display-safe basename; callers must log
+/// the original path locally rather than returning it to a chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaPreflightFailure {
+    NotFound,
+    Unreadable,
+    TooLarge,
+}
+
+impl MediaPreflightFailure {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::Unreadable => "unreadable",
+            Self::TooLarge => "too_large",
+        }
+    }
+}
+
+impl std::fmt::Display for MediaPreflightFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// Error type for gateway / platform communication failures.
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayError {
@@ -197,17 +274,50 @@ pub enum GatewayError {
     #[error("Send failed: {0}")]
     SendFailed(String),
 
+    #[error("Media attachment unavailable ({code}): {file_name}")]
+    MediaPreflightFailed {
+        file_name: String,
+        code: MediaPreflightFailure,
+    },
+
+    /// Discord (or another native media provider) returned a definitive
+    /// client-error response before accepting the attachment/embed. Callers
+    /// may safely fall back to a plain-text representation.
+    #[error("Remote media delivery rejected (HTTP {status})")]
+    MediaRemoteRejected { status: u16 },
+
     #[error("Platform error: {0}")]
     Platform(String),
 
     #[error("Authentication error: {0}")]
     Auth(String),
 
-    #[error("Rate limited{0}", retry_after_secs.map(|s| format!(" (retry after {}s)", s)).unwrap_or_default())]
-    RateLimited { retry_after_secs: Option<u64> },
+    #[error("Rate limited{0}", retry_after.map(|duration| format!(" (retry after {duration:?})")).unwrap_or_default())]
+    RateLimited {
+        /// Provider pacing remains a duration rather than a rounded display
+        /// value so callers can preserve fractional retry hints.
+        retry_after: Option<std::time::Duration>,
+    },
 
     #[error("Session expired: {0}")]
     SessionExpired(String),
+
+    #[error("Partial delivery: {0}")]
+    PartialDelivery(PartialDelivery),
+
+    /// A provider accepted a remote side effect, but the corresponding local
+    /// state could not be durably committed. Callers must repair local state,
+    /// never replay the provider operation.
+    #[error(
+        "Accepted remote state is not durable; repair required ({repair}): {accepted_message_ids:?}"
+    )]
+    AcceptedStateUndurable {
+        /// Non-secret provider identifiers whose accepted state needs repair.
+        accepted_message_ids: Vec<String>,
+        /// Safe operator-facing repair action; never contains a local path or
+        /// provider credential.
+        repair: String,
+    },
 }
 
 impl GatewayError {
@@ -222,6 +332,26 @@ impl GatewayError {
                 SendErrorKind::Unknown => SendErrorKind::Transient,
                 kind => kind,
             },
+            GatewayError::PartialDelivery(partial) => {
+                let kind = classify_send_error_text(&partial.failure);
+                if partial.retryable && kind == SendErrorKind::Unknown {
+                    SendErrorKind::Transient
+                } else {
+                    kind
+                }
+            }
+            GatewayError::MediaPreflightFailed { code, .. } => match code {
+                MediaPreflightFailure::NotFound => SendErrorKind::NotFound,
+                MediaPreflightFailure::Unreadable => SendErrorKind::Transient,
+                MediaPreflightFailure::TooLarge => SendErrorKind::TooLong,
+            },
+            GatewayError::MediaRemoteRejected { status } => match *status {
+                401 | 403 => SendErrorKind::Forbidden,
+                404 => SendErrorKind::NotFound,
+                413 => SendErrorKind::TooLong,
+                _ => SendErrorKind::Unknown,
+            },
+            GatewayError::AcceptedStateUndurable { .. } => SendErrorKind::Unknown,
             GatewayError::SendFailed(message)
             | GatewayError::Platform(message)
             | GatewayError::SessionExpired(message) => classify_send_error_text(message),
@@ -328,9 +458,34 @@ mod tests {
     #[test]
     fn gateway_error_rate_limit_display() {
         let err = GatewayError::RateLimited {
-            retry_after_secs: Some(42),
+            retry_after: Some(std::time::Duration::from_secs(42)),
         };
         assert_eq!(err.to_string(), "Rate limited (retry after 42s)");
+    }
+
+    #[test]
+    fn partial_delivery_roundtrips_fractional_retry_after() {
+        let partial = PartialDelivery {
+            platform: "discord".to_string(),
+            chat_id: "channel-1".to_string(),
+            thread_id: None,
+            reply_to_message_id: None,
+            reply_to_mode: "first".to_string(),
+            non_conversational: false,
+            next_chunk_index: 1,
+            remaining_text: "retry this suffix".to_string(),
+            accepted_message_ids: vec!["message-1".to_string()],
+            accepted_chunks: 1,
+            retryable: true,
+            retry_after: Some(std::time::Duration::from_millis(125)),
+            failure: "rate limited".to_string(),
+            repair_required: None,
+        };
+        let encoded = serde_json::to_string(&partial).expect("partial delivery serializes");
+        let decoded: PartialDelivery =
+            serde_json::from_str(&encoded).expect("partial delivery deserializes");
+        assert_eq!(decoded.retry_after, partial.retry_after);
+        assert_eq!(decoded, partial);
     }
 
     #[test]
@@ -382,12 +537,11 @@ mod tests {
             assert_eq!(classify_send_error_text(text), expected, "{text}");
         }
     }
-
     #[test]
     fn gateway_error_exposes_send_error_kind() {
         assert_eq!(
             GatewayError::RateLimited {
-                retry_after_secs: Some(5)
+                retry_after: Some(std::time::Duration::from_secs(5))
             }
             .send_error_kind(),
             SendErrorKind::RateLimited

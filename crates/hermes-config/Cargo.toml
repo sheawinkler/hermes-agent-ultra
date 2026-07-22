@@ -8,6 +8,7 @@ description = "Configuration management for Hermes Agent"
 
 [dependencies]
 hermes-core = { workspace = true }
+hermes-skills = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -16,6 +17,18 @@ directories = { workspace = true }
 url = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+] }
 
 [features]
 default = []
@@ -24,4 +37,4 @@ default = []
 test-helpers = []
 
 [dev-dependencies]
-tempfile = "3"
+parking_lot = { workspace = true }

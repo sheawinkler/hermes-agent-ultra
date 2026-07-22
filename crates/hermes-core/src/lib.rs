@@ -6,6 +6,8 @@
 pub mod auth_gate;
 pub mod credits;
 pub mod errors;
+pub mod execution_mode;
+pub mod memory_subject;
 pub mod providers;
 pub mod schema_sanitizer;
 pub mod subprocess;
@@ -20,6 +22,19 @@ pub mod version;
 pub use errors::{
     classify_send_error_text, AgentError, ConfigError, GatewayError, SendErrorKind, ToolError,
     SEND_ERROR_KINDS,
+};
+pub use execution_mode::{
+    resolve_execution_mode, ExecutionMode, ExecutionModeResolveError, ExecutionModeSource,
+    ExecutionModeValueError, ResolvedExecutionMode,
+};
+pub use memory_subject::{
+    MemoryAuditActor, MemoryExportArtifact, MemoryExportArtifactRef, MemoryExportCompletion,
+    MemoryExportEvidenceDigest, MemoryExportPage, MemoryExportReceipt, MemoryExportSink,
+    MemoryExportSinkError, MemoryExportSnapshot, MemoryForgetReceipt, MemoryGovernanceOperation,
+    MemoryPrincipalId, MemoryProviderGovernanceError, MemoryReadbackReceipt,
+    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySessionId, MemorySubject,
+    MemorySubjectDerivationKey, MemorySubjectError, MemorySubjectStorageKey, MemorySurface,
+    MemoryTeamId, MemoryTenantId, MemoryVisibility, MEMORY_SUBJECT_KEY_VERSION,
 };
 
 // Re-export all core types

@@ -85,6 +85,28 @@ fn split_message_long() {
     assert_eq!(chunks[1].len(), 904);
 }
 
+#[test]
+fn split_message_counts_multibyte_characters_without_panicking() {
+    let text = "🦀".repeat(4097);
+    let chunks = split_message(&text, 4096);
+
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks[0].chars().count(), 4096);
+    assert_eq!(chunks[1].chars().count(), 1);
+    assert_eq!(chunks.concat(), text);
+}
+
+#[test]
+fn telegram_thread_ids_are_positive_or_root() {
+    assert_eq!(parse_telegram_thread_id(None).unwrap(), None);
+    assert_eq!(parse_telegram_thread_id(Some("  ")).unwrap(), None);
+    assert_eq!(parse_telegram_thread_id(Some("0")).unwrap(), None);
+    assert_eq!(parse_telegram_thread_id(Some(" 42 ")).unwrap(), Some(42));
+    assert!(parse_telegram_thread_id(Some("-1")).is_err());
+    assert!(parse_telegram_thread_id(Some("18446744073709551616")).is_err());
+    assert!(parse_telegram_thread_id(Some("not-a-thread")).is_err());
+}
+
 #[tokio::test]
 async fn edit_text_clips_overflow_preview_instead_of_erroring() {
     let server = MockServer::start().await;
@@ -270,6 +292,10 @@ fn telegram_split_gateway_chat_thread_preserves_topic_suffix() {
     assert_eq!(
         TelegramAdapter::split_gateway_chat_thread("room:server"),
         ("room:server", None)
+    );
+    assert_eq!(
+        TelegramAdapter::split_gateway_chat_thread("-1001:-1"),
+        ("-1001:-1", None)
     );
 }
 
@@ -589,6 +615,7 @@ fn telegram_text_batcher_aggregates_by_chat_user_and_thread() {
         chat_id: 1,
         user_id: Some(2),
         username: None,
+        is_bot: Some(false),
         text: Some("part one".into()),
         message_id: 10,
         is_voice: false,
@@ -737,6 +764,95 @@ async fn telegram_thread_fallback_retries_without_thread_fields() {
         .and_then(|v| v.as_str())
         .unwrap()
         .contains("\\[world\\]\\_1"));
+}
+
+#[tokio::test]
+async fn telegram_threaded_image_fails_in_topic_without_notify_fallback() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/botfake_token_12345/sendPhoto"))
+        .and(body_partial_json(serde_json::json!({
+            "message_thread_id": 42,
+            "photo": "https://assets.example/render?id=1"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": false,
+            "description": "Bad Request: message thread not found"
+        })))
+        .mount(&server)
+        .await;
+
+    let mut adapter = test_adapter(test_config());
+    adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+    let error = PlatformAdapter::send_image_url_with_options(
+        &adapter,
+        "123",
+        "https://assets.example/render?id=1",
+        Some("preview"),
+        SendMessageOptions::threaded(Some("42")),
+    )
+    .await
+    .expect_err("non-notify image must not flatten a broken topic");
+    assert!(error.to_string().contains("message thread not found"));
+
+    let malformed = PlatformAdapter::send_image_url_with_options(
+        &adapter,
+        "123",
+        "https://assets.example/render?id=2",
+        None,
+        SendMessageOptions::threaded(Some("not-a-topic")),
+    )
+    .await
+    .expect_err("malformed thread id must fail before transport");
+    assert!(malformed.to_string().contains("invalid Telegram thread id"));
+
+    let requests = server.received_requests().await.expect("requests");
+    assert_eq!(requests.len(), 1);
+}
+
+#[tokio::test]
+async fn telegram_notify_image_may_fallback_to_topic_root() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/botfake_token_12345/sendPhoto"))
+        .and(body_partial_json(serde_json::json!({
+            "message_thread_id": 42
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": false,
+            "description": "Bad Request: message thread not found"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/botfake_token_12345/sendPhoto"))
+        .and(JsonFieldAbsent("message_thread_id"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": true,
+            "result": { "message_id": 88 }
+        })))
+        .mount(&server)
+        .await;
+
+    let mut adapter = test_adapter(test_config());
+    adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+    PlatformAdapter::send_image_url_with_options(
+        &adapter,
+        "123",
+        "https://assets.example/render?id=1",
+        Some("preview"),
+        SendMessageOptions::notify_threaded(Some("42")),
+    )
+    .await
+    .expect("notify image may conservatively fall back to the topic root");
+
+    let requests = server.received_requests().await.expect("requests");
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1]
+        .body_json::<Value>()
+        .expect("fallback body")
+        .get("message_thread_id")
+        .is_none());
 }
 
 #[tokio::test]
@@ -1283,6 +1399,26 @@ fn telegram_media_method_matches_document_contracts() {
     assert_eq!(
         TelegramAdapter::media_method_for_extension("mp4"),
         ("sendVideo", "video")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_extension("ogg"),
+        ("sendDocument", "document")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("ogg", false),
+        ("sendDocument", "document")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("ogg", true),
+        ("sendVoice", "voice")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("mp3", true),
+        ("sendVoice", "voice")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("png", true),
+        ("sendPhoto", "photo")
     );
 }
 

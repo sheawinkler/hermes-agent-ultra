@@ -266,7 +266,7 @@ fn handle_tools_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
         for (name, score, tier) in risk.iter().take(20) {
             let _ = writeln!(out, "- {name:<28} score={score:>3} tier={tier}");
         }
-        out.push_str("\nUse `/ops status` and `/raw trace verify` for live enforcement + trace integrity signals.");
+        out.push_str("\nUse `/ops status` and `/raw trace verify <PATH>` for live enforcement plus authoritative run-export verification.");
         emit_command_output(app, out.trim_end());
         return Ok(CommandResult::Handled);
     }
@@ -360,7 +360,7 @@ fn handle_tools_toggle_command(app: &mut App, args: &[&str]) -> Result<CommandRe
 fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() {
         // Show full config
-        let config_json = serde_json::to_string_pretty(&*app.config)
+        let config_json = redacted_config_json(&app.config)
             .unwrap_or_else(|e| format!("<serialization error: {}>", e));
         emit_command_output(app, config_json);
     } else {
@@ -372,7 +372,14 @@ fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     let key = args[1];
                     let value = get_config_value(app, key);
                     match value {
-                        Some(v) => emit_command_output(app, format!("{} = {}", key, v)),
+                        Some(v) => {
+                            let mut displayed = serde_json::Value::String(v);
+                            redact_config_value(Some(key), &mut displayed);
+                            let displayed = displayed
+                                .as_str()
+                                .unwrap_or(REDACTED_CONFIG_SECRET);
+                            emit_command_output(app, format!("{} = {}", key, displayed));
+                        }
                         None => emit_command_output(
                             app,
                             format!("Key '{}' not found in configuration.", key),
@@ -387,7 +394,7 @@ fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     let key = args[1];
                     let value = args[2..].join(" ");
                     if set_config_value(app, key, &value) {
-                        emit_command_output(app, format!("Set {} = {}", key, value));
+                        emit_command_output(app, format!("Set {}", key));
                     } else {
                         emit_command_output(app, format!("Unknown configuration key: {}", key));
                     }

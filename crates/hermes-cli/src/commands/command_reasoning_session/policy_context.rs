@@ -393,8 +393,8 @@ async fn handle_auth_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             emit_command_output(
                 app,
                 format!(
-                    "Auth status\nprovider: {}\nmodel: {}\ncredential: {}\n{}\nnext: `/auth verify` (passive refresh check) or `/auth refresh` (forced token refresh)",
-                    provider, app.current_model, state, gate_line
+                    "Auth status\nprovider: {}\nmodel: {}\ncredential: {}\n{}\nnext: `/auth verify` (read-only) or run `hermes auth refresh {}` from the CLI",
+                    provider, app.current_model, state, gate_line, provider
                 ),
             );
         }
@@ -416,37 +416,25 @@ async fn handle_auth_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             emit_command_output(
                 app,
                 format!(
-                    "{}\nnext: if provider rejects again, run `/auth refresh` then retry.",
-                    summary
+                    "{}\nnext: run `hermes auth refresh {}` before retrying if an explicit refresh is needed.",
+                    summary, provider
                 ),
             );
         }
         "refresh" | "force" => {
             let provider = app.current_runtime_provider();
-            if let Some((ok, detail)) = oauth_runtime_gate_for_provider(&provider) {
-                if !ok {
-                    emit_command_output(
-                        app,
-                        format!(
-                            "Auth refresh blocked by OAuth runtime gate for `{}`.\n{}\nUpgrade runtime and retry.",
-                            provider, detail
-                        ),
-                    );
-                    return Ok(CommandResult::Handled);
-                }
-            }
-            let summary = app.verify_runtime_auth(true).await?;
+            let summary = app.verify_runtime_auth(false).await?;
             emit_command_output(
                 app,
                 format!(
-                    "{}\nforced refresh complete; retry your request now.",
-                    summary
+                    "{}\nNo refresh was run from the in-app command; execute `hermes auth refresh {}` as the explicit operator effect.",
+                    summary, provider
                 ),
             );
         }
         _ => emit_command_output(
             app,
-            "Usage: /auth [status|verify|refresh]\n- status: show active provider auth state\n- verify: passive credential hydration + verification\n- refresh: force OAuth/session token refresh",
+            "Usage: /auth [status|verify|refresh]\n- status: show active provider auth state\n- verify: read-only credential status\n- refresh: shows the explicit `hermes auth refresh <provider>` command",
         ),
     }
     Ok(CommandResult::Handled)

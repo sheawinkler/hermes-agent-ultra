@@ -1,7 +1,7 @@
 //! Optional Bearer API key, IP allowlist, and per-IP rate limiting for `hermes-http`.
 //!
 //! Environment:
-//! - `HERMES_HTTP_API_KEY` — if set, require `Authorization: Bearer <key>` for all routes except `/health`, and `/metrics` unless `HERMES_HTTP_METRICS_REQUIRE_AUTH=1`.
+//! - `HERMES_HTTP_API_KEY` — if set, require `Authorization: Bearer <key>` when dashboard OIDC is inactive. When OIDC is active, bearer access is denied unless `HERMES_DASHBOARD_OIDC_ALLOW_MACHINE_BEARER=true`.
 //! - `HERMES_HTTP_ALLOWED_IPS` — comma-separated client IPs (e.g. `127.0.0.1,::1`). When non-empty, only these IPs may access routes other than `/health` (metrics follow the same rule unless exempt below).
 //! - `HERMES_HTTP_RATE_LIMIT_PER_MINUTE` — max requests per client IP per rolling 60s window (0 = disabled).
 //! - `HERMES_HTTP_METRICS_REQUIRE_AUTH` — set to `1` to protect `/metrics` with the same Bearer rules.
@@ -299,23 +299,27 @@ fn request_auth_rejection(
 ) -> Option<(StatusCode, String)> {
     let bearer_ok = bearer_authorized(security, headers);
     if security.dashboard_auth.oidc_enabled()
-        && !dashboard_oidc::oidc_exempt_path(path)
-        && !bearer_ok
+        && !dashboard_oidc::oidc_exempt_path(path, security.dashboard_auth.oidc.as_ref())
     {
-        let Some(ref oidc) = security.dashboard_auth.oidc else {
+        let Some(oidc) = &security.dashboard_auth.oidc else {
             let reason = security
                 .dashboard_auth
                 .config_error
-                .clone()
+                .as_ref()
+                .map(ToString::to_string)
                 .unwrap_or_else(|| "dashboard OIDC is not configured".to_string());
             return Some((StatusCode::SERVICE_UNAVAILABLE, reason));
         };
+        if oidc.allow_machine_bearer && bearer_ok {
+            return None;
+        }
         if let Err(err) = dashboard_oidc::verify_session_from_headers(headers, oidc) {
             return Some((
                 StatusCode::UNAUTHORIZED,
                 format!("dashboard OIDC session required: {err}"),
             ));
         }
+        return None;
     }
 
     if security.api_key.is_some() && !bearer_ok && !security.dashboard_auth.oidc_enabled() {
@@ -330,7 +334,7 @@ fn request_auth_rejection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard_oidc::DashboardAuthMode;
+    use crate::dashboard_oidc::{DashboardAuthMode, DashboardOidcConfigError};
     use axum::http::HeaderValue;
 
     #[test]
@@ -372,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn oidc_auth_fails_closed_but_allows_machine_bearer_and_auth_routes() {
+    fn oidc_auth_fails_closed_for_missing_configuration_even_with_a_machine_bearer() {
         let security = HttpSecurity {
             api_key: Some(Arc::from("machine-secret")),
             metrics_require_auth: false,
@@ -381,7 +385,9 @@ mod tests {
             dashboard_auth: DashboardAuthConfig {
                 mode: DashboardAuthMode::Oidc,
                 oidc: None,
-                config_error: Some("HERMES_DASHBOARD_OIDC_ISSUER is required".to_string()),
+                config_error: Some(DashboardOidcConfigError::MissingRequired(
+                    "HERMES_DASHBOARD_OIDC_ISSUER",
+                )),
             },
         };
         let empty_headers = HeaderMap::new();
@@ -395,7 +401,9 @@ mod tests {
             AUTHORIZATION,
             HeaderValue::from_static("Bearer machine-secret"),
         );
-        assert!(request_auth_rejection(&security, "/v1/rpc", &bearer_headers).is_none());
+        let rejection = request_auth_rejection(&security, "/v1/rpc", &bearer_headers)
+            .expect("a bearer cannot bypass broken OIDC configuration");
+        assert_eq!(rejection.0, StatusCode::SERVICE_UNAVAILABLE);
         assert!(request_auth_rejection(&security, "/auth/status", &empty_headers).is_none());
     }
 }

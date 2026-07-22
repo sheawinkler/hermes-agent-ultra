@@ -135,6 +135,33 @@ static SENSITIVE_BODY_KEYS: &[&str] = &[
     "authorization",
     "key",
 ];
+pub fn is_sensitive_field_name(key: &str) -> bool {
+    let mut normalized = String::with_capacity(key.len());
+    let mut previous_separator = false;
+    for character in key.trim().chars() {
+        if character.is_ascii_alphanumeric() {
+            normalized.push(character.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator && !normalized.is_empty() {
+            normalized.push('_');
+            previous_separator = true;
+        }
+    }
+    while normalized.ends_with('_') {
+        normalized.pop();
+    }
+
+    SENSITIVE_BODY_KEYS.contains(&normalized.as_str())
+        || normalized.ends_with("_api_key")
+        || normalized.ends_with("_access_token")
+        || normalized.ends_with("_refresh_token")
+        || normalized.ends_with("_id_token")
+        || normalized.ends_with("_client_secret")
+        || normalized.ends_with("_private_key")
+        || normalized.ends_with("_secret_access_key")
+        || normalized.ends_with("_password")
+}
+
 
 static PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
@@ -789,6 +816,18 @@ mod tests {
         let sentence = "I have password=foo and other things";
         assert_eq!(redact_sensitive_text(sentence), sentence);
     }
+
+    #[test]
+    fn sensitive_field_names_cover_normalized_environment_keys() {
+        assert!(is_sensitive_field_name("OPENAI_API_KEY"));
+        assert!(is_sensitive_field_name("aws-secret-access-key"));
+        assert!(is_sensitive_field_name("providerSecret"));
+        assert!(is_sensitive_field_name("session_token"));
+        assert!(!is_sensitive_field_name("prompt_tokens"));
+        assert!(!is_sensitive_field_name("token_count"));
+        assert!(!is_sensitive_field_name("source_code"));
+    }
+
 
     #[test]
     fn test_sensitive_file_detection() {

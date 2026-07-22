@@ -963,10 +963,11 @@ async fn handle_ops_cockpit_command(
 ) -> Result<CommandResult, AgentError> {
     let counters = app.tool_registry.policy_counters();
     let budget = RepoReviewBudgetRuntime::from_env();
+    let counts = background_job_counts(&app.state_root);
     let board = render_mission_board(
         &app.current_model,
         app.session_objective.as_deref(),
-        background_job_counts(),
+        counts.mission_board_counts(),
     )
     .await?;
     let route_health = summarize_route_health_state(&route_health_state_path());

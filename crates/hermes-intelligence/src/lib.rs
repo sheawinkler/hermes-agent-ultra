@@ -41,7 +41,7 @@ pub use future_kernel::{
 };
 pub use insights::Insights;
 pub use prompt::PromptBuilder;
-pub use redact::{redact_sensitive_text, RedactionPattern, Redactor};
+pub use redact::{is_sensitive_field_name, redact_sensitive_text, RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
 };

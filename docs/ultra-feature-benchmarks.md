@@ -16,7 +16,7 @@ The benchmark is intentionally deterministic and local. It does not require GitH
 ## Run
 
 ```sh
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target scripts/run-ultra-feature-benchmarks.sh
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} scripts/run-ultra-feature-benchmarks.sh
 ```
 
 The script runs focused Rust tests for the ultra-feature harness and then checks formatting for the Rust workspace.

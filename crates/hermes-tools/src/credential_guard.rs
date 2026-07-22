@@ -3,8 +3,8 @@
 //!
 //! Requirement 22.3
 
-use std::path::Path;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
 use hermes_core::ToolError;
@@ -150,6 +150,176 @@ static SECRET_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| 
     ]
 });
 
+/// Immutable skill-store state that effect-capable tools must never access.
+///
+/// The core verifier is deliberately the only reader of the host skills root.
+/// Owner-only mutation APIs and remote trust-root/audit authority paths live
+/// outside this tool boundary.
+#[derive(Debug, Clone)]
+pub(crate) struct SkillTrustPathGuard {
+    skills_root: PathBuf,
+    external_authority_paths: Vec<PathBuf>,
+}
+
+impl SkillTrustPathGuard {
+    pub(crate) fn new(
+        skills_root: impl Into<PathBuf>,
+        external_authority_paths: Vec<PathBuf>,
+    ) -> Self {
+        Self {
+            skills_root: skills_root.into(),
+            external_authority_paths,
+        }
+    }
+
+    fn is_host_skill_root_path(&self, path: &Path) -> bool {
+        path_matches_protected(path, &self.skills_root, true)
+    }
+
+    fn is_external_authority_path(&self, path: &Path) -> bool {
+        self.external_authority_paths
+            .iter()
+            .any(|protected| path_matches_protected(path, protected, true))
+    }
+
+    /// A host skills-root or external root-signing authority path. This is
+    /// intentionally independent of policy mode and environment flags.
+    pub(crate) fn denies_path(&self, path: &Path) -> bool {
+        self.is_host_skill_root_path(path) || self.is_external_authority_path(path)
+    }
+
+    /// Reject a path-like fragment embedded in terminal/code/plugin input.
+    ///
+    /// This intentionally treats arbitrary strings conservatively: a
+    /// user-supplied effect payload has no reason to reference verifier-only
+    /// state, and raw/disabled policy modes must not turn that into access.
+    pub(crate) fn denies_text(&self, text: &str) -> bool {
+        const VARIABLE_PROTECTED_SUFFIXES: &[&str] = &[
+            "$HERMES_HOME/skills",
+            "${HERMES_HOME}/skills",
+            "$HERMES_AGENT_ULTRA_HOME/skills",
+            "${HERMES_AGENT_ULTRA_HOME}/skills",
+        ];
+        if VARIABLE_PROTECTED_SUFFIXES
+            .iter()
+            .any(|suffix| text.contains(suffix))
+            || self.protected_text_paths().any(|path| {
+                let raw = path.to_string_lossy();
+                if !raw.is_empty() && text.contains(raw.as_ref()) {
+                    return true;
+                }
+                std::fs::canonicalize(path)
+                    .ok()
+                    .map(|canonical| canonical.to_string_lossy().to_string())
+                    .is_some_and(|canonical| !canonical.is_empty() && text.contains(&canonical))
+            })
+        {
+            return true;
+        }
+
+        text.split(|character: char| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    '\'' | '"' | '`' | ';' | '|' | '&' | '<' | '>' | '(' | ')' | '{' | '}'
+                        | '[' | ']' | ','
+                )
+        })
+        .filter_map(|fragment| {
+            let fragment = fragment.trim_matches(|character| {
+                matches!(character, '\'' | '"' | '`' | ':' | '=')
+            });
+            if fragment.is_empty() {
+                return None;
+            }
+            Some(
+                fragment
+                    .rsplit_once('=')
+                    .map_or(fragment, |(_, value)| value)
+                    .strip_prefix("file://")
+                    .unwrap_or_else(|| {
+                        fragment
+                            .rsplit_once('=')
+                            .map_or(fragment, |(_, value)| value)
+                    }),
+            )
+        })
+        .any(|fragment| self.denies_path(Path::new(fragment)))
+    }
+
+    fn protected_text_paths(&self) -> impl Iterator<Item = &PathBuf> {
+        std::iter::once(&self.skills_root).chain(self.external_authority_paths.iter())
+    }
+}
+
+/// Test-only fail-safe fallback. Production registries must bind a validated
+/// `SkillTrustAuthorityPaths` before registering tools.
+impl Default for SkillTrustPathGuard {
+    fn default() -> Self {
+        Self::new(hermes_config::skills_dir(), Vec::new())
+    }
+}
+
+fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    Some(normalized)
+}
+
+fn path_matches_protected(path: &Path, protected: &Path, recursive: bool) -> bool {
+    let Some(lexical_path) = normalize_absolute_path(path) else {
+        return false;
+    };
+    let Some(lexical_protected) = normalize_absolute_path(protected) else {
+        return false;
+    };
+    let lexical_match = if recursive {
+        lexical_path.starts_with(&lexical_protected)
+    } else {
+        lexical_path == lexical_protected
+    };
+    if lexical_match {
+        return true;
+    }
+
+    let Some(resolved_path) = canonical_path_with_existing_ancestor(&lexical_path) else {
+        return false;
+    };
+    let Some(resolved_protected) = canonical_path_with_existing_ancestor(&lexical_protected)
+    else {
+        return false;
+    };
+    if recursive {
+        resolved_path.starts_with(resolved_protected)
+    } else {
+        resolved_path == resolved_protected
+    }
+}
+
+fn skill_trust_effect_error(path: &Path, operation: &str) -> ToolError {
+    ToolError::ExecutionFailed(format!(
+        "{} denied: '{}' is verifier-only skill trust state",
+        operation,
+        path.display()
+    ))
+}
 // ---------------------------------------------------------------------------
 // CredentialGuard
 // ---------------------------------------------------------------------------
@@ -161,6 +331,9 @@ pub struct CredentialGuard {
     extra_protected_names: Vec<String>,
     /// If true, also block writes that contain detected secrets.
     scan_content: bool,
+    /// Core-owned skill-store state. Production registry dispatch supplies
+    /// the exact validated authority paths before a handler is invoked.
+    skill_trust_paths: SkillTrustPathGuard,
 }
 
 impl CredentialGuard {
@@ -169,6 +342,7 @@ impl CredentialGuard {
         Self {
             extra_protected_names: Vec::new(),
             scan_content: true,
+            skill_trust_paths: SkillTrustPathGuard::default(),
         }
     }
 
@@ -177,6 +351,7 @@ impl CredentialGuard {
         Self {
             extra_protected_names: Vec::new(),
             scan_content: false,
+            skill_trust_paths: SkillTrustPathGuard::default(),
         }
     }
 
@@ -186,15 +361,43 @@ impl CredentialGuard {
         self
     }
 
+    /// Bind this guard to the exact runtime skills root and explicit external
+    /// remote-trust-root/audit authority paths. No environment or in-root
+    /// keyring fallback is consulted.
+    pub fn with_skill_trust_protected_paths(
+        mut self,
+        skills_root: impl Into<PathBuf>,
+        external_authority_paths: Vec<PathBuf>,
+    ) -> Self {
+        self.skill_trust_paths = SkillTrustPathGuard::new(skills_root, external_authority_paths);
+        self
+    }
+
     /// Check whether a file path refers to a protected credential file.
     pub fn is_protected_file(&self, path: &Path) -> bool {
-        is_protected_file_with_extra(path, &self.extra_protected_names)
+        self.skill_trust_paths.denies_path(path)
+            || is_protected_file_with_extra(path, &self.extra_protected_names)
+    }
+
+    /// Check raw terminal/code/plugin input before it can reach an effectful
+    /// backend. This is independent of tool-policy mode and raw passthrough.
+    pub(crate) fn check_effect_text(&self, text: &str) -> Result<(), ToolError> {
+        if self.skill_trust_paths.denies_text(text) {
+            return Err(ToolError::ExecutionFailed(
+                "Effect denied: verifier-only skill trust state may only be accessed by typed core/CLI owner APIs"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Check whether reading a file is allowed.
     ///
     /// Returns `Err(ToolError)` if the file is a protected credential file.
     pub fn check_read_access(&self, path: &Path) -> Result<(), ToolError> {
+        if self.skill_trust_paths.denies_path(path) {
+            return Err(skill_trust_effect_error(path, "Read"));
+        }
         if self.is_protected_file(path) {
             return Err(ToolError::ExecutionFailed(format!(
                 "Access denied: '{}' is a protected credential file",
@@ -209,6 +412,9 @@ impl CredentialGuard {
     /// Returns `Err(ToolError)` if the target is a protected file or if the
     /// content contains detectable secrets (when content scanning is enabled).
     pub fn check_write_access(&self, path: &Path, content: &str) -> Result<(), ToolError> {
+        if self.skill_trust_paths.denies_path(path) {
+            return Err(skill_trust_effect_error(path, "Write"));
+        }
         if is_write_denied(path) {
             return Err(ToolError::ExecutionFailed(format!(
                 "Write denied: '{}' is a protected system or credential path",
@@ -251,13 +457,16 @@ impl Default for CredentialGuard {
 /// Check whether a file path refers to a protected credential file
 /// (using the built-in pattern list only).
 pub fn is_protected_file(path: &Path) -> bool {
-    is_protected_file_with_extra(path, &[])
+    CredentialGuard::path_only().is_protected_file(path)
 }
 
 /// Check whether a file path is write-denied even if it is not a credential
 /// file by name. This covers sensitive system files, shell profiles, package
 /// manager credential files, and profile-aware `$HERMES_HOME/.env`.
 pub fn is_write_denied(path: &Path) -> bool {
+    if SkillTrustPathGuard::default().denies_path(path) {
+        return true;
+    }
     is_write_denied_with_roots_and_safe_root(
         path,
         std::env::var_os("HOME").map(PathBuf::from).as_deref(),
@@ -294,6 +503,65 @@ fn path_has_component_prefix(path: &Path, root: &Path, prefix: &str) -> bool {
     rel == Path::new(prefix) || rel.starts_with(Path::new(prefix))
 }
 
+/// Resolve a path through every existing ancestor without treating a missing
+/// final path as a reason to skip symlink checks. The suffix after the closest
+/// existing ancestor is appended only after that ancestor has been
+/// canonicalized.
+fn canonical_path_with_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    let mut candidate = normalized;
+    let mut unresolved_suffix = Vec::<OsString>::new();
+    loop {
+        match candidate.canonicalize() {
+            Ok(mut canonical) => {
+                for part in unresolved_suffix.iter().rev() {
+                    canonical.push(part);
+                }
+                return Some(canonical);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if std::fs::symlink_metadata(&candidate)
+                    .ok()
+                    .is_some_and(|metadata| metadata.file_type().is_symlink())
+                {
+                    return None;
+                }
+                unresolved_suffix.push(candidate.file_name()?.to_os_string());
+                candidate = candidate.parent()?.to_path_buf();
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+fn canonical_safe_root(path: &Path) -> Option<PathBuf> {
+    let canonical = canonical_path_with_existing_ancestor(path)?;
+    if canonical.is_dir() && canonical.exists() {
+        Some(canonical)
+    } else {
+        None
+    }
+}
+
 /// Root-injected form for deterministic tests and callers that already know
 /// the active profile/home roots.
 pub fn is_write_denied_with_roots(
@@ -313,7 +581,31 @@ pub fn is_write_denied_with_roots_and_safe_root(
     safe_root: Option<&Path>,
 ) -> bool {
     let expanded = expand_home(path, home);
-    let normalized = expanded.to_string_lossy();
+    if let Some(hermes_home) = hermes_home {
+        let skills_root = expand_home(hermes_home, home).join("skills");
+        if SkillTrustPathGuard::new(skills_root, Vec::new()).denies_path(&expanded) {
+            return true;
+        }
+    }
+    // Static system paths are denied before canonicalization. Their parent may
+    // legitimately be absent on a host, but that must not turn a deny into an
+    // allow merely because resolution cannot proceed.
+    let expanded_text = expanded.to_string_lossy();
+    if WRITE_DENY_EXACT_ABSOLUTE
+        .iter()
+        .any(|candidate| expanded_text == *candidate)
+        || WRITE_DENY_PREFIX_ABSOLUTE
+            .iter()
+            .any(|prefix| expanded_text == *prefix || expanded_text.starts_with(&format!("{prefix}/")))
+    {
+        return true;
+    }
+    let Some(resolved) = canonical_path_with_existing_ancestor(&expanded) else {
+        // An unreadable, dangling-symlink, or otherwise unresolvable path
+        // cannot be proven to remain under a trusted root.
+        return true;
+    };
+    let normalized = resolved.to_string_lossy();
 
     if WRITE_DENY_EXACT_ABSOLUTE
         .iter()
@@ -329,35 +621,42 @@ pub fn is_write_denied_with_roots_and_safe_root(
     }
 
     if let Some(home) = home {
-        if let Ok(rel) = expanded.strip_prefix(home) {
-            let rel_str = rel.to_string_lossy();
-            if WRITE_DENY_HOME_EXACT
-                .iter()
-                .any(|candidate| rel_str == *candidate)
-            {
-                return true;
-            }
-            if WRITE_DENY_HOME_PREFIX
-                .iter()
-                .any(|prefix| path_has_component_prefix(&expanded, home, prefix))
-            {
-                return true;
+        let expanded_home = expand_home(home, Some(home));
+        if let Some(canonical_home) = canonical_path_with_existing_ancestor(&expanded_home) {
+            if let Ok(rel) = resolved.strip_prefix(&canonical_home) {
+                let rel_str = rel.to_string_lossy();
+                if WRITE_DENY_HOME_EXACT
+                    .iter()
+                    .any(|candidate| rel_str == *candidate)
+                {
+                    return true;
+                }
+                if WRITE_DENY_HOME_PREFIX
+                    .iter()
+                    .any(|prefix| path_has_component_prefix(&resolved, &canonical_home, prefix))
+                {
+                    return true;
+                }
             }
         }
     }
 
     if let Some(hermes_home) = hermes_home {
-        if expanded == hermes_home.join(".env") {
-            return true;
+        if let Some(canonical_hermes_home) =
+            canonical_path_with_existing_ancestor(&expand_home(hermes_home, home))
+        {
+            if resolved == canonical_hermes_home.join(".env") {
+                return true;
+            }
         }
     }
 
     if let Some(safe_root) = safe_root {
         let expanded_safe_root = expand_home(safe_root, home);
-        if !expanded_safe_root.as_os_str().is_empty()
-            && expanded != expanded_safe_root
-            && !expanded.starts_with(&expanded_safe_root)
-        {
+        let Some(canonical_safe_root) = canonical_safe_root(&expanded_safe_root) else {
+            return true;
+        };
+        if !resolved.starts_with(&canonical_safe_root) {
             return true;
         }
     }
@@ -582,6 +881,112 @@ mod tests {
     }
 
     #[test]
+    fn skill_trust_paths_are_denied_for_read_write_and_effect_text() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let hermes_home = tmp.path().join("hermes");
+        let skills_root = hermes_home.join("skills");
+        let lock = skills_root.join(".hub").join("lock.json");
+        let pending = skills_root
+            .join(".hub")
+            .join("pending")
+            .join("draft")
+            .join("candidate.json");
+        let package = skills_root
+            .join(".packages")
+            .join("local")
+            .join("draft")
+            .join("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            .join("SKILL.md");
+        let ordinary_skill = skills_root.join("draft").join("SKILL.md");
+        let remote_root = tmp.path().join("remote-trust-root.json");
+        let remote_audit = tmp.path().join("remote-keyring-audit.json");
+        for path in [&lock, &pending, &package, &ordinary_skill] {
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("parent");
+            std::fs::write(path, "state").expect("state");
+        }
+        for path in [&remote_root, &remote_audit] {
+            std::fs::write(path, "owner-only state").expect("authority state");
+        }
+
+        let guard = CredentialGuard::path_only().with_skill_trust_protected_paths(
+            skills_root.clone(),
+            vec![remote_root.clone(), remote_audit.clone()],
+        );
+        for path in [
+            &lock,
+            &pending,
+            &package,
+            &ordinary_skill,
+            &remote_root,
+            &remote_audit,
+        ] {
+            assert!(
+                guard.check_read_access(path).is_err(),
+                "read unexpectedly allowed for {}",
+                path.display()
+            );
+            assert!(
+                guard.check_write_access(path, "mutate").is_err(),
+                "write unexpectedly allowed for {}",
+                path.display()
+            );
+            assert!(
+                guard
+                    .check_effect_text(&format!("printf x > {}", path.display()))
+                    .is_err(),
+                "effect text unexpectedly allowed for {}",
+                path.display()
+            );
+        }
+        assert!(is_write_denied_with_roots(
+            &lock,
+            None,
+            Some(&hermes_home)
+        ));
+        assert!(guard
+            .check_write_access(&hermes_home.join("notes.txt"), "safe user data")
+            .is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_trust_path_guard_rejects_traversal_and_symlink_aliases() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let skills_root = tmp.path().join("skills");
+        let hub = skills_root.join(".hub");
+        std::fs::create_dir_all(&hub).expect("hub");
+        std::fs::write(hub.join("revocations.json"), "{}").expect("revocations");
+        let alias = tmp.path().join("hub-alias");
+        symlink(&hub, &alias).expect("hub symlink");
+        let guard = CredentialGuard::path_only()
+            .with_skill_trust_protected_paths(skills_root.clone(), Vec::new());
+
+        let traversal = skills_root
+            .join("scratch")
+            .join("..")
+            .join(".hub")
+            .join("revocations.json");
+        let alias_target = alias.join("revocations.json");
+        for path in [&traversal, &alias_target] {
+            assert!(
+                guard.check_read_access(path).is_err(),
+                "read unexpectedly allowed for {}",
+                path.display()
+            );
+            assert!(
+                guard.check_write_access(path, "mutate").is_err(),
+                "write unexpectedly allowed for {}",
+                path.display()
+            );
+        }
+        assert!(guard
+            .check_effect_text(&format!("cat {}", alias_target.display()))
+            .is_err());
+    }
+
+    #[test]
     fn write_deny_matches_upstream_sensitive_paths() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let home = tmp.path().join("home");
@@ -751,6 +1156,43 @@ mod tests {
             Some(&home),
             None,
             None
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_safe_root_rejects_symlink_and_missing_parent_escapes() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let safe_root = tmp.path().join("workspace");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&safe_root).expect("safe root");
+        std::fs::create_dir_all(&outside).expect("outside");
+
+        symlink(&outside, safe_root.join("escape")).expect("escape symlink");
+        symlink(outside.join("missing"), safe_root.join("dangling"))
+            .expect("dangling symlink");
+
+        assert!(is_write_denied_with_roots_and_safe_root(
+            &safe_root.join("escape/new/file.txt"),
+            Some(&home),
+            None,
+            Some(&safe_root)
+        ));
+        assert!(is_write_denied_with_roots_and_safe_root(
+            &safe_root.join("dangling/new/file.txt"),
+            Some(&home),
+            None,
+            Some(&safe_root)
+        ));
+        assert!(!is_write_denied_with_roots_and_safe_root(
+            &safe_root.join("new/file.txt"),
+            Some(&home),
+            None,
+            Some(&safe_root)
         ));
     }
 }

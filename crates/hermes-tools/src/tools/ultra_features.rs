@@ -11,8 +11,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+use hermes_skills::{
+    SkillTrustLoad, SkillTrustPolicy, SkillTrustRead, SkillTrustStore, SkillTrustVerifier,
+};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -787,48 +790,77 @@ fn github_repo_from_remote() -> Result<(String, String), ToolError> {
     )))
 }
 
+/// Resolve a `skill://` resource only through the canonical v2 lock store.
+///
+/// There is intentionally no filesystem fallback: a valid-looking drop-in
+/// `SKILL.md` has no authority until the core verifier admits its locked
+/// package. The contained read repeats admission checks after file access.
 fn read_skill_resource(name: &str) -> Result<String, ToolError> {
-    for root in skill_roots() {
-        let direct = root.join(name).join("SKILL.md");
-        if direct.is_file() {
-            return fs::read_to_string(direct).map_err(io_err("read skill"));
-        }
-        if let Some(found) = find_named_skill(&root, name) {
-            return fs::read_to_string(found).map_err(io_err("read skill"));
-        }
-    }
-    Err(ToolError::NotFound(format!("skill not found: {name}")))
+    let skills_root = hermes_config::skills_dir();
+    let verifier = SkillTrustVerifier::for_skill_root(
+        &skills_root,
+        SkillTrustPolicy::default(),
+        BTreeMap::new(),
+    )
+    .map_err(|error| {
+        ToolError::ExecutionFailed(format!("skill trust initialization failed: {error}"))
+    })?;
+    let store = SkillTrustStore::new(skills_root, verifier);
+    read_skill_resource_from_store(name, &store)
 }
 
-fn skill_roots() -> Vec<PathBuf> {
-    let mut roots = vec![PathBuf::from("skills")];
-    if let Some(home) = home_dir() {
-        roots.push(home.join(".codex/skills"));
-        roots.push(home.join(".agents/skills"));
-    }
-    roots
-}
-
-fn find_named_skill(root: &Path, name: &str) -> Option<PathBuf> {
-    if !root.is_dir() {
-        return None;
-    }
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(dir).ok()?.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if path.file_name().and_then(|s| s.to_str()) == Some(name) {
-                    let skill = path.join("SKILL.md");
-                    if skill.is_file() {
-                        return Some(skill);
-                    }
-                }
-                stack.push(path);
-            }
+fn read_skill_resource_from_store(
+    name: &str,
+    store: &SkillTrustStore,
+) -> Result<String, ToolError> {
+    let name = skill_resource_selector(name)?;
+    match store.load_named(name, false).map_err(|error| {
+        ToolError::ExecutionFailed(format!("skill trust verification failed: {error}"))
+    })? {
+        SkillTrustLoad::Admitted(_) => {}
+        SkillTrustLoad::NotFound => {
+            return Err(ToolError::NotFound(format!("skill '{name}' not found")));
+        }
+        SkillTrustLoad::Quarantined { name, quarantine } => {
+            return Err(ToolError::ExecutionFailed(format!(
+                "skill '{name}' is quarantined ({:?}): {}",
+                quarantine.reason, quarantine.detail
+            )));
         }
     }
-    None
+
+    match store
+        .read_contained(name, Path::new("SKILL.md"), false)
+        .map_err(|error| ToolError::ExecutionFailed(format!("skill trust read failed: {error}")))?
+    {
+        SkillTrustRead::Read { bytes, .. } => String::from_utf8(bytes)
+            .map_err(|_| ToolError::ExecutionFailed("verified SKILL.md is not UTF-8".to_string())),
+        SkillTrustRead::NotFound => Err(ToolError::NotFound(format!(
+            "verified SKILL.md for skill '{name}' is not present"
+        ))),
+        SkillTrustRead::Quarantined { name, quarantine } => {
+            Err(ToolError::ExecutionFailed(format!(
+                "skill '{name}' became quarantined during verified read ({:?}): {}",
+                quarantine.reason, quarantine.detail
+            )))
+        }
+    }
+}
+
+fn skill_resource_selector(raw: &str) -> Result<&str, ToolError> {
+    let name = raw.trim();
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == ".."
+        || name.contains("..")
+    {
+        return Err(ToolError::InvalidParams(
+            "skill:// requires one canonical package name, not a path".to_string(),
+        ));
+    }
+    Ok(name)
 }
 
 fn read_session_resource(id: &str) -> Result<String, ToolError> {
@@ -2786,4 +2818,88 @@ mod tests {
         assert!(result.contains("all_smokes_completed"));
         assert!(result.contains("ultra-feature-2"));
     }
+    #[test]
+    fn skill_resource_requires_admitted_v2_package() {
+        use hermes_skills::{
+            canonical_bundle_digest, full_skill_scan, store_lock, SkillCompatibility,
+            SkillLockEntryV2, SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2,
+            SkillPackageProof, SkillPackageSource, SkillPermissions, SkillSignature,
+            SkillSigningKey, SkillTrustKeyring, SKILL_LOCK_SCHEMA_VERSION,
+        };
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let unverified_root = tmp.path().join("unverified-skills");
+        let unverified_payload = unverified_root.join("looks-active").join("SKILL.md");
+        fs::create_dir_all(unverified_payload.parent().expect("payload parent"))
+            .expect("payload parent");
+        fs::write(&unverified_payload, "# Looks active\n\nraw drop-in").expect("raw drop-in");
+        let unverified_verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(Vec::new()).expect("empty keyring"),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .expect("verifier");
+        let unverified_store = SkillTrustStore::new(unverified_root, unverified_verifier);
+        let err = read_skill_resource_from_store("looks-active", &unverified_store)
+            .expect_err("unlocked SKILL.md must not be consumed");
+        assert!(err.to_string().contains("quarantined"));
+        assert!(!err.to_string().contains("raw drop-in"));
+
+        let verified_root = tmp.path().join("verified-skills");
+        let name = "active-signed-skill";
+        let package_root = verified_root.join(name);
+        fs::create_dir_all(&package_root).expect("package root");
+        fs::write(
+            package_root.join("SKILL.md"),
+            "# Active signed skill\n\nverified instructions",
+        )
+        .expect("skill body");
+        let signer = SkillSigningKey::from_seed([43; 32]);
+        let identity = SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/active-signed-skill",
+            "publisher.example",
+            "0123456789abcdef0123456789abcdef01234567",
+            canonical_bundle_digest(&package_root).expect("content digest"),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = SkillPackageManifestV2::new(
+            SkillPackageSource::Remote,
+            identity,
+            SkillPackageProof::RemoteSignature(SkillSignature::ed25519("test-key", "")),
+            full_skill_scan(&package_root),
+            SkillCompatibility::default(),
+            SkillPermissions::default(),
+            Vec::new(),
+        );
+        signer
+            .sign_manifest(&mut manifest, "test-key")
+            .expect("sign manifest");
+        store_lock(
+            &verified_root,
+            &SkillLockV2 {
+                schema_version: SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![SkillLockEntryV2 {
+                    install_path: name.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .expect("store v2 lock");
+        let verified_verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(vec![signer.trusted_key("test-key", true)])
+                .expect("trusted signer"),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .expect("verifier");
+        let verified_store = SkillTrustStore::new(verified_root, verified_verifier);
+        assert_eq!(
+            read_skill_resource_from_store(name, &verified_store).expect("admitted skill"),
+            "# Active signed skill\n\nverified instructions"
+        );
+    }
+
 }

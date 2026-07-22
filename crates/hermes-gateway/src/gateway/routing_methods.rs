@@ -1,57 +1,147 @@
 impl Gateway {
-    /// DM check → session lookup → agent loop → response.
+    /// Route a message whose sender provenance is unavailable.
+    ///
+    /// Production adapters must prefer [`Self::route_message_from_sender`] and
+    /// pass metadata verified by their platform parser.
     pub async fn route_message(&self, incoming: &IncomingMessage) -> Result<(), GatewayError> {
-        self.route_message_from_sender(incoming, IncomingSender::human())
+        self.route_message_from_sender(incoming, IncomingSender::unknown())
             .await
     }
 
-    /// Route an incoming message with platform-provided sender metadata.
+    /// Route an incoming message with platform-verified sender metadata.
     pub async fn route_message_from_sender(
         &self,
         incoming: &IncomingMessage,
         sender: IncomingSender,
     ) -> Result<(), GatewayError> {
-        let mut current = incoming.clone();
-        for drain_depth in 0..32 {
-            match self
-                .route_message_once_from_sender(&current, sender)
-                .await?
-            {
-                Some(next) => {
-                    current = next;
-                }
-                None => return Ok(()),
-            }
-            if drain_depth == 31 {
-                warn!(
-                    platform = current.platform,
-                    chat_id = current.chat_id,
-                    "busy-session drain depth reached safety cap"
-                );
-            }
-        }
-        Ok(())
+        self.route_message_from_sender_outcome(incoming, sender)
+            .await?
+            .into_result()
     }
 
-    async fn route_message_once_from_sender(
+    /// Route accepted ingress and preserve whether a failed delivery is safe to
+    /// retry or must remain quarantined because side effects are uncertain.
+    ///
+    /// Duplicate suppression happens exactly once here, before a private queue
+    /// envelope is created. Drained entries therefore never re-enter dedup.
+    pub async fn route_message_from_sender_outcome(
         &self,
         incoming: &IncomingMessage,
         sender: IncomingSender,
-    ) -> Result<Option<IncomingMessage>, GatewayError> {
+    ) -> Result<GatewayRouteOutcome, GatewayError> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(GatewayError::Platform(
+                "gateway is shutting down".to_string(),
+            ));
+        }
+        let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let gateway = self.clone();
+        let workers = self.turn_workers.clone();
+        let active_ingress_workers = self.active_ingress_workers.clone();
+        let incoming = incoming.clone();
+        {
+        let mut registered_workers = self.turn_workers.lock().unwrap();
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(GatewayError::Platform(
+                "gateway is shutting down".to_string(),
+            ));
+        }
+        let ingress_worker_limit = self
+            .config
+            .ingress_worker_limit
+            .unwrap_or(MAX_INGRESS_WORKERS)
+            .max(1);
+        if self.config.resource_limits_enabled
+            && self.active_ingress_workers.load(Ordering::Acquire) >= ingress_worker_limit
+        {
+            // This admission check runs before a worker, dedup claim, handler,
+            // model, tool, or outbound notification exists. Preserve it as a
+            // typed live-retry signal rather than turning it into an uncertain
+            // durable quarantine.
+            return Ok(GatewayRouteOutcome::Backpressured {
+                retry_after: INGRESS_BACKPRESSURE_RETRY_AFTER,
+            });
+        }
+        self.active_ingress_workers.fetch_add(1, Ordering::AcqRel);
+        let ingress_guard = IngressWorkerGuard {
+            active: active_ingress_workers,
+        };
+        let handle = tokio::spawn(async move {
+            let _ingress_guard = ingress_guard;
+            let result = tokio::select! {
+                biased;
+                _ = gateway.wait_for_shutdown() => Err(GatewayError::Platform(
+                    "gateway is shutting down".to_string(),
+                )),
+                result = AssertUnwindSafe(
+                    gateway.route_validated_ingress(incoming, sender),
+                ).catch_unwind() => match result {
+                    Ok(result) => result,
+                    Err(_) => Err(GatewayError::Platform(
+                        "gateway ingress worker panicked".to_string(),
+                    )),
+                },
+            };
+            let _ = completion_tx.send(result);
+            workers.lock().unwrap().remove(&worker_id);
+        });
+        registered_workers.insert(worker_id, handle);
+        }
+        completion_rx.await.map_err(|_| {
+            GatewayError::Platform(
+                "gateway ingress worker ended before reporting completion".to_string(),
+            )
+        })?
+    }
+
+    /// Build the authoritative session scope from platform-verified ingress.
+    ///
+    /// `chat_id` remains the parent channel used for authorization and
+    /// outbound parent targeting; `thread_id` only refines the conversation
+    /// lane and reply destination.
+    fn conversation_scope_for(incoming: &IncomingMessage) -> ConversationScope<'_> {
+        ConversationScope::new(
+            &incoming.platform,
+            &incoming.chat_id,
+            incoming.thread_id.as_deref(),
+            &incoming.user_id,
+            incoming.is_dm,
+        )
+    }
+
+    async fn get_or_create_runtime_session(
+        &self,
+        incoming: &IncomingMessage,
+    ) -> Option<Session> {
+        let scope = Self::conversation_scope_for(incoming);
+        if self.config.resource_limits_enabled {
+            self.session_manager
+                .try_get_or_create_session_for_scope(scope, MAX_RETAINED_SESSIONS)
+                .await
+        } else {
+            Some(
+                self.session_manager
+                    .get_or_create_session_for_scope(scope)
+                    .await,
+            )
+        }
+    }
+
+    async fn route_validated_ingress(
+        &self,
+        mut incoming: IncomingMessage,
+        sender: IncomingSender,
+    ) -> Result<GatewayRouteOutcome, GatewayError> {
         let access_policy = self.platform_access_policy(&incoming.platform).await;
         let is_slash_command = incoming.text.trim_start().starts_with('/');
         if let Some(policy) = access_policy.as_ref() {
-            let source_authorized = {
-                let dm_manager = self.dm_manager.read().await;
-                dm_manager.is_authorized_source(
-                    &incoming.platform,
-                    &incoming.user_id,
-                    &incoming.chat_id,
-                    incoming.is_dm,
-                )
-            };
+            // DM grants are intentionally absent from this calculation. Group
+            // and slash traffic is governed only by its configured policy plus
+            // the explicit, verified Discord bot exception below.
             let bypasses_user_allowlist =
-                source_authorized || policy.allows_sender_without_user_allowlist(incoming, sender);
+                policy.allows_sender_without_user_allowlist(&incoming, &sender);
+            let identity_allowed = policy.is_identity_allowed(&incoming, &sender);
             if !incoming.is_dm {
                 if policy.is_channel_ignored(&incoming.chat_id) {
                     debug!(
@@ -59,7 +149,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel is ignored by platform policy"
                     );
-                    return Ok(None);
+                    return Ok(GatewayRouteOutcome::Committed);
                 }
                 if !policy.is_channel_allowed(&incoming.chat_id) {
                     debug!(
@@ -67,7 +157,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel not in platform allowlist"
                     );
-                    return Ok(None);
+                    return Ok(GatewayRouteOutcome::Committed);
                 }
                 match policy.group_mode {
                     GroupAccessMode::Disabled => {
@@ -76,11 +166,11 @@ impl Gateway {
                             user_id = incoming.user_id,
                             "Group traffic denied by platform policy"
                         );
-                        return Ok(None);
+                        return Ok(GatewayRouteOutcome::Committed);
                     }
                     GroupAccessMode::Allowlist => {
                         if !bypasses_user_allowlist
-                            && !policy.is_user_allowed(&incoming.user_id)
+                            && !identity_allowed
                             && !policy.is_group_chat_authorized(&incoming.chat_id)
                         {
                             self.warn_fail_closed_default_once(&incoming.platform, policy)
@@ -90,7 +180,7 @@ impl Gateway {
                                 user_id = incoming.user_id,
                                 "Group message denied: user not in allowlist"
                             );
-                            return Ok(None);
+                            return Ok(GatewayRouteOutcome::Committed);
                         }
                     }
                     GroupAccessMode::Open => {}
@@ -100,7 +190,7 @@ impl Gateway {
                 && policy.slash_requires_allowlist
                 && policy.has_allowlist()
                 && !bypasses_user_allowlist
-                && !policy.is_user_allowed(&incoming.user_id)
+                && !identity_allowed
             {
                 self.warn_fail_closed_default_once(&incoming.platform, policy)
                     .await;
@@ -109,28 +199,51 @@ impl Gateway {
                     user_id = incoming.user_id,
                     "Slash command denied: user not in platform allowlist"
                 );
-                return Ok(None);
+                return Ok(GatewayRouteOutcome::Committed);
             }
         }
 
-        // 1. Check DM authorization if this is a direct message
-        if incoming.is_dm {
-            let dm_manager = self.dm_manager.read().await;
-            let decision = dm_manager
-                .handle_dm(&incoming.user_id, &incoming.platform)
-                .await;
+        // Pure channel/group/slash policy rejects happen before claiming. Claim
+        // immediately before the first stateful or outbound boundary so a
+        // redelivery cannot create or send a second pairing response.
+        let (dedup_key, mut dedup_claim) = match self.acquire_dedup_claim(&incoming).await {
+            DedupIngressClaim::Untracked => (None, None),
+            DedupIngressClaim::Completed => {
+                debug!(
+                    platform = incoming.platform,
+                    chat_id = incoming.chat_id,
+                    message_id = incoming.message_id.as_deref().unwrap_or_default(),
+                    "Completed platform message redelivery suppressed"
+                );
+                return Ok(GatewayRouteOutcome::Committed);
+            }
+            DedupIngressClaim::Owner { key, guard } => (Some(key), Some(guard)),
+        };
 
-            match decision {
-                DmDecision::Allow => {
-                    // Proceed
-                }
+        if incoming.is_dm {
+            let dm_decision = {
+                let dm_manager = self.dm_manager.read().await;
+                dm_manager
+                    .handle_dm_for_chat(
+                        &incoming.user_id,
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        is_slash_command,
+                    )
+                    .await
+            };
+            match dm_decision {
+                DmDecision::Allow => {}
                 DmDecision::Pair { message } => {
-                    // Send pairing message and return
-                    if let Some(msg) = message {
-                        self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
+                    if let Some(message) = message {
+                        self.send_message(&incoming.platform, &incoming.chat_id, &message, None)
                             .await?;
                     }
-                    return Ok(None);
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        self.complete_dedup_key(dedup_key.as_deref()).await;
+                        claim.disarm();
+                    }
+                    return Ok(GatewayRouteOutcome::Committed);
                 }
                 DmDecision::Deny => {
                     debug!(
@@ -138,198 +251,1010 @@ impl Gateway {
                         platform = incoming.platform,
                         "DM denied for unauthorized user"
                     );
-                    return Ok(None);
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        self.complete_dedup_key(dedup_key.as_deref()).await;
+                        claim.disarm();
+                    }
+                    return Ok(GatewayRouteOutcome::Committed);
                 }
             }
         }
 
-        if self.should_suppress_duplicate(incoming).await {
-            debug!(
-                platform = incoming.platform,
-                chat_id = incoming.chat_id,
-                message_id = incoming.message_id.as_deref().unwrap_or_default(),
-                "Duplicate platform message redelivery suppressed"
-            );
-            return Ok(None);
-        }
-
-        // 2. Get or create session
-        let session_key = self.session_manager.compose_session_key(
-            &incoming.platform,
-            &incoming.chat_id,
-            &incoming.user_id,
-        );
-        let existing_session = self.session_manager.get_session(&session_key).await;
-        let session = self
-            .session_manager
-            .get_or_create_session(&incoming.platform, &incoming.chat_id, &incoming.user_id)
-            .await;
-        let session_started = existing_session.is_none();
-        let session_auto_reset = existing_session
-            .as_ref()
-            .map(|s| s.created_at != session.created_at)
-            .unwrap_or(false);
-        if session_started || session_auto_reset {
-            self.emit_hook_event(
-                "session:start",
-                serde_json::json!({
-                    "platform": incoming.platform,
-                    "chat_id": incoming.chat_id,
-                    "user_id": incoming.user_id,
-                    "session_id": session_key,
-                    "reason": if session_started { "new" } else { "auto_reset" }
-                }),
-            )
-            .await;
-        }
-
-        let mut agent_text_override: Option<String> = None;
-
-        if !is_slash_command {
-            let decision = {
-                let mut busy = self.busy_sessions.write().await;
-                busy.handle_busy_message(
-                    &session_key,
-                    Self::incoming_to_busy_event(incoming, incoming.text.clone()),
-                    self.busy_input_mode(),
-                )
+        if let Some(preparer) = self.accepted_ingress_preparer(&incoming.platform).await {
+            let preparation = match preparer(&incoming, &sender).await {
+                Ok(preparation) => preparation,
+                Err(AcceptedIngressPreparationError::Retryable { error, retry_after }) => {
+                    // This preparation boundary is before session allocation,
+                    // handler/model/tool execution, or outbound delivery.
+                    // Preserve any exact provider retry hint and release dedup
+                    // ownership so the CLI spool can replay the full ingress.
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        self.release_dedup_key(dedup_key.as_deref()).await;
+                        claim.disarm();
+                    }
+                    return Ok(GatewayRouteOutcome::Retryable { error, retry_after });
+                }
+                Err(AcceptedIngressPreparationError::Rejected(error))
+                | Err(AcceptedIngressPreparationError::Ambiguous(error)) => return Err(error),
             };
-            if decision.handled {
-                if self.config.display.busy_ack_enabled() {
-                    if let Some(ack) = decision.ack {
-                        self.send_message_threaded(
-                            &incoming.platform,
-                            &incoming.chat_id,
-                            &ack,
-                            None,
-                            Self::reply_thread_id(incoming),
-                        )
-                        .await?;
+            if let Some(thread_id) = preparation.thread_id {
+                let thread_id = thread_id.trim();
+                if thread_id.is_empty() {
+                    return Err(GatewayError::Platform(
+                        "accepted ingress preparation returned an empty thread ID".to_string(),
+                    ));
+                }
+                if incoming.thread_id.is_some() {
+                    return Err(GatewayError::Platform(
+                        "accepted ingress preparation cannot replace an existing thread"
+                            .to_string(),
+                    ));
+                }
+                incoming.thread_id = Some(thread_id.to_string());
+            }
+        }
+
+        let session_key = self
+            .session_manager
+            .compose_session_key_for_scope(Self::conversation_scope_for(&incoming));
+        let reset_requested = is_slash_command
+            && matches!(
+                handle_command(&incoming.text),
+                GatewayCommandResult::ResetSession(_)
+            );
+        let mut session_capacity_reached = false;
+        {
+            let turn_lock = self.session_turn_lock(&session_key).await;
+            let _session_guard = turn_lock.lock().await;
+            let busy = self.busy_sessions.read().await;
+            let transition = if busy.is_active(&session_key) {
+                None
+            } else {
+                let existing_session = self.session_manager.get_session(&session_key).await;
+                if let Some(stale_session) = existing_session
+                    .as_ref()
+                    .filter(|session| session.should_reset())
+                    .cloned()
+                {
+                    if reset_requested {
+                        None
+                    } else {
+                        Some((stale_session, true))
+                    }
+                } else {
+                    match self.get_or_create_runtime_session(&incoming).await {
+                        Some(session) => existing_session.is_none().then_some((session, false)),
+                        None => {
+                            session_capacity_reached = true;
+                            None
+                        }
                     }
                 }
-                return Ok(None);
-            }
-        }
+            };
+            drop(busy);
 
-        // Slash commands are executed directly by the gateway command runtime.
-        // Installed skill commands are the exception: after built-ins and quick
-        // commands decline them, they are converted into a normal agent turn
-        // containing the resolved SKILL.md content.
-        if is_slash_command {
-            match self.execute_slash_command(incoming, &session_key).await? {
-                SlashCommandOutcome::Handled => return Ok(None),
-                SlashCommandOutcome::ForwardToAgent { message } => {
-                    agent_text_override = Some(message);
+            if let Some((session, auto_reset)) = transition {
+                if auto_reset {
+                    self.emit_session_finalize(&session_key, &session, "auto_reset")
+                        .await;
+                    if let Some((old_session, new_session)) = self
+                        .session_manager
+                        .reset_session_with_snapshots(&session_key)
+                        .await
+                    {
+                        self.clear_session_boundary_security_state(&session_key)
+                            .await;
+                        let _ = tokio::time::timeout(
+                            SESSION_COMMIT_TIMEOUT,
+                            self.emit_hook_event(
+                                "session:reset",
+                                serde_json::json!({
+                                    "platform": incoming.platform,
+                                    "chat_id": incoming.chat_id,
+                                    "user_id": incoming.user_id,
+                                    "session_id": session_key,
+                                    "old_logical_session_id": old_session.id,
+                                    "new_logical_session_id": new_session.id,
+                                    "reason": "auto_reset"
+                                }),
+                            ),
+                        )
+                        .await;
+                        let _ = tokio::time::timeout(
+                            SESSION_COMMIT_TIMEOUT,
+                            self.emit_session_reset_lifecycle(
+                                &session_key,
+                                &new_session,
+                                "auto_reset",
+                            ),
+                        )
+                        .await;
+                    }
+                } else {
+                    let _ = tokio::time::timeout(
+                        SESSION_COMMIT_TIMEOUT,
+                        self.emit_hook_event(
+                            "session:start",
+                            serde_json::json!({
+                                "platform": incoming.platform,
+                                "chat_id": incoming.chat_id,
+                                "user_id": incoming.user_id,
+                                "session_id": session_key,
+                                "logical_session_id": session.id,
+                                "reason": "new"
+                            }),
+                        ),
+                    )
+                    .await;
                 }
             }
         }
+        if session_capacity_reached {
+            if let Some(claim) = dedup_claim.as_mut() {
+                self.release_dedup_key(dedup_key.as_deref()).await;
+                claim.disarm();
+            }
+            self.send_message_threaded(
+                &incoming.platform,
+                &incoming.chat_id,
+                "Gateway session capacity reached; retry later.",
+                None,
+                Self::reply_thread_id(&incoming),
+            )
+            .await?;
+            return Ok(GatewayRouteOutcome::Committed);
+        }
 
-        let reaction_plan = Self::reaction_lifecycle_plan(incoming, access_policy.as_ref());
-        let reaction_adapter = if reaction_plan.is_some() {
-            self.get_adapter(&incoming.platform).await
+        let agent_text_override = if is_slash_command {
+            let outcome = match self
+                .execute_slash_command(
+                    &incoming,
+                    &sender,
+                    &session_key,
+                    dedup_key.clone(),
+                    &mut dedup_claim,
+                )
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        self.release_dedup_key(dedup_key.as_deref()).await;
+                        claim.disarm();
+                    }
+                    return Err(error);
+                }
+            };
+            match outcome {
+                SlashCommandOutcome::Handled => {
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        self.complete_dedup_key(dedup_key.as_deref()).await;
+                        claim.disarm();
+                    }
+                    return Ok(GatewayRouteOutcome::Committed);
+                }
+                SlashCommandOutcome::ForwardToAgent { message } => Some(message),
+            }
         } else {
             None
         };
-        if let (Some(adapter), Some(message_id), Some(plan)) = (
-            &reaction_adapter,
-            incoming.message_id.as_deref(),
-            reaction_plan,
-        ) {
-            if let Err(err) = adapter
-                .add_reaction(&incoming.chat_id, message_id, plan.start)
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to add start reaction: {}",
-                    err
-                );
-            }
-        }
 
-        let agent_text = agent_text_override.as_deref().unwrap_or(&incoming.text);
-        let enriched_text =
-            self.enrich_message_with_transcription(&self.enrich_message_with_vision(agent_text));
-        self.maybe_apply_smart_model_routing(&session_key, &enriched_text)
-            .await;
-
-        // 3. Add the user message to the session
-        self.session_manager
-            .add_message(&session_key, Message::user(enriched_text))
-            .await;
-        self.bump_input_usage(&session_key, agent_text.chars().count())
-            .await;
-
-        // 4. Get all session messages for the agent loop
-        let messages = self.session_manager.get_messages(&session_key).await;
-
-        // 5. Process through agent loop (streaming or non-streaming)
-        {
-            let mut busy = self.busy_sessions.write().await;
-            busy.mark_active(&session_key, None);
-        }
-        let processing_result = if self.config.streaming_enabled {
-            self.route_streaming(incoming, messages, &session_key).await
-        } else {
-            self.route_non_streaming(incoming, messages, &session_key)
-                .await
+        let (turn_completion_tx, turn_completion_rx) = tokio::sync::oneshot::channel();
+        let reply_target = incoming.clone();
+        let entry = match agent_text_override {
+            Some(message) => QueuedIncoming::from_validated_ingress(incoming, sender)
+                .with_agent_text_override(message),
+            None => QueuedIncoming::from_validated_ingress(incoming, sender),
         };
-
-        if let (Some(adapter), Some(message_id), Some(plan)) = (
-            &reaction_adapter,
-            incoming.message_id.as_deref(),
-            reaction_plan,
-        ) {
-            if let Err(err) = adapter
-                .remove_reaction(&incoming.chat_id, message_id, plan.start)
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to remove start reaction: {}",
-                    err
-                );
-            }
-            let emoji = if processing_result.is_ok() {
-                plan.success
-            } else {
-                plan.error
-            };
-            if let Err(err) = adapter
-                .add_reaction(&incoming.chat_id, message_id, emoji)
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to add completion reaction: {}",
-                    err
-                );
+        let entry = entry
+            .with_dedup_key(dedup_key.clone())
+            .with_completion_sender(turn_completion_tx);
+        let admission = self
+            .claim_session_lane(&session_key, entry, self.busy_input_mode())
+            .await;
+        let ownership_transferred = match &admission {
+            BusyAdmission::Claimed { .. } => true,
+            BusyAdmission::Queued(decision) => decision.queued,
+            BusyAdmission::AtCapacity => false,
+        };
+        if ownership_transferred {
+            if let Some(claim) = dedup_claim.as_mut() {
+                claim.disarm();
             }
         }
 
-        let pending = {
-            let mut busy = self.busy_sessions.write().await;
-            busy.finish(
-                &session_key,
-                if processing_result.is_ok() {
+        match admission {
+            BusyAdmission::Claimed {
+                lease,
+                mut entry,
+            } => {
+                entry.clear_completion_sender();
+                drop(turn_completion_rx);
+                self.start_turn_chain(lease, entry).await
+            }
+            BusyAdmission::Queued(decision) => {
+                if decision.steered && !decision.queued {
+                    self.complete_dedup_key(dedup_key.as_deref()).await;
+                }
+                if self.config.display.busy_ack_enabled() {
+                    if let Some(ack) = decision.ack {
+                        if let Err(error) = self
+                            .send_message_threaded(
+                                &reply_target.platform,
+                                &reply_target.chat_id,
+                                &ack,
+                                None,
+                                Self::reply_thread_id(&reply_target),
+                            )
+                            .await
+                        {
+                            warn!(
+                                platform = %reply_target.platform,
+                                chat_id = %reply_target.chat_id,
+                                error = %error,
+                                "failed to send busy-session acknowledgement; queued turn remains owned"
+                            );
+                        }
+                    }
+                }
+                if decision.queued {
+                    turn_completion_rx.await.map_err(|_| {
+                        GatewayError::Platform(
+                            "queued gateway turn ended before reporting completion".into(),
+                        )
+                    })?
+                } else {
+                    Ok(GatewayRouteOutcome::Committed)
+                }
+            }
+            BusyAdmission::AtCapacity => {
+                if let Some(claim) = dedup_claim.as_mut() {
+                    self.release_dedup_key(dedup_key.as_deref()).await;
+                    claim.disarm();
+                }
+                self.send_message_threaded(
+                    &reply_target.platform,
+                    &reply_target.chat_id,
+                    "Gateway session capacity reached; retry later.",
+                    None,
+                    Self::reply_thread_id(&reply_target),
+                )
+                .await?;
+                Ok(GatewayRouteOutcome::Committed)
+            }
+        }
+    }
+
+    async fn start_turn_chain(
+        &self,
+        lease: TurnLease,
+        entry: QueuedIncoming,
+    ) -> Result<GatewayRouteOutcome, GatewayError> {
+        let completion_rx = self.spawn_turn_chain_worker(lease, entry);
+        completion_rx.await.map_err(|_| {
+            GatewayError::Platform("gateway turn worker ended before reporting completion".into())
+        })?
+    }
+
+    fn spawn_turn_chain_detached(&self, lease: TurnLease, entry: QueuedIncoming) {
+        drop(self.spawn_turn_chain_worker(lease, entry));
+    }
+
+    fn spawn_turn_chain_worker(
+        &self,
+        lease: TurnLease,
+        entry: QueuedIncoming,
+    ) -> tokio::sync::oneshot::Receiver<Result<GatewayRouteOutcome, GatewayError>> {
+        let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let gateway = self.clone();
+        let workers = self.turn_workers.clone();
+        let handle = tokio::spawn(async move {
+            if start_rx.await.is_ok() {
+                let _ = AssertUnwindSafe(gateway.run_turn_chain(lease, entry, completion_tx))
+                    .catch_unwind()
+                    .await;
+            }
+            workers.lock().unwrap().remove(&worker_id);
+        });
+        let mut registered_workers = self.turn_workers.lock().unwrap();
+        if self.shutting_down.load(Ordering::Acquire) {
+            drop(registered_workers);
+            handle.abort();
+            return completion_rx;
+        }
+        registered_workers.insert(worker_id, handle);
+        drop(registered_workers);
+        if start_tx.send(()).is_err() {
+            if let Some(handle) = self.turn_workers.lock().unwrap().remove(&worker_id) {
+                handle.abort();
+            }
+        }
+        completion_rx
+    }
+
+    async fn wait_for_shutdown(&self) {
+        let mut receiver = self.shutdown_tx.subscribe();
+        if *receiver.borrow() {
+            return;
+        }
+        let _ = receiver.wait_for(|shutdown| *shutdown).await;
+    }
+
+    /// Drain one session lane in a detached worker so cancellation of the
+    /// caller's future cannot orphan its owned turn or its queued successors.
+    async fn run_turn_chain(
+        self,
+        mut lease: TurnLease,
+        mut entry: QueuedIncoming,
+        completion_tx: tokio::sync::oneshot::Sender<Result<GatewayRouteOutcome, GatewayError>>,
+    ) {
+        let mut completion_tx = Some(completion_tx);
+        let mut staged_execution_guard = Some(lease.execution_guard());
+
+        loop {
+            let _execution_guard = staged_execution_guard
+                .take()
+                .expect("turn chain lost its execution guard");
+            let mutation_baseline = self
+                .capture_turn_mutation_baseline(lease.session_key())
+                .await;
+            let delivery_started = AtomicBool::new(false);
+            let incoming = entry.incoming();
+            let mut reaction_plan = if self.is_turn_current(&lease).await
+                && !self.shutting_down.load(Ordering::Acquire)
+            {
+                let access_policy = self.platform_access_policy(&incoming.platform).await;
+                Self::reaction_lifecycle_plan(incoming, access_policy.as_ref())
+            } else {
+                None
+            };
+            let reaction_adapter = if reaction_plan.is_some() {
+                self.get_adapter(&incoming.platform).await
+            } else {
+                None
+            };
+            let reaction_chat_id = reaction_adapter.as_ref().map_or(
+                incoming.chat_id.as_str(),
+                |adapter| {
+                    adapter.reaction_target_chat_id(
+                        incoming.chat_id.as_str(),
+                        incoming.thread_id.as_deref(),
+                    )
+                },
+            );
+            if reaction_plan.is_some()
+                && (!self.is_turn_current(&lease).await
+                    || self.shutting_down.load(Ordering::Acquire))
+            {
+                reaction_plan = None;
+            }
+            if let (Some(adapter), Some(message_id), Some(plan)) = (
+                &reaction_adapter,
+                incoming.message_id.as_deref(),
+                reaction_plan,
+            ) {
+                if let Err(err) = Self::await_adapter_call(
+                    "start reaction",
+                    NONCRITICAL_ADAPTER_TIMEOUT,
+                    || adapter.add_reaction(reaction_chat_id, message_id, plan.start),
+                )
+                .await
+                {
+                    debug!(
+                        platform = incoming.platform,
+                        chat_id = incoming.chat_id,
+                        message_id = message_id,
+                        "Failed to add start reaction: {}",
+                        err
+                    );
+                }
+            }
+            let processing_result = match AssertUnwindSafe(async {
+                tokio::select! {
+                    biased;
+                    _ = self.wait_for_shutdown() => Err(GatewayError::SessionExpired(
+                        "gateway is shutting down".to_string(),
+                    )),
+                    _ = lease.cancelled() => Err(GatewayError::SessionExpired(
+                        "gateway turn was cancelled before reset".to_string(),
+                    )),
+                    result = self.process_claimed_turn(&entry, &lease, &delivery_started) => result,
+                }
+            })
+            .catch_unwind()
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(GatewayError::Platform(
+                    "gateway turn handler panicked".to_string(),
+                )),
+            };
+            let classify_outcome = |current: bool, shutting_down: bool| {
+                if !current || shutting_down {
+                    ProcessingOutcome::Cancelled
+                } else if processing_result.is_ok() {
                     ProcessingOutcome::Success
                 } else {
                     ProcessingOutcome::Failure
-                },
-            )
-            .map(Self::busy_event_to_incoming)
-        };
-        if let Err(error) = &processing_result {
-            self.send_processing_error_notification(incoming, error).await;
+                }
+            };
+            let mut current = self.is_turn_current(&lease).await;
+            let mut shutting_down = self.shutting_down.load(Ordering::Acquire);
+            let mut outcome = classify_outcome(current, shutting_down);
+            let mut shutdown_rollback_attempted = false;
+            if current && shutting_down {
+                shutdown_rollback_attempted = true;
+                let _ = self
+                    .restore_retryable_turn_failure(
+                        &lease,
+                        &mutation_baseline,
+                        delivery_started.load(Ordering::Acquire),
+                    )
+                    .await;
+                current = self.is_turn_current(&lease).await;
+                shutting_down = self.shutting_down.load(Ordering::Acquire);
+                outcome = classify_outcome(current, shutting_down);
+            }
+            if let (Some(adapter), Some(message_id), Some(plan)) = (
+                &reaction_adapter,
+                incoming.message_id.as_deref(),
+                reaction_plan,
+            ) {
+                if let Err(err) = Self::await_adapter_call(
+                    "reaction removal",
+                    NONCRITICAL_ADAPTER_TIMEOUT,
+                    || adapter.remove_reaction(reaction_chat_id, message_id, plan.start),
+                )
+                .await
+                {
+                    debug!(
+                        platform = incoming.platform,
+                        chat_id = incoming.chat_id,
+                        message_id = message_id,
+                        "Failed to remove start reaction: {}",
+                        err
+                    );
+                }
+                current = self.is_turn_current(&lease).await;
+                shutting_down = self.shutting_down.load(Ordering::Acquire);
+                outcome = classify_outcome(current, shutting_down);
+            }
+
+            if outcome == ProcessingOutcome::Failure {
+                // Preserve local state when it is demonstrably free of a
+                // delivery side effect, but raw ingress remains terminal:
+                // handler/model/tool execution may already have side effected.
+                let _ = self
+                    .restore_retryable_turn_failure(
+                        &lease,
+                        &mutation_baseline,
+                        delivery_started.load(Ordering::Acquire),
+                    )
+                    .await;
+            }
+            let notification_sent = if outcome == ProcessingOutcome::Failure
+                && !matches!(
+                    &processing_result,
+                    Err(
+                        GatewayError::PartialDelivery(_)
+                            | GatewayError::AcceptedStateUndurable { .. }
+                    )
+                )
+            {
+                if let Err(error) = &processing_result {
+                    self.send_processing_error_notification(
+                        entry.incoming(),
+                        &lease,
+                        error,
+                        &delivery_started,
+                    )
+                    .await
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            let completion = loop {
+                let mut busy = self.busy_sessions.write().await;
+                current = busy.is_current(&lease);
+                shutting_down = self.shutting_down.load(Ordering::Acquire);
+                if current && shutting_down && !shutdown_rollback_attempted {
+                    drop(busy);
+                    shutdown_rollback_attempted = true;
+                    let _ = self
+                        .restore_retryable_turn_failure(
+                            &lease,
+                            &mutation_baseline,
+                            delivery_started.load(Ordering::Acquire),
+                        )
+                        .await;
+                    continue;
+                }
+                outcome = classify_outcome(current, shutting_down);
+                if outcome == ProcessingOutcome::Cancelled {
+                    break busy.complete_turn(&lease, outcome);
+                }
+                let candidate_outcome = outcome;
+                drop(busy);
+
+                let terminal_emoji =
+                    if let (Some(adapter), Some(message_id), Some(plan)) = (
+                        &reaction_adapter,
+                        incoming.message_id.as_deref(),
+                        reaction_plan,
+                    ) {
+                        let emoji = if candidate_outcome == ProcessingOutcome::Success {
+                            plan.success
+                        } else {
+                            plan.error
+                        };
+                        if let Err(err) = Self::await_adapter_call(
+                            "completion reaction",
+                            NONCRITICAL_ADAPTER_TIMEOUT,
+                            || adapter.add_reaction(reaction_chat_id, message_id, emoji),
+                        )
+                        .await
+                        {
+                            debug!(
+                                platform = incoming.platform,
+                                chat_id = incoming.chat_id,
+                                message_id = message_id,
+                                "Failed to add completion reaction: {}",
+                                err
+                            );
+                        }
+                        Some(emoji)
+                    } else {
+                        None
+                    };
+
+                let mut busy = self.busy_sessions.write().await;
+                current = busy.is_current(&lease);
+                shutting_down = self.shutting_down.load(Ordering::Acquire);
+                let final_outcome = classify_outcome(current, shutting_down);
+                let needs_shutdown_rollback =
+                    current && shutting_down && !shutdown_rollback_attempted;
+                if needs_shutdown_rollback || final_outcome != candidate_outcome {
+                    drop(busy);
+                    if needs_shutdown_rollback {
+                        shutdown_rollback_attempted = true;
+                        let _ = self
+                            .restore_retryable_turn_failure(
+                                &lease,
+                                &mutation_baseline,
+                                delivery_started.load(Ordering::Acquire),
+                            )
+                            .await;
+                    }
+                    if let (Some(adapter), Some(message_id), Some(emoji)) = (
+                        &reaction_adapter,
+                        incoming.message_id.as_deref(),
+                        terminal_emoji,
+                    ) {
+                        if let Err(err) = Self::await_adapter_call(
+                            "stale completion reaction removal",
+                            NONCRITICAL_ADAPTER_TIMEOUT,
+                            || adapter.remove_reaction(reaction_chat_id, message_id, emoji),
+                        )
+                        .await
+                        {
+                            debug!(
+                                platform = incoming.platform,
+                                chat_id = incoming.chat_id,
+                                message_id = message_id,
+                                "Failed to remove stale completion reaction: {}",
+                                err
+                            );
+                        }
+                    }
+                    continue;
+                }
+                outcome = final_outcome;
+                break busy.complete_turn(&lease, outcome);
+            };
+            let (owned, next) = match completion {
+                TurnCompletion::Stale => (false, None),
+                TurnCompletion::Completed { next } => (true, next),
+            };
+            // `complete_turn` may atomically claim a queued successor. Guard it
+            // before any adapter or dedup await so reset can always join it.
+            let next_execution_guard = next
+                .as_ref()
+                .map(|(next_lease, _)| next_lease.execution_guard());
+            if owned {
+                // This route has progressed past admission. Even when local
+                // state rolls back, handler/model/tool work may already have
+                // crossed an external boundary, so retain terminal dedup.
+                self.complete_dedup_key(entry.dedup_key()).await;
+            }
+            // `entry` is mutably consumed below for its completion sender.
+            // Snapshot only the eventual partial-record identity first so no
+            // borrow of the ingress receipt survives that handoff.
+            let incoming_platform = incoming.platform.clone();
+            let incoming_chat_id = incoming.chat_id.clone();
+            let incoming_thread_id = incoming.thread_id.clone();
+            // A reset may promote an already-queued entry into a fresh detached
+            // worker. Its ingress receipt remains authoritative; claimed turns
+            // clear that receipt and use the worker-lifecycle sender instead.
+            if let Some(completion_tx) = entry
+                .take_completion_sender()
+                .or_else(|| completion_tx.take())
+            {
+                let caller_result = if !owned {
+                    // Preserve the stale/reset non-owner behavior: a newer
+                    // owner is responsible for the same lane's completion.
+                    Ok(GatewayRouteOutcome::Committed)
+                } else if outcome == ProcessingOutcome::Cancelled {
+                    // This worker was admitted and may have invoked arbitrary
+                    // handler/model/tool code. Cancellation is therefore
+                    // quarantine-only even when local rollback succeeded.
+                    let error = match processing_result {
+                        Err(error) => error,
+                        Ok(()) => GatewayError::SessionExpired(
+                            "gateway shut down with an uncertain turn boundary".to_string(),
+                        ),
+                    };
+                    Ok(GatewayRouteOutcome::Uncertain(error))
+                } else {
+                    match processing_result {
+                        Ok(()) => Ok(GatewayRouteOutcome::Committed),
+                        Err(GatewayError::PartialDelivery(partial)) => {
+                            Ok(GatewayRouteOutcome::Partial(partial))
+                        }
+                        Err(GatewayError::AcceptedStateUndurable {
+                            accepted_message_ids,
+                            repair,
+                        }) => {
+                            let accepted_chunks = accepted_message_ids.len().max(1);
+                            Ok(GatewayRouteOutcome::Partial(
+                                hermes_core::errors::PartialDelivery {
+                                    platform: incoming_platform,
+                                    chat_id: incoming_chat_id,
+                                    thread_id: incoming_thread_id,
+                                    reply_to_message_id: None,
+                                    reply_to_mode: "none".to_string(),
+                                    non_conversational: false,
+                                    next_chunk_index: 0,
+                                    remaining_text: String::new(),
+                                    accepted_message_ids,
+                                    accepted_chunks,
+                                    retryable: false,
+                                    retry_after: None,
+                                    failure: repair.clone(),
+                                    repair_required: Some(repair),
+                                },
+                            ))
+                        }
+                        // A fully accepted error notification conclusively
+                        // handles this inbound turn. Its original failure is
+                        // still logged above; retaining it in the Discord
+                        // ingress spool would otherwise fill capacity with
+                        // ordinary, already-notified model/tool failures.
+                        Err(_) if notification_sent => Ok(GatewayRouteOutcome::Committed),
+                        // Any rejected, timed-out, panicked, or ambiguous
+                        // notification is not safe to replay as raw ingress:
+                        // hooks/tools may already have side effected.
+                        Err(error) => Ok(GatewayRouteOutcome::Uncertain(error)),
+                    }
+                };
+                let _ = completion_tx.send(caller_result);
+            }
+
+            let Some((next_lease, next_entry)) = next else {
+                break;
+            };
+            staged_execution_guard = next_execution_guard;
+            lease = next_lease;
+            entry = next_entry;
         }
-        processing_result?;
-        Ok(pending)
+    }
+
+    async fn is_turn_current(&self, lease: &TurnLease) -> bool {
+        self.busy_sessions.read().await.is_current(lease)
+    }
+
+    async fn session_turn_lock(&self, session_key: &str) -> SessionTurnLock {
+        let mut registry = self.session_turn_locks.lock();
+        if let Some((key, weak)) = registry.get_key_value(session_key) {
+            if let Some(lock) = weak.upgrade() {
+                return SessionTurnLock {
+                    key: key.clone(),
+                    lock: Some(lock),
+                    registry: self.session_turn_locks.clone(),
+                };
+            }
+        }
+        let key = Arc::<str>::from(session_key);
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        registry.insert(key.clone(), Arc::downgrade(&lock));
+        SessionTurnLock {
+            key,
+            lock: Some(lock),
+            registry: self.session_turn_locks.clone(),
+        }
+    }
+
+    async fn claim_session_lane(
+        &self,
+        session_key: &str,
+        entry: QueuedIncoming,
+        mode: BusyInputMode,
+    ) -> BusyAdmission {
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let _turn_guard = turn_lock.lock().await;
+        self.busy_sessions.write().await.claim_idle_or_enqueue(
+            session_key,
+            entry,
+            mode,
+            std::time::Instant::now(),
+        )
+    }
+
+    async fn enqueue_session_if_active(
+        &self,
+        session_key: &str,
+        entry: QueuedIncoming,
+    ) -> QueueAdmission {
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let _turn_guard = turn_lock.lock().await;
+        self.busy_sessions
+            .write()
+            .await
+            .enqueue_if_active(session_key, entry)
+    }
+
+    async fn steer_session_if_active(
+        &self,
+        session_key: &str,
+        entry: QueuedIncoming,
+    ) -> Option<BusyMessageDecision> {
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let _turn_guard = turn_lock.lock().await;
+        let mut busy = self.busy_sessions.write().await;
+        if !busy.is_active(session_key) {
+            return None;
+        }
+        match busy.claim_idle_or_enqueue(
+            session_key,
+            entry,
+            BusyInputMode::Steer,
+            std::time::Instant::now(),
+        ) {
+            BusyAdmission::Queued(decision) => Some(decision),
+            BusyAdmission::Claimed { .. } => None,
+            BusyAdmission::AtCapacity => Some(BusyMessageDecision {
+                handled: true,
+                queued: false,
+                interrupted: false,
+                steered: false,
+                ack: Some("The active session queue is full. Retry the prompt later.".to_string()),
+            }),
+        }
+    }
+
+    async fn try_lock_session_mutation(
+        &self,
+        session_key: &str,
+    ) -> Option<OwnedSessionMutationGuard> {
+        let lock = self.session_turn_lock(session_key).await;
+        let guard = lock
+            .lock
+            .as_ref()
+            .expect("session lock missing")
+            .clone()
+            .try_lock_owned()
+            .ok()?;
+        if self.busy_sessions.read().await.is_active(session_key) {
+            return None;
+        }
+        Some(OwnedSessionMutationGuard {
+            guard: Some(guard),
+            lock: Some(lock),
+        })
+    }
+
+    async fn process_claimed_turn(
+        &self,
+        entry: &QueuedIncoming,
+        lease: &TurnLease,
+        delivery_started: &AtomicBool,
+    ) -> Result<(), GatewayError> {
+        let session_key = lease.session_key();
+        let incoming = entry.incoming();
+        let agent_text = entry.agent_text_override().unwrap_or(&incoming.text);
+        let enriched_text =
+            self.enrich_message_with_transcription(&self.enrich_message_with_vision(agent_text));
+
+        if !self.is_turn_current(lease).await {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was invalidated before processing".to_string(),
+            ));
+        }
+
+        let messages = {
+            let turn_lock = self.session_turn_lock(session_key).await;
+            let _turn_guard = turn_lock.lock().await;
+            let busy = self.busy_sessions.read().await;
+            if !busy.is_current(lease) {
+                return Err(GatewayError::SessionExpired(
+                    "gateway turn was invalidated before processing".to_string(),
+                ));
+            }
+            let session_was_missing = self
+                .session_manager
+                .get_session(session_key)
+                .await
+                .is_none();
+            let created_session = if session_was_missing {
+                self.get_or_create_runtime_session(incoming).await
+            } else {
+                None
+            };
+            let session_creation_failed = session_was_missing && created_session.is_none();
+            drop(busy);
+            if let Some(session) = created_session {
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.emit_hook_event(
+                        "session:start",
+                        serde_json::json!({
+                            "platform": incoming.platform,
+                            "chat_id": incoming.chat_id,
+                            "user_id": incoming.user_id,
+                            "session_id": session_key,
+                            "logical_session_id": session.id,
+                            "reason": "post_boundary"
+                        }),
+                    ),
+                )
+                .await;
+            }
+            let busy = self.busy_sessions.read().await;
+            if !busy.is_current(lease) {
+                return Err(GatewayError::SessionExpired(
+                    "gateway turn was invalidated before session mutation".to_string(),
+                ));
+            }
+            drop(busy);
+            match (session_creation_failed, entry.turn_kind()) {
+                (true, _) => Err("Gateway session capacity reached; retry later."),
+                (false, QueuedTurnKind::Message) => {
+                    self.maybe_apply_smart_model_routing(session_key, &enriched_text)
+                        .await;
+                    if self
+                        .session_manager
+                        .try_add_user_message(session_key, Message::user(enriched_text))
+                        .await
+                    {
+                        self.bump_input_usage(session_key, agent_text.chars().count())
+                            .await;
+                        Ok(Some(self.session_manager.get_messages(session_key).await))
+                    } else {
+                        Err("This message exceeds the available session context capacity. Shorten it or retry after context is freed.")
+                    }
+                }
+                (false, QueuedTurnKind::Retry) => {
+                    let mut messages = self.session_manager.get_messages(session_key).await;
+                    if matches!(
+                        messages.last().map(|message| message.role),
+                        Some(MessageRole::Assistant)
+                    ) {
+                        messages.pop();
+                    }
+                    if messages.is_empty() {
+                        Ok(None)
+                    } else {
+                        self.session_manager
+                            .replace_messages(session_key, messages.clone())
+                            .await;
+                        Ok(Some(messages))
+                    }
+                }
+            }
+        };
+
+        match messages {
+            Ok(Some(messages)) if self.config.streaming_enabled => {
+                self.route_streaming(
+                    incoming,
+                    messages,
+                    session_key,
+                    lease,
+                    delivery_started,
+                )
+                .await
+            }
+            Ok(Some(messages)) => {
+                self.route_non_streaming(
+                    incoming,
+                    messages,
+                    session_key,
+                    lease,
+                    delivery_started,
+                )
+                .await
+            }
+            Ok(None) => {
+                self.send_turn_bound_message(incoming, lease, "No previous message to retry.")
+                    .await
+            }
+            Err(message) => self.send_turn_bound_message(incoming, lease, message).await,
+        }
+
+    }
+
+    async fn capture_turn_mutation_baseline(
+        &self,
+        session_key: &str,
+    ) -> TurnMutationBaseline {
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let _turn_guard = turn_lock.lock().await;
+        TurnMutationBaseline {
+            session: self.session_manager.get_session(session_key).await,
+            usage: self.usage_stats.read().await.get(session_key).cloned(),
+            runtime: self.runtime_state.read().await.get(session_key).cloned(),
+        }
+    }
+
+    async fn restore_retryable_turn_failure(
+        &self,
+        lease: &TurnLease,
+        baseline: &TurnMutationBaseline,
+        delivery_started: bool,
+    ) -> bool {
+        let turn_lock = self.session_turn_lock(lease.session_key()).await;
+        let _turn_guard = turn_lock.lock().await;
+        if !self.busy_sessions.read().await.is_current(lease) {
+            return false;
+        }
+        if delivery_started {
+            return false;
+        }
+        let assistant_messages_before = baseline
+            .usage
+            .as_ref()
+            .map(|usage| usage.assistant_messages)
+            .unwrap_or(0);
+        let assistant_messages_after = self
+            .usage_stats
+            .read()
+            .await
+            .get(lease.session_key())
+            .map(|usage| usage.assistant_messages)
+            .unwrap_or(0);
+        if assistant_messages_after > assistant_messages_before {
+            return false;
+        }
+
+        self.session_manager
+            .restore_session_snapshot(lease.session_key(), baseline.session.clone())
+            .await;
+        {
+            let mut usage = self.usage_stats.write().await;
+            match baseline.usage.as_ref() {
+                Some(snapshot) => {
+                    usage.insert(lease.session_key().to_string(), snapshot.clone());
+                }
+                None => {
+                    usage.remove(lease.session_key());
+                }
+            }
+        }
+        {
+            let mut runtime = self.runtime_state.write().await;
+            match baseline.runtime.as_ref() {
+                Some(snapshot) => {
+                    runtime.insert(lease.session_key().to_string(), snapshot.clone());
+                }
+                None => {
+                    runtime.remove(lease.session_key());
+                }
+            }
+        }
+        true
     }
 
     async fn warn_fail_closed_default_once(&self, platform: &str, policy: &PlatformAccessPolicy) {
@@ -346,7 +1271,9 @@ impl Gateway {
     async fn send_processing_error_notification(
         &self,
         incoming: &IncomingMessage,
+        lease: &TurnLease,
         original_error: &GatewayError,
+        delivery_started: &AtomicBool,
     ) -> bool {
         let mut detail: String = original_error.to_string().chars().take(300).collect();
         if detail.trim().is_empty() {
@@ -358,24 +1285,56 @@ impl Gateway {
             detail
         );
 
-        match self
-            .send_message_threaded(
+        let turn_lock = self.session_turn_lock(lease.session_key()).await;
+        let _commit_guard = turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return false;
+        }
+        drop(busy);
+        // The adapter may accept this notification even if the await later
+        // errors or shutdown cancels it, so establish the effect boundary
+        // immediately before the first network attempt.
+        delivery_started.store(true, Ordering::Release);
+        match tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            AssertUnwindSafe(self.send_message_threaded(
                 &incoming.platform,
                 &incoming.chat_id,
                 &notice,
                 Some(ParseMode::Plain),
                 Self::reply_thread_id(incoming),
-            )
-            .await
+            ))
+            .catch_unwind(),
+        )
+        .await
         {
-            Ok(()) => true,
-            Err(notify_error) => {
+            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Err(notify_error))) => {
                 error!(
                     platform = %incoming.platform,
                     chat_id = %incoming.chat_id,
                     original_error = %original_error,
                     notify_error = %notify_error,
                     "failed to send gateway error notification"
+                );
+                false
+            }
+            Ok(Err(_)) => {
+                error!(
+                    platform = %incoming.platform,
+                    chat_id = %incoming.chat_id,
+                    original_error = %original_error,
+                    "gateway error notification panicked"
+                );
+                false
+            }
+            Err(_) => {
+                error!(
+                    platform = %incoming.platform,
+                    chat_id = %incoming.chat_id,
+                    original_error = %original_error,
+                    "timed out sending gateway error notification"
                 );
                 false
             }
@@ -386,10 +1345,14 @@ impl Gateway {
         match error {
             GatewayError::ConnectionFailed(_) => "ConnectionFailed",
             GatewayError::SendFailed(_) => "SendFailed",
+            GatewayError::MediaPreflightFailed { .. } => "MediaPreflightFailed",
+            GatewayError::MediaRemoteRejected { .. } => "MediaRemoteRejected",
             GatewayError::Platform(_) => "Platform",
             GatewayError::Auth(_) => "Auth",
             GatewayError::RateLimited { .. } => "RateLimited",
             GatewayError::SessionExpired(_) => "SessionExpired",
+            GatewayError::PartialDelivery(_) => "PartialDelivery",
+            GatewayError::AcceptedStateUndurable { .. } => "AcceptedStateUndurable",
         }
     }
 

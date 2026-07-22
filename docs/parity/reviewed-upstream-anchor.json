@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "canonical_upstream_url": "https://github.com/NousResearch/hermes-agent.git",
+  "anchor_sha": "f64e4f4f5768c18a53f44890747653bafcab2796",
+  "reviewed_at_utc": "2026-07-17T00:00:00+00:00",
+  "review_basis": {
+    "kind": "historical_queue_boundary",
+    "semantic_evidence": "The immutable fork queue artifact records the exact upstream SHA and its reviewed disposition; this anchor is a range boundary, not a current port classification."
+  },
+  "evidence": {
+    "fork_commit": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27",
+    "artifacts": [
+      {
+        "path": "docs/parity/upstream-missing-queue.json",
+        "anchor_classification": {
+          "sha": "f64e4f4f5768c18a53f44890747653bafcab2796",
+          "disposition": "ported",
+          "classification_rule": "sha_override"
+        }
+      }
+    ]
+  }
+}

@@ -1,11 +1,24 @@
-fn background_job_counts() -> (usize, usize, usize, usize) {
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
-    let mut queued = 0usize;
-    let mut running = 0usize;
-    let mut completed = 0usize;
-    let mut failed = 0usize;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BackgroundJobCounts {
+    queued: usize,
+    running: usize,
+    completed: usize,
+    failed: usize,
+    canceled: usize,
+    outcome_unknown: usize,
+}
+
+impl BackgroundJobCounts {
+    fn mission_board_counts(self) -> (usize, usize, usize, usize) {
+        (self.queued, self.running, self.completed, self.failed)
+    }
+}
+
+fn background_job_counts(state_root: &Path) -> BackgroundJobCounts {
+    let jobs_dir = state_root.join("background_jobs");
+    let mut counts = BackgroundJobCounts::default();
     let Ok(entries) = std::fs::read_dir(jobs_dir) else {
-        return (queued, running, completed, failed);
+        return counts;
     };
     for entry in entries.filter_map(Result::ok) {
         if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
@@ -17,14 +30,18 @@ fn background_job_counts() -> (usize, usize, usize, usize) {
             .unwrap_or("unknown")
             .to_ascii_lowercase();
         match status.as_str() {
-            "queued" => queued = queued.saturating_add(1),
-            "running" => running = running.saturating_add(1),
-            "completed" => completed = completed.saturating_add(1),
-            "failed" => failed = failed.saturating_add(1),
+            "queued" => counts.queued = counts.queued.saturating_add(1),
+            "running" => counts.running = counts.running.saturating_add(1),
+            "completed" => counts.completed = counts.completed.saturating_add(1),
+            "failed" => counts.failed = counts.failed.saturating_add(1),
+            "canceled" => counts.canceled = counts.canceled.saturating_add(1),
+            "outcome_unknown" | "unknown" => {
+                counts.outcome_unknown = counts.outcome_unknown.saturating_add(1)
+            }
             _ => {}
         }
     }
-    (queued, running, completed, failed)
+    counts
 }
 
 #[derive(Debug, Clone)]
@@ -41,8 +58,8 @@ struct BackgroundJobRecord {
     status_path: PathBuf,
 }
 
-fn collect_background_jobs(limit: usize) -> Vec<BackgroundJobRecord> {
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+fn collect_background_jobs(state_root: &Path, limit: usize) -> Vec<BackgroundJobRecord> {
+    let jobs_dir = state_root.join("background_jobs");
     let Ok(entries) = std::fs::read_dir(jobs_dir) else {
         return Vec::new();
     };
@@ -122,12 +139,12 @@ fn collect_background_jobs(limit: usize) -> Vec<BackgroundJobRecord> {
     rows
 }
 
-fn resolve_background_job(id_or_prefix: &str) -> Option<BackgroundJobRecord> {
+fn resolve_background_job(state_root: &Path, id_or_prefix: &str) -> Option<BackgroundJobRecord> {
     let needle = id_or_prefix.trim().to_ascii_lowercase();
     if needle.is_empty() {
         return None;
     }
-    collect_background_jobs(500).into_iter().find(|job| {
+    collect_background_jobs(state_root, 500).into_iter().find(|job| {
         let id = job.id.to_ascii_lowercase();
         id == needle || id.starts_with(&needle)
     })
@@ -151,14 +168,19 @@ fn tail_file_lines(path: &Path, limit: usize) -> Result<String, AgentError> {
     Ok(tail_text_lines(&body, limit))
 }
 
-fn render_background_status(limit: usize) -> String {
-    let (queued, running, completed, failed) = background_job_counts();
-    let rows = collect_background_jobs(limit);
+fn render_background_status(state_root: &Path, limit: usize) -> String {
+    let counts = background_job_counts(state_root);
+    let rows = collect_background_jobs(state_root, limit);
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Background queue status: queued={} running={} completed={} failed={}",
-        queued, running, completed, failed
+        "Background queue status: queued={} running={} completed={} failed={} canceled={} outcome_unknown={}",
+        counts.queued,
+        counts.running,
+        counts.completed,
+        counts.failed,
+        counts.canceled,
+        counts.outcome_unknown,
     );
     if rows.is_empty() {
         out.push_str("\nNo background jobs found.");
@@ -209,11 +231,15 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
             Ok(CommandResult::Handled)
         }
         "recover" => {
-            let recovered = recover_orphan_loop_events(600)?;
+            let recovered = recover_queued_background_jobs(
+                &app.state_root,
+                app.run_runtime.as_ref(),
+                600,
+            );
             emit_command_output(
                 app,
                 format!(
-                    "Mission queue recovery complete. Marked {} orphaned running event(s).",
+                    "Mission durable-job recovery complete. Rescheduled {} queued job(s).",
                     recovered
                 ),
             );
@@ -224,12 +250,32 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
                 .get(1)
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(32);
-            let replayed = replay_loop_queue(limit)?;
+            let dispatch = app
+                .run_runtime
+                .dispatch_alpha_runtime_v1(app.agent.config.execution_mode, limit)
+                .map_err(|error| {
+                    AgentError::Io(format!("mission durable dispatch failed: {error}"))
+                })?;
+            let mut scheduled = 0usize;
+            for job in dispatch.newly_durable_jobs() {
+                schedule_alpha_runtime_v1_background_job(
+                    &app.state_root,
+                    app.run_runtime.as_ref(),
+                    job,
+                )?;
+                scheduled = scheduled.saturating_add(1);
+            }
             emit_command_output(
                 app,
                 format!(
-                    "Mission queue replay complete. Replayed {} event(s) (limit={}).",
-                    replayed, limit
+                    "Mission durable dispatch complete (limit={limit}): claimed={} acknowledged={} retryable={} dead_lettered={} rejected={} newly_scheduled={} empty={}.",
+                    dispatch.claimed,
+                    dispatch.acknowledged,
+                    dispatch.retryable,
+                    dispatch.dead_lettered,
+                    dispatch.rejected,
+                    scheduled,
+                    dispatch.empty,
                 ),
             );
             Ok(CommandResult::Handled)
@@ -245,12 +291,20 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
             let loop_id = args[1];
             let event_type = args[2];
             let payload = args[3..].join(" ");
-            let event = enqueue_loop_event(loop_id, event_type, &payload)?;
+            let request = hermes_agent::AlphaRuntimeV1Request::new(loop_id, event_type, payload)
+                .map_err(|error| AgentError::Config(format!("mission request rejected: {error}")))?;
+            let receipt = app
+                .run_runtime
+                .enqueue_alpha_runtime_v1(app.agent.config.execution_mode, request)
+                .map_err(|error| AgentError::Io(format!("mission durable enqueue failed: {error}")))?;
             emit_command_output(
                 app,
                 format!(
-                    "Queued mission event {} loop={} type={} status={}",
-                    event.id, event.loop_id, event.event_type, event.status
+                    "Mission delivery queued: run={} outbox={} loop={} type={} status=pending_delivery",
+                    receipt.run_id,
+                    receipt.outbox_id,
+                    receipt.envelope.loop_id().as_str(),
+                    receipt.envelope.event_type().as_str(),
                 ),
             );
             Ok(CommandResult::Handled)
@@ -472,11 +526,11 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
         }
         "status" | "show" => {
             let loops = load_alpha_loops()?;
-            let (queued, running, completed, failed) = background_job_counts();
+            let counts = background_job_counts(&app.state_root);
             let board = render_mission_board(
                 &app.current_model,
                 app.session_objective.as_deref(),
-                (queued, running, completed, failed),
+                counts.mission_board_counts(),
             )
             .await?;
             let enabled = loops.iter().filter(|l| l.enabled).count();

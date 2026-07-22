@@ -207,7 +207,9 @@ fn acp_usage_from_agent_usage(usage: &hermes_core::UsageStats) -> hermes_acp::Us
 struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
+    run_runtime: Arc<hermes_agent::RunRuntime>,
     interrupts: Arc<Mutex<HashMap<String, hermes_agent::InterruptController>>>,
+    execution_mode: hermes_core::ResolvedExecutionMode,
 }
 
 impl CliAcpPromptExecutor {
@@ -223,36 +225,55 @@ impl CliAcpPromptExecutor {
 fn acp_stream_callbacks(
     session_id: &str,
     callback_events: Arc<Mutex<Vec<hermes_acp::AcpEvent>>>,
-) -> hermes_agent::AgentCallbacks {
-    let thought_events = callback_events.clone();
-    let thought_session_id = session_id.to_string();
-    let stream_events = callback_events;
-    let stream_session_id = session_id.to_string();
-    hermes_agent::AgentCallbacks {
-        on_thinking: Some(Box::new(move |thinking: &str| {
-            if thinking.trim().is_empty() {
-                return;
+) -> (hermes_agent::AgentCallbacks, hermes_agent::AgentObserverSink) {
+    let session_id = session_id.to_string();
+    let (observer_sink, mut observer_rx) = hermes_agent::AgentObserverSink::channel(256);
+    let _ = std::thread::Builder::new()
+        .name("hermes-acp-observer".to_string())
+        .spawn(move || {
+            let mut muted = false;
+            while let Some(event) = observer_rx.blocking_recv() {
+                let acp_event = match event {
+                    hermes_agent::AgentObserverEvent::Thinking(thinking)
+                        if !thinking.trim().is_empty() =>
+                    {
+                        Some(hermes_acp::AcpEvent::agent_thought_chunk(
+                            &session_id,
+                            &thinking,
+                        ))
+                    }
+                    hermes_agent::AgentObserverEvent::RenderDelta(mut delta) => {
+                        if let Some(enabled) = delta.mute_post_response {
+                            muted = enabled;
+                        }
+                        if muted {
+                            None
+                        } else {
+                            delta.text.take().filter(|text| !text.is_empty()).map(
+                                |mut text| {
+                                    if delta.break_before {
+                                        text.insert_str(0, "\n\n");
+                                    }
+                                    hermes_acp::AcpEvent::message_delta(&session_id, &text)
+                                },
+                            )
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(event) = acp_event {
+                    if let Ok(mut events) = callback_events.lock() {
+                        events.push(event);
+                    }
+                }
             }
-            if let Ok(mut events) = thought_events.lock() {
-                events.push(hermes_acp::AcpEvent::agent_thought_chunk(
-                    &thought_session_id,
-                    thinking,
-                ));
-            }
-        })),
-        on_stream_delta: Some(Box::new(move |delta: &str| {
-            if delta.is_empty() {
-                return;
-            }
-            if let Ok(mut events) = stream_events.lock() {
-                events.push(hermes_acp::AcpEvent::message_delta(
-                    &stream_session_id,
-                    delta,
-                ));
-            }
-        })),
-        ..hermes_agent::AgentCallbacks::default()
-    }
+        });
+    (
+        hermes_agent::AgentCallbacks {
+            observer_sink: Some(observer_sink.clone()),
+        },
+        observer_sink,
+    )
 }
 
 #[async_trait::async_trait]
@@ -269,8 +290,14 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .or_else(|| self.config.model.clone())
             .unwrap_or_else(|| "dynamic".to_string());
 
+        let memory_subject = hermes_agent::MemorySubject::local_owner(
+            hermes_agent::MemorySurface::Acp,
+            session.session_id.clone(),
+        )
+        .map_err(|_| "invalid ACP memory subject".to_string())?;
         let provider = crate::app::build_provider(&self.config, &model);
-        let mut agent_config = crate::app::build_agent_config(&self.config, &model);
+        let mut agent_config =
+            crate::app::build_agent_config(&self.config, &model, self.execution_mode);
         agent_config.session_id = Some(session.session_id.clone());
 
         let agent_tools = Arc::new(crate::app::bridge_tool_registry(&self.tool_registry));
@@ -280,14 +307,19 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         }
         let callback_events: Arc<Mutex<Vec<hermes_acp::AcpEvent>>> =
             Arc::new(Mutex::new(Vec::new()));
-        let callbacks = acp_stream_callbacks(&session.session_id, callback_events.clone());
+        let (callbacks, observer_sink) =
+            acp_stream_callbacks(&session.session_id, callback_events.clone());
         let agent = hermes_agent::attach_discovered_memory(
             hermes_agent::AgentLoop::with_interrupt(agent_config, agent_tools, provider, interrupt)
+                .with_run_runtime(self.run_runtime.clone())
                 .with_callbacks(callbacks),
-        );
+            memory_subject,
+        )
+        .map_err(|_| "memory initialization failed".to_string())?;
         let messages = acp_history_to_messages(history, user_text);
 
         let result = agent.run(messages, Some(self.current_tool_schemas())).await;
+        let _ = observer_sink.flush().await;
         if let Ok(mut active) = self.interrupts.lock() {
             active.remove(&session.session_id);
         }
@@ -330,7 +362,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .get(&session.session_id)
             .cloned();
         if let Some(controller) = controller {
-            controller.interrupt(Some(hermes_agent::format_steer_marker(guidance)));
+            controller.steer(hermes_agent::format_steer_marker(guidance));
             Ok(true)
         } else {
             Ok(false)
@@ -381,13 +413,32 @@ where
 
 /// Handle `hermes acp [action]`.
 pub async fn handle_cli_acp(
+    config_dir: Option<String>,
     action: Option<String>,
     assume_yes: bool,
+    execution_mode_override: Option<String>,
 ) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
         "start" => {
-            let config = hermes_config::load_config(None)
-                .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+            let config = hermes_config::load_config(config_dir.as_deref())
+                .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?;
+            let execution_mode = hermes_config::resolve_runtime_execution_mode(
+                &config,
+                execution_mode_override.as_deref(),
+            )
+            .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?;
+            let execution_backend =
+                crate::terminal_backend::build_execution_backend_binding(&config, execution_mode)?;
+            let state_root = hermes_config::state_dir(
+                config_dir.as_deref().map(std::path::Path::new),
+            );
+            let run_runtime = Arc::new(
+                hermes_agent::RunRuntime::open(&state_root).map_err(|error| {
+                    hermes_core::AgentError::Io(format!(
+                        "run-record startup failed: {error}"
+                    ))
+                })?,
+            );
 
             let model = config
                 .model
@@ -401,7 +452,7 @@ pub async fn handle_cli_acp(
             );
 
             let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
-            let terminal_backend = crate::terminal_backend::build_terminal_backend(&config);
+            let terminal_backend = Arc::clone(&execution_backend.terminal_backend);
             let skill_store = Arc::new(hermes_skills::FileSkillStore::new(
                 hermes_config::skills_dir(),
             ));
@@ -412,12 +463,18 @@ pub async fn handle_cli_acp(
             let cron_data_dir = hermes_config::cron_dir();
             std::fs::create_dir_all(&cron_data_dir)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
-                &config,
-                &model,
-                cron_data_dir,
-                &tool_registry,
-            ));
+            let cron_scheduler = Arc::new(
+                build_runtime_cron_scheduler(
+                    &config,
+                    &model,
+                    cron_data_dir,
+                    &tool_registry,
+                    run_runtime.clone(),
+                    execution_mode,
+                    Arc::clone(&execution_backend.containment_context),
+                )
+                .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?,
+            );
             cron_scheduler
                 .load_persisted_jobs()
                 .await
@@ -431,7 +488,9 @@ pub async fn handle_cli_acp(
             let prompt_executor = Arc::new(CliAcpPromptExecutor {
                 config: Arc::new(config.clone()),
                 tool_registry: tool_registry.clone(),
+                run_runtime,
                 interrupts: Arc::new(Mutex::new(HashMap::new())),
+                execution_mode,
             });
 
             let session_manager = Arc::new(hermes_acp::SessionManager::new());

@@ -1,6 +1,6 @@
 #[test]
 fn test_yolo_env_truthy_values_bypass_recoverable_confirmations() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _session = EnvGuard::remove("HERMES_SESSION_KEY");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
     let manager = ApprovalManager::new();
@@ -17,7 +17,7 @@ fn test_yolo_env_truthy_values_bypass_recoverable_confirmations() {
 
 #[test]
 fn test_yolo_env_false_like_values_do_not_bypass() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _session = EnvGuard::remove("HERMES_SESSION_KEY");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
     let manager = ApprovalManager::new();
@@ -34,7 +34,7 @@ fn test_yolo_env_false_like_values_do_not_bypass() {
 
 #[test]
 fn test_cron_env_default_requires_confirmation_for_recoverable_commands() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _session_key = EnvGuard::remove("HERMES_SESSION_KEY");
     let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -51,7 +51,7 @@ fn test_cron_env_default_requires_confirmation_for_recoverable_commands() {
 
 #[test]
 fn test_cron_env_approve_aliases_bypass_recoverable_only() {
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _session_key = EnvGuard::remove("HERMES_SESSION_KEY");
     let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -72,6 +72,29 @@ fn test_cron_env_approve_aliases_bypass_recoverable_only() {
             "cron approval mode {value:?} must not bypass hardline denial"
         );
     }
+}
+
+#[test]
+fn test_hardline_denial_survives_all_environment_override_combinations() {
+    let _lock = TEST_ENV_LOCK.lock();
+    let session = "hardline-all-overrides";
+    let _session_key = EnvGuard::set("HERMES_SESSION_KEY", session);
+    let _yolo = EnvGuard::set("HERMES_YOLO_MODE", "1");
+    let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+    let _cron = EnvGuard::set("HERMES_CRON_SESSION", "1");
+    let _cron_mode = EnvGuard::set("HERMES_CRON_APPROVAL_MODE", "approve");
+    let _cron_mode_legacy = EnvGuard::set("HERMES_APPROVALS_CRON_MODE", "allow");
+    clear_session(session);
+    enable_session_yolo(session);
+
+    let manager = ApprovalManager::new();
+    let from_env = manager.check_approval_from_env("rm -rf /", "local");
+    let explicit_overrides =
+        manager.check_approval_with_context("rm -rf /", "local", true, false);
+    clear_session(session);
+
+    assert_eq!(from_env, ApprovalDecision::Denied);
+    assert_eq!(explicit_overrides, ApprovalDecision::Denied);
 }
 
 #[test]
@@ -114,7 +137,7 @@ fn test_cron_combined_guard_wins_over_gateway_origin() {
 fn test_session_scoped_yolo_only_bypasses_current_session() {
     let _guard = lock_test_state();
     reset_approval_state_unlocked();
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
     let manager = ApprovalManager::new();
@@ -153,7 +176,7 @@ fn test_session_scoped_yolo_only_bypasses_current_session() {
 fn test_session_scoped_yolo_does_not_bypass_hardline_or_sudo_floor() {
     let _guard = lock_test_state();
     reset_approval_state_unlocked();
-    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let _lock = TEST_ENV_LOCK.lock();
     let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
     let _sudo = EnvGuard::remove("SUDO_PASSWORD");
     let _session = EnvGuard::set("HERMES_SESSION_KEY", "session-a");
@@ -232,9 +255,7 @@ fn test_gateway_approval_resolve_single_is_fifo() {
         pattern_keys: vec!["second".to_string()],
         allow_permanent: true,
     }));
-    GATEWAY_QUEUES
-        .lock()
-        .expect("gateway queue lock poisoned")
+    GATEWAY_QUEUES.lock()
         .insert(
             session.to_string(),
             VecDeque::from([first.clone(), second.clone()]),
@@ -270,9 +291,7 @@ fn test_gateway_approval_resolve_all_unblocks_entries() {
         pattern_keys: vec!["second".to_string()],
         allow_permanent: true,
     }));
-    GATEWAY_QUEUES
-        .lock()
-        .expect("gateway queue lock poisoned")
+    GATEWAY_QUEUES.lock()
         .insert(
             session.to_string(),
             VecDeque::from([first.clone(), second.clone()]),
@@ -308,9 +327,7 @@ fn test_clear_session_denies_and_signals_gateway_entries() {
         pattern_keys: vec!["second".to_string()],
         allow_permanent: true,
     }));
-    GATEWAY_QUEUES
-        .lock()
-        .expect("gateway queue lock poisoned")
+    GATEWAY_QUEUES.lock()
         .insert(
             session.to_string(),
             VecDeque::from([first.clone(), second.clone()]),
@@ -417,7 +434,7 @@ fn test_gateway_approval_notify_emits_redacted_command_but_queues_raw() {
     assert_eq!(display_request.pattern_key, "tirith:credential_redaction");
 
     let queued_raw = {
-        let queues = GATEWAY_QUEUES.lock().expect("gateway queue lock poisoned");
+        let queues = GATEWAY_QUEUES.lock();
         queues
             .get(session)
             .and_then(|entries| entries.front())
@@ -506,7 +523,7 @@ fn test_approval_observers_fire_pre_and_post_on_cli_path() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_for_observer = events.clone();
     let observer_id = register_approval_observer(move |event| {
-        events_for_observer.lock().unwrap().push(event);
+        events_for_observer.lock().push(event);
     });
     let mut callback = |prompt: ApprovalPrompt| {
         assert_eq!(prompt.command, "rm -rf /tmp/observer-cli");
@@ -529,7 +546,7 @@ fn test_approval_observers_fire_pre_and_post_on_cli_path() {
     assert!(result.approved);
     assert!(result.user_approved);
     assert!(unregister_approval_observer(observer_id));
-    let events = events.lock().unwrap().clone();
+    let events = events.lock().clone();
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].kind, ApprovalHookKind::PreApprovalRequest);
     assert_eq!(events[0].surface, ApprovalSurface::Cli);
@@ -574,7 +591,7 @@ fn test_approval_observers_fire_on_gateway_resolution() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_for_observer = events.clone();
     let observer_id = register_approval_observer(move |event| {
-        events_for_observer.lock().unwrap().push(event);
+        events_for_observer.lock().push(event);
     });
     let (tx, rx) = std::sync::mpsc::channel();
     register_gateway_notify(session, move |request| {
@@ -612,7 +629,7 @@ fn test_approval_observers_fire_on_gateway_resolution() {
     assert!(result.user_approved);
     assert!(unregister_approval_observer(observer_id));
     unregister_gateway_notify(session);
-    let events = events.lock().unwrap().clone();
+    let events = events.lock().clone();
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].kind, ApprovalHookKind::PreApprovalRequest);
     assert_eq!(events[0].surface, ApprovalSurface::Gateway);

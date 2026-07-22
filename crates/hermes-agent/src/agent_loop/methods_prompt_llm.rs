@@ -76,7 +76,7 @@ impl AgentLoop {
         _task_hint: &str,
         tool_schemas: &[ToolSchema],
         model_for_prompt: &str,
-    ) -> String {
+    ) -> FreshSystemPrompt {
         let soul = load_soul_md_from_home(self.config.hermes_home.as_deref());
         let mut builder = SystemPromptBuilder::new().with_personality(soul.as_deref());
         if let Some(base) = self.config.system_prompt.as_deref() {
@@ -169,13 +169,29 @@ impl AgentLoop {
         }
 
         if !self.config.skip_memory {
-            let (memory_block, user_block) =
-                load_builtin_memory_snapshot(self.config.hermes_home.as_deref());
-            if let Some(block) = memory_block {
-                builder = builder.with_block(&block);
-            }
-            if let Some(block) = user_block {
-                builder = builder.with_block(&block);
+            let snapshot = match self.memory_subject_binding() {
+                Some((subject, filter)) => load_builtin_memory_snapshot(
+                    Some(subject),
+                    Some(filter),
+                    self.config.hermes_home.as_deref(),
+                ),
+                None => Err(BuiltinMemorySnapshotUnavailable::MissingSubjectBinding),
+            };
+            match snapshot {
+                Ok((memory_block, user_block)) => {
+                    if let Some(block) = memory_block {
+                        builder = builder.with_block(&block);
+                    }
+                    if let Some(block) = user_block {
+                        builder = builder.with_block(&block);
+                    }
+                }
+                Err(reason) => {
+                    tracing::debug!(
+                        ?reason,
+                        "skipping built-in memory snapshot without a safe authenticated subject binding"
+                    );
+                }
             }
         }
 
@@ -184,9 +200,10 @@ impl AgentLoop {
             builder = builder.with_memory_context(&mem_block);
         }
 
-        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names, hidden_skill_categories)
-        {
-            builder = builder.with_skills_prompt(&skills_prompt);
+        let injected_skills_block =
+            self.skills_system_prompt(&tool_names, hidden_skill_categories);
+        if let Some(skills_prompt) = &injected_skills_block {
+            builder = builder.with_skills_prompt(skills_prompt);
         }
 
         if let Some(context_prompt) = self.context_files_prompt() {
@@ -226,25 +243,31 @@ impl AgentLoop {
             builder = builder.with_block(hint);
         }
 
-        builder.build().to_string()
+        FreshSystemPrompt {
+            content: builder.build().to_string(),
+            injected_skills_block,
+        }
     }
 
-    /// Returns `(prompt, restored_from_storage)` — restored prompts skip fresh `build_system_prompt`.
+    /// Resolves the system prompt once. A restored prompt deliberately skips
+    /// fresh construction, including skill discovery, so its evidence cannot
+    /// claim a fresh injected-skills block.
     fn resolve_initial_system_prompt(
         &self,
         task_hint: &str,
         tool_schemas: &[ToolSchema],
-    ) -> (String, bool) {
-        if let Some(ref s) = self.config.stored_system_prompt {
+    ) -> ResolvedSystemPrompt {
+        if let Some(s) = &self.config.stored_system_prompt {
             let t = s.trim();
             if !t.is_empty() {
-                return (s.clone(), true);
+                return ResolvedSystemPrompt::stored(s.clone());
             }
         }
-        (
-            self.build_system_prompt(task_hint, tool_schemas, &self.config.model),
-            false,
-        )
+        ResolvedSystemPrompt::Fresh(self.build_system_prompt(
+            task_hint,
+            tool_schemas,
+            &self.config.model,
+        ))
     }
 
     /// Compress when total chars exceed 80% of the context budget (Python auto-compaction).
@@ -280,19 +303,21 @@ impl AgentLoop {
             return;
         }
 
-        let session = self
-            .config
-            .session_id
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or("session");
-        let topic = format!("runbooks/alpha/compaction/{}", session);
+        let Some((subject, filter)) = self.memory_subject_binding() else {
+            if matches!(mode, CompactionGovernanceMode::Enforce) {
+                self.emit_status(
+                    "lifecycle",
+                    "Compaction governance enforce-mode: subject-bound memory is unavailable.",
+                );
+            }
+            return;
+        };
+        let topic = "runbooks/alpha/compaction";
         let pressure_before = ((before_chars as f64 / max_context_chars as f64) * 100.0).round();
         let pressure_after = ((after_chars as f64 / max_context_chars as f64) * 100.0).round();
         let content = format!(
-            "compaction_event mode={} session={} before_chars={} after_chars={} max_chars={} pressure_before_pct={} pressure_after_pct={}",
+            "compaction_event mode={} before_chars={} after_chars={} max_chars={} pressure_before_pct={} pressure_after_pct={}",
             mode.as_str(),
-            session,
             before_chars,
             after_chars,
             max_context_chars,
@@ -300,7 +325,14 @@ impl AgentLoop {
             pressure_after
         );
 
-        match write_contextlattice_checkpoint(&topic, CONTEXTLATTICE_COMPACTION_FILE, &content) {
+        match write_contextlattice_checkpoint(
+            subject,
+            filter,
+            self.config.hermes_home.as_deref(),
+            topic,
+            CONTEXTLATTICE_COMPACTION_FILE,
+            &content,
+        ) {
             Ok(()) => {
                 self.emit_status(
                     "lifecycle",
@@ -363,9 +395,7 @@ impl AgentLoop {
         if self.config.quiet_mode {
             return;
         }
-        if let Some(cb) = self.callbacks.status_callback.as_ref() {
-            cb(event_type, message);
-        }
+        self.callbacks.emit_status(event_type, message);
     }
 
     fn should_emit_context_pressure_warning(
@@ -481,6 +511,119 @@ impl AgentLoop {
         Some(body)
     }
 
+    fn llm_error_is_uncertain(error: &AgentError) -> bool {
+        fn is_definitive_http_rejection(message: &str) -> bool {
+            let lower = message.to_ascii_lowercase();
+            [400_u16, 401, 403, 404, 413, 422, 429]
+                .iter()
+                .any(|status| {
+                    [
+                        format!("api error {status}"),
+                        format!("http {status}"),
+                        format!("status {status}"),
+                        format!("status={status}"),
+                    ]
+                    .iter()
+                    .any(|marker| lower.contains(marker))
+                })
+        }
+
+        match error {
+            AgentError::LlmApi(message) => !is_definitive_http_rejection(message),
+            AgentError::Timeout(_)
+            | AgentError::Interrupted { .. }
+            | AgentError::Io(_)
+            | AgentError::Gateway(_)
+            | AgentError::ToolExecution(_) => true,
+            AgentError::Config(_)
+            | AgentError::PolicyBlocked(_)
+            | AgentError::MaxTurnsExceeded
+            | AgentError::InvalidToolCall(_)
+            | AgentError::ContextTooLong
+            | AgentError::RateLimited { .. }
+            | AgentError::AuthFailed(_) => false,
+        }
+    }
+
+    async fn governed_chat_completion(
+        &self,
+        active_run: Option<&Arc<ActiveRun>>,
+        provider: &dyn LlmProvider,
+        provider_name: &str,
+        model_name: &str,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        max_tokens: Option<u32>,
+        temperature: Option<f64>,
+        extra_body: Option<&Value>,
+    ) -> Result<LlmResponse, AgentError> {
+        let attempt = match active_run {
+            Some(run) => Some(
+                run.begin_llm_attempt(
+                    provider_name,
+                    model_name,
+                    messages,
+                    tools,
+                    max_tokens,
+                    temperature,
+                    extra_body,
+                    false,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::Io(format!(
+                        "run-record evidence failure: LLM request append failed: {error}"
+                    ))
+                })?,
+            ),
+            None => None,
+        };
+        let result = provider
+            .chat_completion(
+                messages,
+                tools,
+                max_tokens,
+                temperature,
+                Some(model_name),
+                extra_body,
+            )
+            .await;
+        if let Some(attempt) = attempt {
+            let run = active_run.expect("active run exists with attempt");
+            match &result {
+                Ok(response) => run
+                    .record_llm_result(attempt, response)
+                    .await
+                    .map_err(|record_error| {
+                        AgentError::Io(format!(
+                            "run-record evidence failure: LLM outcome append failed: {record_error}"
+                        ))
+                    })?,
+                Err(error) if Self::llm_error_is_uncertain(error) => {
+                    run.record_llm_uncertain(attempt, &error.to_string())
+                        .await
+                        .map_err(|record_error| {
+                            AgentError::Io(format!(
+                                "run-record evidence failure: uncertain LLM outcome append failed: {record_error}"
+                            ))
+                        })?;
+                    return Err(AgentError::Io(format!(
+                        "run-record evidence failure: non-resumable LLM outcome unknown: {error}"
+                    )));
+                }
+                Err(error) => run
+                    .record_llm_error(attempt, &error.to_string())
+                    .await
+                    .map_err(|record_error| {
+                        AgentError::Io(format!(
+                            "run-record evidence failure: LLM outcome append failed: {record_error}"
+                        ))
+                    })?,
+            }
+        }
+        result
+    }
+
     // -- Retry-aware LLM call ---------------------------------------------
 
     fn call_llm_with_retry<'a>(
@@ -489,6 +632,7 @@ impl AgentLoop {
         tool_schemas: &'a [ToolSchema],
         route: Option<&'a TurnRuntimeRoute>,
         max_tokens_override: Option<u32>,
+        active_run: Option<&'a Arc<ActiveRun>>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>>
@@ -496,7 +640,13 @@ impl AgentLoop {
                 + 'a,
         >,
     > {
-        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, route, max_tokens_override))
+        Box::pin(self.call_llm_with_retry_inner(
+            ctx,
+            tool_schemas,
+            route,
+            max_tokens_override,
+            active_run,
+        ))
     }
 
     async fn call_llm_with_retry_inner(
@@ -505,6 +655,7 @@ impl AgentLoop {
         tool_schemas: &[ToolSchema],
         route: Option<&TurnRuntimeRoute>,
         max_tokens_override: Option<u32>,
+        active_run: Option<&Arc<ActiveRun>>,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
         let model = route
             .map(|r| r.model.as_str())
@@ -560,16 +711,18 @@ impl AgentLoop {
                 );
                 match routed_provider {
                     Ok(provider) => {
-                        provider
-                            .chat_completion(
-                                &api_messages,
-                                tool_schemas,
-                                effective_max_tokens,
-                                self.config.temperature,
-                                Some(&wire_model_name),
-                                extra_body_for_call.as_ref(),
-                            )
-                            .await
+                        self.governed_chat_completion(
+                            active_run,
+                            provider.as_ref(),
+                            runtime_provider_name,
+                            &wire_model_name,
+                            &api_messages,
+                            tool_schemas,
+                            effective_max_tokens,
+                            self.config.temperature,
+                            extra_body_for_call.as_ref(),
+                        )
+                        .await
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -577,20 +730,24 @@ impl AgentLoop {
                             rt.routing_reason,
                             e
                         );
+                        let (fallback_provider_name, fallback_model_name) =
+                            self.extract_provider_and_model(self.config.model.as_str());
                         let fallback_wire_model_name = Self::runtime_wire_model_for_provider(
-                            active_provider.as_str(),
-                            &effective_model_name,
+                            fallback_provider_name.as_str(),
+                            fallback_model_name,
                         );
-                        self.llm_provider
-                            .chat_completion(
-                                &api_messages,
-                                tool_schemas,
-                                effective_max_tokens,
-                                self.config.temperature,
-                                Some(&fallback_wire_model_name),
-                                default_extra_body.as_ref(),
-                            )
-                            .await
+                        self.governed_chat_completion(
+                            active_run,
+                            self.llm_provider.as_ref(),
+                            fallback_provider_name.as_str(),
+                            &fallback_wire_model_name,
+                            &api_messages,
+                            tool_schemas,
+                            effective_max_tokens,
+                            self.config.temperature,
+                            default_extra_body.as_ref(),
+                        )
+                        .await
                     }
                 }
             } else {
@@ -598,16 +755,18 @@ impl AgentLoop {
                     active_provider.as_str(),
                     &effective_model_name,
                 );
-                self.llm_provider
-                    .chat_completion(
-                        &api_messages,
-                        tool_schemas,
-                        effective_max_tokens,
-                        self.config.temperature,
-                        Some(&wire_model_name),
-                        default_extra_body.as_ref(),
-                    )
-                    .await
+                self.governed_chat_completion(
+                    active_run,
+                    self.llm_provider.as_ref(),
+                    active_provider.as_str(),
+                    &wire_model_name,
+                    &api_messages,
+                    tool_schemas,
+                    effective_max_tokens,
+                    self.config.temperature,
+                    default_extra_body.as_ref(),
+                )
+                .await
             };
 
             match result {
@@ -673,16 +832,20 @@ impl AgentLoop {
                                                 pool,
                                             ) {
                                                 Ok(provider) => {
-                                                    provider
-                                                        .chat_completion(
-                                                            &api_messages,
-                                                            tool_schemas,
-                                                            effective_max_tokens,
-                                                            self.config.temperature,
-                                                            Some(&fallback_model_name),
-                                                            extra_body_for_call.as_ref(),
-                                                        )
-                                                        .await
+                                                    self.governed_chat_completion(
+                                                        active_run,
+                                                        provider.as_ref(),
+                                                        rt.provider
+                                                            .as_deref()
+                                                            .unwrap_or(provider_name.as_str()),
+                                                        &fallback_model_name,
+                                                        &api_messages,
+                                                        tool_schemas,
+                                                        effective_max_tokens,
+                                                        self.config.temperature,
+                                                        extra_body_for_call.as_ref(),
+                                                    )
+                                                    .await
                                                 }
                                                 Err(build_err) => Err(build_err),
                                             }
@@ -697,16 +860,18 @@ impl AgentLoop {
                                                 self.primary_credential_pool.as_ref(),
                                             ) {
                                                 Ok(provider) => {
-                                                    provider
-                                                        .chat_completion(
-                                                            &api_messages,
-                                                            tool_schemas,
-                                                            effective_max_tokens,
-                                                            self.config.temperature,
-                                                            Some(&fallback_model_name),
-                                                            default_extra_body.as_ref(),
-                                                        )
-                                                        .await
+                                                    self.governed_chat_completion(
+                                                        active_run,
+                                                        provider.as_ref(),
+                                                        provider_name.as_str(),
+                                                        &fallback_model_name,
+                                                        &api_messages,
+                                                        tool_schemas,
+                                                        effective_max_tokens,
+                                                        self.config.temperature,
+                                                        default_extra_body.as_ref(),
+                                                    )
+                                                    .await
                                                 }
                                                 Err(build_err) => Err(build_err),
                                             }
@@ -756,16 +921,18 @@ impl AgentLoop {
                                         pool,
                                     ) {
                                         Ok(provider) => {
-                                            provider
-                                                .chat_completion(
-                                                    &api_messages,
-                                                    &[],
-                                                    effective_max_tokens,
-                                                    self.config.temperature,
-                                                    Some(&wire_model_name),
-                                                    extra_body_for_call.as_ref(),
-                                                )
-                                                .await
+                                            self.governed_chat_completion(
+                                                active_run,
+                                                provider.as_ref(),
+                                                runtime_provider_name,
+                                                &wire_model_name,
+                                                &api_messages,
+                                                &[],
+                                                effective_max_tokens,
+                                                self.config.temperature,
+                                                extra_body_for_call.as_ref(),
+                                            )
+                                            .await
                                         }
                                         Err(_) => {
                                             let (fallback_provider_name, fallback_model_name) = self
@@ -777,16 +944,18 @@ impl AgentLoop {
                                                     fallback_provider_name.as_str(),
                                                     fallback_model_name,
                                                 );
-                                            self.llm_provider
-                                                .chat_completion(
-                                                    &api_messages,
-                                                    &[],
-                                                    effective_max_tokens,
-                                                    self.config.temperature,
-                                                    Some(&fallback_wire_model_name),
-                                                    default_extra_body.as_ref(),
-                                                )
-                                                .await
+                                            self.governed_chat_completion(
+                                                active_run,
+                                                self.llm_provider.as_ref(),
+                                                fallback_provider_name.as_str(),
+                                                &fallback_wire_model_name,
+                                                &api_messages,
+                                                &[],
+                                                effective_max_tokens,
+                                                self.config.temperature,
+                                                default_extra_body.as_ref(),
+                                            )
+                                            .await
                                         }
                                     }
                                 } else {
@@ -794,16 +963,18 @@ impl AgentLoop {
                                         provider_name.as_str(),
                                         model_name,
                                     );
-                                    self.llm_provider
-                                        .chat_completion(
-                                            &api_messages,
-                                            &[],
-                                            effective_max_tokens,
-                                            self.config.temperature,
-                                            Some(&wire_model_name),
-                                            default_extra_body.as_ref(),
-                                        )
-                                        .await
+                                    self.governed_chat_completion(
+                                        active_run,
+                                        self.llm_provider.as_ref(),
+                                        provider_name.as_str(),
+                                        &wire_model_name,
+                                        &api_messages,
+                                        &[],
+                                        effective_max_tokens,
+                                        self.config.temperature,
+                                        default_extra_body.as_ref(),
+                                    )
+                                    .await
                                 };
                                 match no_tools_result {
                                     Ok(resp) => {
@@ -878,13 +1049,15 @@ impl AgentLoop {
                                                 fallback_model_name,
                                             );
                                         let fallback_result = self
-                                            .llm_provider
-                                            .chat_completion(
+                                            .governed_chat_completion(
+                                                active_run,
+                                                self.llm_provider.as_ref(),
+                                                fallback_provider_name.as_str(),
+                                                &fallback_wire_model_name,
                                                 &api_messages,
                                                 tool_schemas,
                                                 effective_max_tokens,
                                                 self.config.temperature,
-                                                Some(&fallback_wire_model_name),
                                                 default_extra_body.as_ref(),
                                             )
                                             .await;
@@ -967,6 +1140,152 @@ impl AgentLoop {
         }
     }
 
+    async fn begin_governed_stream_attempt(
+        &self,
+        active_run: Option<&Arc<ActiveRun>>,
+        provider_name: &str,
+        model_name: &str,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        max_tokens: Option<u32>,
+        extra_body: Option<&Value>,
+    ) -> Result<Option<LlmAttempt>, AgentError> {
+        match active_run {
+            Some(run) => run
+                .begin_llm_attempt(
+                    provider_name,
+                    model_name,
+                    messages,
+                    tools,
+                    max_tokens,
+                    self.config.temperature,
+                    extra_body,
+                    true,
+                )
+                .await
+                .map(Some)
+                .map_err(|error| {
+                    AgentError::Io(format!(
+                        "run-record evidence failure: LLM stream request append failed: {error}"
+                    ))
+                }),
+            None => Ok(None),
+        }
+    }
+
+    async fn record_governed_stream_result(
+        active_run: Option<&Arc<ActiveRun>>,
+        attempt: Option<LlmAttempt>,
+        response: &LlmResponse,
+        stream_digest: &str,
+        chunk_count: u64,
+        interrupted: bool,
+    ) -> Result<(), AgentError> {
+        let Some(attempt) = attempt else {
+            return Ok(());
+        };
+        active_run
+            .expect("active run exists with stream attempt")
+            .record_llm_stream_result(
+                attempt,
+                response,
+                stream_digest,
+                chunk_count,
+                interrupted,
+            )
+            .await
+            .map_err(|error| {
+                AgentError::Io(format!(
+                    "run-record evidence failure: LLM stream outcome append failed: {error}"
+                ))
+            })
+    }
+
+    async fn record_governed_stream_error(
+        active_run: Option<&Arc<ActiveRun>>,
+        attempt: Option<LlmAttempt>,
+        error: &str,
+        stream_digest: &str,
+        chunk_count: u64,
+    ) -> Result<(), AgentError> {
+        let Some(attempt) = attempt else {
+            return Ok(());
+        };
+        active_run
+            .expect("active run exists with stream attempt")
+            .record_llm_stream_error(attempt, error, stream_digest, chunk_count)
+            .await
+            .map_err(|record_error| {
+                AgentError::Io(format!(
+                    "run-record evidence failure: LLM stream error append failed: {record_error}"
+                ))
+            })
+    }
+
+    async fn record_governed_stream_uncertain(
+        active_run: Option<&Arc<ActiveRun>>,
+        attempt: Option<LlmAttempt>,
+        error: &str,
+        stream_digest: &str,
+        chunk_count: u64,
+    ) -> Result<(), AgentError> {
+        let Some(attempt) = attempt else {
+            return Ok(());
+        };
+        active_run
+            .expect("active run exists with stream attempt")
+            .record_llm_stream_uncertain(attempt, error, stream_digest, chunk_count)
+            .await
+            .map_err(|record_error| {
+                AgentError::Io(format!(
+                    "run-record evidence failure: uncertain LLM stream outcome append failed: {record_error}"
+                ))
+            })
+    }
+
+    async fn record_governed_stream_interruption(
+        active_run: Option<&Arc<ActiveRun>>,
+        attempt: Option<LlmAttempt>,
+        interruption: &AgentError,
+        stream_digest: &str,
+        chunk_count: u64,
+    ) -> Result<(), AgentError> {
+        let error = interruption.to_string();
+        if chunk_count == 0 {
+            Self::record_governed_stream_error(
+                active_run,
+                attempt,
+                &error,
+                stream_digest,
+                chunk_count,
+            )
+            .await
+        } else {
+            Self::record_governed_stream_uncertain(
+                active_run,
+                attempt,
+                &error,
+                stream_digest,
+                chunk_count,
+            )
+            .await
+        }
+    }
+
+    fn update_stream_digest(
+        digest: &mut Sha256,
+        chunk: &StreamChunk,
+    ) -> Result<(), AgentError> {
+        let bytes = serde_json_canonicalizer::to_vec(chunk).map_err(|error| {
+            AgentError::Io(format!(
+                "run-record evidence failure: stream chunk canonicalization failed: {error}"
+            ))
+        })?;
+        digest.update((bytes.len() as u64).to_be_bytes());
+        digest.update(bytes);
+        Ok(())
+    }
+
     /// Collect one streaming completion into [`LlmResponse`] (first attempt in `run_stream` D-step).
     async fn collect_stream_llm_response(
         &self,
@@ -975,6 +1294,7 @@ impl AgentLoop {
         route: Option<&TurnRuntimeRoute>,
         active_model: &str,
         max_tokens_override: Option<u32>,
+        active_run: Option<&Arc<ActiveRun>>,
         on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
@@ -988,9 +1308,10 @@ impl AgentLoop {
             .unwrap_or(self.config.stream_read_max_retries.min(10));
 
         'stream_attempt: for stream_attempt in 0..=max_stream_retries {
-            let mut stream = if let Some(rt) = route {
+            let (mut stream, evidence_attempt, response_model) = if let Some(rt) = route {
                 let (provider_name, model_name) = self.extract_provider_and_model(active_model);
-                let runtime_provider_name = rt.provider.as_deref().unwrap_or(provider_name.as_str());
+                let runtime_provider_name =
+                    rt.provider.as_deref().unwrap_or(provider_name.as_str());
                 let wire_model_name =
                     Self::runtime_wire_model_for_provider(runtime_provider_name, model_name);
                 let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
@@ -1005,19 +1326,33 @@ impl AgentLoop {
                     Some(mode),
                     pool,
                 ) {
-                    Ok(provider) => provider.chat_completion_stream(
-                        &api_messages,
-                        tool_schemas,
-                        effective_max_tokens,
-                        self.config.temperature,
-                        Some(&wire_model_name),
-                        extra_body_for_call.as_ref(),
-                    ),
-                    Err(e) => {
+                    Ok(provider) => {
+                        let attempt = self
+                            .begin_governed_stream_attempt(
+                                active_run,
+                                runtime_provider_name,
+                                &wire_model_name,
+                                &api_messages,
+                                tool_schemas,
+                                effective_max_tokens,
+                                extra_body_for_call.as_ref(),
+                            )
+                            .await?;
+                        let stream = provider.chat_completion_stream(
+                            &api_messages,
+                            tool_schemas,
+                            effective_max_tokens,
+                            self.config.temperature,
+                            Some(&wire_model_name),
+                            extra_body_for_call.as_ref(),
+                        );
+                        (stream, attempt, wire_model_name)
+                    }
+                    Err(error) => {
                         tracing::warn!(
                             "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
                             rt.routing_reason,
-                            e
+                            error
                         );
                         let (fallback_provider_name, fallback_model_name) =
                             self.extract_provider_and_model(self.config.model.as_str());
@@ -1025,14 +1360,26 @@ impl AgentLoop {
                             fallback_provider_name.as_str(),
                             fallback_model_name,
                         );
-                        self.llm_provider.chat_completion_stream(
+                        let attempt = self
+                            .begin_governed_stream_attempt(
+                                active_run,
+                                fallback_provider_name.as_str(),
+                                &fallback_wire_model_name,
+                                &api_messages,
+                                tool_schemas,
+                                effective_max_tokens,
+                                default_extra_body.as_ref(),
+                            )
+                            .await?;
+                        let stream = self.llm_provider.chat_completion_stream(
                             &api_messages,
                             tool_schemas,
                             effective_max_tokens,
                             self.config.temperature,
                             Some(&fallback_wire_model_name),
                             default_extra_body.as_ref(),
-                        )
+                        );
+                        (stream, attempt, fallback_wire_model_name)
                     }
                 }
             } else {
@@ -1040,14 +1387,26 @@ impl AgentLoop {
                     active_provider_name.as_str(),
                     active_model_name,
                 );
-                self.llm_provider.chat_completion_stream(
+                let attempt = self
+                    .begin_governed_stream_attempt(
+                        active_run,
+                        active_provider_name.as_str(),
+                        &wire_model_name,
+                        &api_messages,
+                        tool_schemas,
+                        effective_max_tokens,
+                        default_extra_body.as_ref(),
+                    )
+                    .await?;
+                let stream = self.llm_provider.chat_completion_stream(
                     &api_messages,
                     tool_schemas,
                     effective_max_tokens,
                     self.config.temperature,
                     Some(&wire_model_name),
                     default_extra_body.as_ref(),
-                )
+                );
+                (stream, attempt, wire_model_name)
             };
 
             let mut content = String::new();
@@ -1057,80 +1416,105 @@ impl AgentLoop {
             let mut finish_reason: Option<String> = None;
             let mut deltas_were_sent = false;
             let mut stream_scrubber = StreamingContextScrubber::new();
+            let mut raw_stream_digest = Sha256::new();
+            let mut raw_chunk_count = 0_u64;
+            let mut saw_protocol_terminal = false;
+            let mut tool_call_delta_was_emitted = false;
 
-            while let Some(chunk_result) = stream.next().await {
-                if self.interrupt.take_interrupt_graceful().is_some() {
-                    let message = Self::assemble_stream_assistant_message(
-                        &content,
-                        &reasoning_content,
-                        &tool_calls,
-                    );
-                    return Ok(StreamCollectOutcome::Interrupted(LlmResponse {
-                        message,
-                        usage: last_usage.clone(),
-                        model: active_model.to_string(),
-                        finish_reason: Some("interrupted".to_string()),
-                    }));
+            loop {
+                let next = stream.next().await;
+                if let Some(interrupt_error) = self.interrupt.take_fatal_error() {
+                    let digest = hex::encode(raw_stream_digest.clone().finalize());
+                    Self::record_governed_stream_interruption(
+                        active_run,
+                        evidence_attempt,
+                        &interrupt_error,
+                        &digest,
+                        raw_chunk_count,
+                    )
+                    .await?;
+                    return Err(interrupt_error);
                 }
+
+                let chunk_result = match next {
+                    Some(chunk_result) => chunk_result,
+                    None if saw_protocol_terminal => break,
+                    None => Err(AgentError::Io(format!(
+                        "provider stream connection closed before terminal finish reason (received {raw_chunk_count} chunks)"
+                    ))),
+                };
 
                 let chunk = match chunk_result {
                     Ok(chunk) => chunk,
                     Err(err) => {
-                        let partial_tool_in_flight = tool_calls.iter().any(|tc| {
-                            !tc.id.is_empty()
-                                || !tc.function.name.is_empty()
-                                || !tc.function.arguments.trim().is_empty()
-                        });
-                        let should_retry_for_partial_tool = deltas_were_sent
-                            && partial_tool_in_flight
-                            && is_transient_stream_error(&err)
-                            && stream_attempt < max_stream_retries;
-                        let should_retry_before_deltas = !deltas_were_sent
+                        let error_text = err.to_string();
+                        let digest = hex::encode(raw_stream_digest.clone().finalize());
+                        if active_run.is_some()
+                            && (raw_chunk_count > 0 || Self::llm_error_is_uncertain(&err))
+                        {
+                            Self::record_governed_stream_uncertain(
+                                active_run,
+                                evidence_attempt,
+                                &error_text,
+                                &digest,
+                                raw_chunk_count,
+                            )
+                            .await?;
+                            return Err(AgentError::Io(format!(
+                                "run-record evidence failure: non-resumable LLM stream outcome unknown: {err}"
+                            )));
+                        }
+                        Self::record_governed_stream_error(
+                            active_run,
+                            evidence_attempt,
+                            &error_text,
+                            &digest,
+                            raw_chunk_count,
+                        )
+                        .await?;
+                        let should_retry_before_visible_output = !deltas_were_sent
+                            && !tool_call_delta_was_emitted
                             && is_transient_stream_error(&err)
                             && stream_attempt < max_stream_retries;
 
-                        if should_retry_for_partial_tool || should_retry_before_deltas {
-                            let next_attempt = stream_attempt + 2;
+                        if should_retry_before_visible_output {
                             let total_attempts = max_stream_retries + 1;
-                            if should_retry_for_partial_tool {
-                                on_chunk(StreamChunk {
-                                    delta: Some(hermes_core::StreamDelta {
-                                        content: Some(
-                                            "\n\n[connection dropped mid tool-call; reconnecting...]\n\n"
-                                                .to_string(),
-                                        ),
-                                        tool_calls: None,
-                                        extra: None,
-                                    }),
-                                    finish_reason: None,
-                                    usage: None,
-                                });
-                                self.emit_status(
-                                    "lifecycle",
-                                    &format!(
-                                        "Connection dropped mid tool-call; reconnecting (attempt {}/{})",
-                                        next_attempt, total_attempts
-                                    ),
-                                );
-                                tracing::warn!(
-                                    "Streaming attempt {}/{} failed after partial tool-call data; retrying: {}",
-                                    stream_attempt + 1,
-                                    total_attempts,
-                                    err
-                                );
-                            } else {
-                                tracing::warn!(
-                                    "Streaming attempt {}/{} failed before deltas; retrying: {}",
-                                    stream_attempt + 1,
-                                    total_attempts,
-                                    err
-                                );
-                            }
+                            tracing::warn!(
+                                "Streaming attempt {}/{} failed before externally visible stream output; retrying: {}",
+                                stream_attempt + 1,
+                                total_attempts,
+                                err
+                            );
                             continue 'stream_attempt;
                         }
                         return Err(err);
                     }
                 };
+                if let Err(error) = Self::update_stream_digest(&mut raw_stream_digest, &chunk) {
+                    let digest = hex::encode(raw_stream_digest.clone().finalize());
+                    Self::record_governed_stream_uncertain(
+                        active_run,
+                        evidence_attempt,
+                        &error.to_string(),
+                        &digest,
+                        raw_chunk_count,
+                    )
+                    .await?;
+                    return Err(error);
+                }
+                raw_chunk_count = raw_chunk_count.saturating_add(1);
+                if let Some(interrupt_error) = self.interrupt.take_fatal_error() {
+                    let digest = hex::encode(raw_stream_digest.clone().finalize());
+                    Self::record_governed_stream_interruption(
+                        active_run,
+                        evidence_attempt,
+                        &interrupt_error,
+                        &digest,
+                        raw_chunk_count,
+                    )
+                    .await?;
+                    return Err(interrupt_error);
+                }
 
                 let mut emit_chunk = chunk.clone();
                 if let Some(ref delta) = chunk.delta {
@@ -1146,17 +1530,13 @@ impl AgentLoop {
                         if !scrubbed.is_empty() {
                             deltas_were_sent = true;
                             content.push_str(&scrubbed);
-                            if let Some(ref cb) = self.callbacks.on_stream_delta {
-                                cb(&scrubbed);
-                            }
+                            self.callbacks.emit_stream_delta(&scrubbed);
                         }
                     }
                     if let Some(ref extra) = delta.extra {
                         if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
                             reasoning_content.push_str(thinking);
-                            if let Some(ref cb) = self.callbacks.on_thinking {
-                                cb(thinking);
-                            }
+                            self.callbacks.emit_thinking(thinking);
                         }
                     }
                     if let Some(ref tc_deltas) = delta.tool_calls {
@@ -1190,17 +1570,16 @@ impl AgentLoop {
                 if let Some(ref usage) = chunk.usage {
                     last_usage = Some(usage.clone());
                 }
-                if let Some(ref fr) = chunk.finish_reason {
+                if let Some(fr) = &chunk.finish_reason {
                     finish_reason = Some(fr.clone());
+                    saw_protocol_terminal = true;
                 }
 
                 if chunk.finish_reason.is_some() {
                     let scrubbed_tail = stream_scrubber.flush();
                     if !scrubbed_tail.is_empty() {
                         content.push_str(&scrubbed_tail);
-                        if let Some(ref cb) = self.callbacks.on_stream_delta {
-                            cb(&scrubbed_tail);
-                        }
+                        self.callbacks.emit_stream_delta(&scrubbed_tail);
                         on_chunk(StreamChunk {
                             delta: Some(hermes_core::StreamDelta {
                                 content: Some(scrubbed_tail),
@@ -1218,6 +1597,12 @@ impl AgentLoop {
                 });
                 if !empty_delta || emit_chunk.finish_reason.is_some() || emit_chunk.usage.is_some()
                 {
+                    let emits_tool_call = emit_chunk
+                        .delta
+                        .as_ref()
+                        .and_then(|delta| delta.tool_calls.as_ref())
+                        .is_some_and(|tool_calls| !tool_calls.is_empty());
+                    tool_call_delta_was_emitted |= emits_tool_call;
                     on_chunk(emit_chunk);
                 }
             }
@@ -1225,9 +1610,7 @@ impl AgentLoop {
             let scrubbed_tail = stream_scrubber.flush();
             if !scrubbed_tail.is_empty() {
                 content.push_str(&scrubbed_tail);
-                if let Some(ref cb) = self.callbacks.on_stream_delta {
-                    cb(&scrubbed_tail);
-                }
+                self.callbacks.emit_stream_delta(&scrubbed_tail);
                 on_chunk(StreamChunk {
                     delta: Some(hermes_core::StreamDelta {
                         content: Some(scrubbed_tail),
@@ -1254,13 +1637,23 @@ impl AgentLoop {
 
             let message =
                 Self::assemble_stream_assistant_message(&content, &reasoning_content, &tool_calls);
-
-            return Ok(StreamCollectOutcome::Complete(LlmResponse {
+            let response = LlmResponse {
                 message,
                 usage: last_usage,
-                model: active_model.to_string(),
+                model: response_model,
                 finish_reason,
-            }));
+            };
+            let digest = hex::encode(raw_stream_digest.finalize());
+            Self::record_governed_stream_result(
+                active_run,
+                evidence_attempt,
+                &response,
+                &digest,
+                raw_chunk_count,
+                false,
+            )
+            .await?;
+            return Ok(StreamCollectOutcome::Complete(response));
         }
 
         Err(AgentError::LlmApi(

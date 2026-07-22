@@ -4,13 +4,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
-use hermes_config::{load_config, GatewayConfig, PlatformConfig};
+use uuid::Uuid;
+use hermes_config::{load_config, GatewayConfig};
 use hermes_core::AgentError;
 use hermes_tools::{
     default_change_type_for_resource, maintain_graph_subscriptions,
     resolve_teams_pipeline_store_path, sync_graph_subscription_record, MicrosoftGraphClient,
     MicrosoftGraphTeamsBackend, MicrosoftGraphTokenProvider, TeamsGraphBackend,
-    TeamsMeetingPipeline, TeamsPipelineConfig, TeamsPipelineError, TeamsPipelineStore,
+    TeamsMeetingPipeline, TeamsMeetingPipelineJob, TeamsPipelineConfig, TeamsPipelineError,
+    TeamsPipelineStore,
 };
 use serde_json::{json, Map, Value};
 
@@ -23,6 +25,8 @@ pub struct TeamsPipelineCliOptions {
     pub status: Option<String>,
     pub store_path: Option<String>,
     pub meeting_id: Option<String>,
+    /// Microsoft Entra object ID for the meeting organizer; required for Graph artifact access.
+    pub organizer_user_id: Option<String>,
     pub join_web_url: Option<String>,
     pub tenant_id: Option<String>,
     pub call_record_id: Option<String>,
@@ -117,8 +121,19 @@ fn cmd_show(options: &TeamsPipelineCliOptions) -> Result<(), AgentError> {
 
 async fn cmd_run(options: &TeamsPipelineCliOptions) -> Result<(), AgentError> {
     let id = required_id(options, "teams-pipeline run <job-id>")?;
+    let organizer_user_id = required_organizer_user_id(options, "teams-pipeline run")?;
     let pipeline = build_pipeline(options)?;
-    let job = pipeline.run_job(&id).await.map_err(agent_error)?;
+    let payload = pipeline
+        .store()
+        .get_job(&id)
+        .map_err(agent_error)?
+        .ok_or_else(|| AgentError::Config(format!("Unknown Teams pipeline job: {id}")))?;
+    let mut job = TeamsMeetingPipelineJob::from_value(payload).map_err(agent_error)?;
+    let meeting_ref = job.meeting_ref.as_mut().ok_or_else(|| {
+        AgentError::Config(format!("Teams pipeline job {id} has no meeting reference."))
+    })?;
+    meeting_ref.organizer_user_id = Some(organizer_user_id);
+    let job = pipeline.run_job_record(job).await.map_err(agent_error)?;
     print_json(compact_job(
         serde_json::to_value(job).map_err(json_agent_error)?,
     ))
@@ -138,9 +153,15 @@ async fn cmd_fetch(options: &TeamsPipelineCliOptions) -> Result<(), AgentError> 
             "teams-pipeline fetch: meeting_id or join_web_url is required".into(),
         ));
     }
+    let organizer_user_id = required_organizer_user_id(options, "teams-pipeline fetch")?;
     let backend = MicrosoftGraphTeamsBackend::from_env().map_err(agent_error)?;
     let meeting = backend
-        .resolve_meeting_reference(meeting_id, join_web_url, options.tenant_id.as_deref())
+        .resolve_meeting_reference(
+            meeting_id,
+            Some(&organizer_user_id),
+            join_web_url,
+            options.tenant_id.as_deref(),
+        )
         .await
         .map_err(agent_error)?;
     let transcript = backend
@@ -365,46 +386,16 @@ fn cmd_validate(options: &TeamsPipelineCliOptions) -> Result<(), AgentError> {
     print_json(snapshot)
 }
 
+/// Rust CLI only supports manual local transcript/summary output. External
+/// Teams delivery is unsupported in this Rust release; the optional source
+/// plugin is not packaged or verified.
 pub fn build_pipeline_runtime_config(config: &GatewayConfig) -> Value {
-    let Some(teams_config) = config.platforms.get("teams") else {
-        return json!({});
-    };
-    let teams_extra = &teams_config.extra;
-    let mut pipeline = teams_extra
-        .get("meeting_pipeline")
-        .and_then(Value::as_object)
+    config
+        .platforms
+        .get("teams")
+        .and_then(|teams| teams.extra.get("meeting_pipeline"))
         .cloned()
-        .unwrap_or_default();
-
-    if teams_config.enabled {
-        let mut delivery = pipeline
-            .get("teams_delivery")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        if let Some(mode) = extra_string(teams_config, "delivery_mode") {
-            delivery.insert("mode".into(), Value::String(mode));
-        }
-        for key in [
-            "incoming_webhook_url",
-            "access_token",
-            "team_id",
-            "channel_id",
-            "chat_id",
-        ] {
-            if let Some(value) = extra_string(teams_config, key) {
-                delivery.insert(key.into(), Value::String(value));
-            }
-        }
-        if !delivery.is_empty() {
-            delivery.insert(
-                "enabled".into(),
-                Value::Bool(teams_delivery_is_configured(teams_extra, &delivery)),
-            );
-            pipeline.insert("teams_delivery".into(), Value::Object(delivery));
-        }
-    }
-    Value::Object(pipeline)
+        .unwrap_or_else(|| json!({}))
 }
 
 fn validate_configuration_snapshot(
@@ -412,7 +403,6 @@ fn validate_configuration_snapshot(
     store: &TeamsPipelineStore,
 ) -> Result<Value, AgentError> {
     let mut issues = Vec::new();
-    let mut warnings = Vec::new();
     let graph = json!({
         "tenant_id": std::env::var("MSGRAPH_TENANT_ID").ok().map(|s| !s.trim().is_empty()).unwrap_or(false),
         "client_id": std::env::var("MSGRAPH_CLIENT_ID").ok().map(|s| !s.trim().is_empty()).unwrap_or(false),
@@ -422,139 +412,33 @@ fn validate_configuration_snapshot(
         || !graph["client_id"].as_bool().unwrap_or(false)
         || !graph["client_secret"].as_bool().unwrap_or(false)
     {
-        issues.push("Microsoft Graph app-only credentials are incomplete.");
+        issues.push("Microsoft Graph app-only credentials are incomplete.".to_owned());
     }
-
-    let webhook_enabled = config
-        .platforms
-        .get("msgraph_webhook")
-        .map(|platform| platform.enabled)
-        .unwrap_or(false);
-    if !webhook_enabled {
-        issues.push("MSGRAPH_WEBHOOK_ENABLED is not enabled.");
+    if let Err(error) =
+        TeamsPipelineConfig::from_value(Some(build_pipeline_runtime_config(config)))
+    {
+        issues.push(error.to_string());
     }
-
-    let teams_config = config.platforms.get("teams");
-    let teams_enabled = teams_config
-        .map(|platform| platform.enabled)
-        .unwrap_or(false);
-    let teams_mode = teams_config.and_then(|platform| extra_string(platform, "delivery_mode"));
-    if !teams_enabled {
-        warnings.push("Teams outbound delivery is disabled.");
-    } else if teams_mode.as_deref() == Some("incoming_webhook") {
-        if teams_config
-            .and_then(|platform| extra_string(platform, "incoming_webhook_url"))
-            .is_none()
-        {
-            issues.push("TEAMS_INCOMING_WEBHOOK_URL is required for incoming_webhook mode.");
-        }
-    } else if teams_mode.as_deref() == Some("graph") {
-        let Some(platform) = teams_config else {
-            unreachable!();
-        };
-        let has_token = platform
-            .token
-            .as_ref()
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false)
-            || extra_string(platform, "access_token").is_some()
-            || std::env::var("TEAMS_GRAPH_ACCESS_TOKEN")
-                .ok()
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-        let has_graph_creds = graph["tenant_id"].as_bool().unwrap_or(false)
-            && graph["client_id"].as_bool().unwrap_or(false)
-            && graph["client_secret"].as_bool().unwrap_or(false);
-        if !has_token && !has_graph_creds {
-            issues.push("TEAMS_GRAPH_ACCESS_TOKEN or complete MSGRAPH_* app credentials is required for graph delivery mode.");
-        }
-        if extra_string(platform, "team_id").is_none() {
-            issues.push("TEAMS_TEAM_ID is required for graph delivery mode.");
-        }
-        if extra_string(platform, "channel_id")
-            .or_else(|| extra_string(platform, "chat_id"))
-            .or_else(|| platform.home_channel.clone())
-            .is_none()
-        {
-            issues.push("TEAMS_CHANNEL_ID is required for graph delivery mode.");
-        }
-    } else {
-        warnings.push("TEAMS_DELIVERY_MODE is not set.");
-    }
-
     Ok(json!({
         "ok": issues.is_empty(),
         "issues": issues,
-        "warnings": warnings,
         "graph_config": graph,
-        "webhook_enabled": webhook_enabled,
-        "teams_enabled": teams_enabled,
-        "teams_delivery_mode": teams_mode,
+        "runtime": "manual_local_only",
+        "external_sinks": "unsupported in this Rust release; optional source plugin is not packaged or verified",
         "store_path": store.path(),
         "store_stats": store.stats().map_err(agent_error)?,
     }))
 }
 
-fn teams_delivery_is_configured(
-    teams_extra: &std::collections::HashMap<String, Value>,
-    teams_delivery: &Map<String, Value>,
-) -> bool {
-    let mode = teams_delivery
-        .get("mode")
-        .or_else(|| teams_delivery.get("delivery_mode"))
-        .or_else(|| teams_extra.get("delivery_mode"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    if mode == "incoming_webhook" {
-        return teams_delivery
-            .get("incoming_webhook_url")
-            .or_else(|| teams_extra.get("incoming_webhook_url"))
-            .and_then(Value::as_str)
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-    }
-    if mode == "graph" {
-        let chat_id = teams_delivery
-            .get("chat_id")
-            .or_else(|| teams_extra.get("chat_id"))
-            .and_then(Value::as_str)
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        let team_id = teams_delivery
-            .get("team_id")
-            .or_else(|| teams_extra.get("team_id"))
-            .and_then(Value::as_str)
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        let channel_id = teams_delivery
-            .get("channel_id")
-            .or_else(|| teams_extra.get("channel_id"))
-            .and_then(Value::as_str)
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        return chat_id || (team_id && channel_id);
-    }
-    false
-}
-
-fn extra_string(platform: &PlatformConfig, key: &str) -> Option<String> {
-    platform
-        .extra
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToOwned::to_owned)
-}
 
 fn build_pipeline(options: &TeamsPipelineCliOptions) -> Result<TeamsMeetingPipeline, AgentError> {
     let store = Arc::new(open_store(options)?);
     let backend = Arc::new(MicrosoftGraphTeamsBackend::from_env().map_err(agent_error)?);
-    let config = load_config(options.config_dir.as_deref())
-        .map(|config| TeamsPipelineConfig::from_value(Some(build_pipeline_runtime_config(&config))))
-        .unwrap_or_default();
+    let config = match load_config(options.config_dir.as_deref()) {
+        Ok(config) => TeamsPipelineConfig::from_value(Some(build_pipeline_runtime_config(&config)))
+            .map_err(agent_error)?,
+        Err(_) => TeamsPipelineConfig::default(),
+    };
     Ok(TeamsMeetingPipeline::new(backend, store, config))
 }
 
@@ -565,7 +449,8 @@ fn open_store(options: &TeamsPipelineCliOptions) -> Result<TeamsPipelineStore, A
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
-    TeamsPipelineStore::new(resolve_teams_pipeline_store_path(path.as_deref())).map_err(agent_error)
+    let path = resolve_teams_pipeline_store_path(path.as_deref()).map_err(agent_error)?;
+    TeamsPipelineStore::new(path).map_err(agent_error)
 }
 
 fn required_id(options: &TeamsPipelineCliOptions, usage: &str) -> Result<String, AgentError> {
@@ -576,6 +461,27 @@ fn required_id(options: &TeamsPipelineCliOptions, usage: &str) -> Result<String,
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| AgentError::Config(format!("{usage}: missing id")))
+}
+
+fn required_organizer_user_id(
+    options: &TeamsPipelineCliOptions,
+    action: &str,
+) -> Result<String, AgentError> {
+    let raw = options
+        .organizer_user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            AgentError::Config(format!(
+                "{action}: --organizer-user-id (Microsoft Entra object ID) is required"
+            ))
+        })?;
+    Uuid::parse_str(raw).map(|identifier| identifier.to_string()).map_err(|_| {
+        AgentError::Config(format!(
+            "{action}: --organizer-user-id must be a Microsoft Entra object ID UUID"
+        ))
+    })
 }
 
 fn compact_job(mut value: Value) -> Value {
@@ -610,10 +516,12 @@ fn agent_error(error: TeamsPipelineError) -> AgentError {
         | TeamsPipelineError::Store(message)
         | TeamsPipelineError::Json(message) => AgentError::Config(message),
         TeamsPipelineError::Io(message) => AgentError::Io(message),
-        TeamsPipelineError::Retryable(message)
-        | TeamsPipelineError::ArtifactNotFound(message)
-        | TeamsPipelineError::Sink(message) => AgentError::ToolExecution(message),
-        TeamsPipelineError::Graph { status, message } => {
+        TeamsPipelineError::Retryable(message) | TeamsPipelineError::ArtifactNotFound(message) => {
+            AgentError::ToolExecution(message)
+        }
+        TeamsPipelineError::Graph {
+            status, message, ..
+        } => {
             AgentError::ToolExecution(format!("Microsoft Graph HTTP {status}: {message}"))
         }
     }
@@ -623,9 +531,40 @@ fn agent_error(error: TeamsPipelineError) -> AgentError {
 mod tests {
     use super::*;
     use hermes_config::PlatformConfig;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_environment() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.original.as_deref() {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
 
     #[test]
-    fn runtime_config_uses_existing_teams_platform_settings() {
+    fn runtime_config_uses_only_explicit_manual_pipeline_settings() {
         let mut config = GatewayConfig::default();
         let mut teams = PlatformConfig {
             enabled: true,
@@ -636,23 +575,13 @@ mod tests {
         teams.extra.insert("channel_id".into(), json!("channel-1"));
         teams.extra.insert(
             "meeting_pipeline".into(),
-            json!({"transcript_min_chars": 120, "notion": {"enabled": true, "database_id": "db-1"}}),
+            json!({"transcript_min_chars": 120}),
         );
         config.platforms.insert("teams".into(), teams);
 
         let runtime_config = build_pipeline_runtime_config(&config);
 
-        assert_eq!(runtime_config["transcript_min_chars"], json!(120));
-        assert_eq!(runtime_config["notion"]["database_id"], json!("db-1"));
-        assert_eq!(
-            runtime_config["teams_delivery"],
-            json!({
-                "enabled": true,
-                "mode": "graph",
-                "team_id": "team-1",
-                "channel_id": "channel-1"
-            })
-        );
+        assert_eq!(runtime_config, json!({"transcript_min_chars": 120}));
     }
 
     #[test]
@@ -668,5 +597,77 @@ mod tests {
             compact["summary_payload"]["transcript_preview"],
             json!("abcdef")
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_rejects_missing_blank_or_malformed_organizer_before_network() {
+        let _env_lock = lock_environment();
+        let server = MockServer::start().await;
+        let _base = EnvVarGuard::set("MSGRAPH_BASE_URL", &server.uri());
+        let _token = EnvVarGuard::set("MSGRAPH_ACCESS_TOKEN", "test-token");
+        for organizer_user_id in [None, Some("   "), Some("not-an-entra-object-id")] {
+            let options = TeamsPipelineCliOptions {
+                meeting_id: Some("meeting-cli".into()),
+                id: Some("job-cli".into()),
+                organizer_user_id: organizer_user_id.map(ToOwned::to_owned),
+                ..TeamsPipelineCliOptions::default()
+            };
+            let error = cmd_fetch(&options).await.unwrap_err();
+            assert!(
+                error.to_string().contains("--organizer-user-id"),
+                "unexpected error: {error}"
+            );
+            let error = cmd_run(&options).await.unwrap_err();
+            assert!(
+                error.to_string().contains("--organizer-user-id"),
+                "unexpected error: {error}"
+            );
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_uses_exact_user_scoped_graph_paths() {
+        let _env_lock = lock_environment();
+        let server = MockServer::start().await;
+        let organizer = "11111111-1111-1111-1111-111111111111";
+        let meeting_id = "meeting-cli";
+        let meeting_path = format!("/users/{organizer}/onlineMeetings/{meeting_id}");
+        let transcripts_path = format!("{meeting_path}/transcripts");
+        let recordings_path = format!("{meeting_path}/recordings");
+        Mock::given(method("GET"))
+            .and(path(meeting_path.as_str()))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": meeting_id,
+                "organizer": {"identity": {"user": {"id": organizer}}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        for resource_path in [&transcripts_path, &recordings_path] {
+            Mock::given(method("GET"))
+                .and(path(resource_path.as_str()))
+                .and(header("authorization", "Bearer test-token"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"value": []})))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let _base = EnvVarGuard::set("MSGRAPH_BASE_URL", &server.uri());
+        let _token = EnvVarGuard::set("MSGRAPH_ACCESS_TOKEN", "test-token");
+        let options = TeamsPipelineCliOptions {
+            meeting_id: Some(meeting_id.into()),
+            organizer_user_id: Some(organizer.into()),
+            ..TeamsPipelineCliOptions::default()
+        };
+
+        cmd_fetch(&options).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].url.path(), meeting_path);
+        assert_eq!(requests[1].url.path(), transcripts_path);
+        assert_eq!(requests[2].url.path(), recordings_path);
     }
 }

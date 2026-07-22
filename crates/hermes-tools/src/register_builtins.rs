@@ -8,8 +8,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hermes_core::{SkillProvider, TerminalBackend, ToolHandler};
+use hermes_environments::ExecutionContainmentContext;
 
-use crate::ToolRegistry;
+
+use crate::{ToolRegistry, VettedToolEffect};
 
 /// Register all built-in tool handlers into the given registry.
 ///
@@ -19,24 +21,79 @@ use crate::ToolRegistry;
 /// Backends that depend on environment variables (e.g. `OPENAI_API_KEY`,
 /// `FAL_KEY`, `HASS_URL`) are constructed eagerly; if the vars are absent
 /// the tools will return a clear error at *runtime*, not at registration.
+/// Register all built-in tool handlers into the given registry.
+///
+/// This compatibility helper resolves the local memory backend through its
+/// legacy default constructor. Production ingress must instead call
+/// [`register_builtin_tools_with_home`] or
+/// [`register_builtin_tools_with_execution_context_and_home`].
 pub fn register_builtin_tools(
     registry: &ToolRegistry,
     terminal_backend: Arc<dyn TerminalBackend>,
     skill_provider: Arc<dyn SkillProvider>,
 ) {
-    register_builtin_tools_with_data_dir(
+    register_builtin_tools_with_data_dir_and_memory_home(
         registry,
         terminal_backend,
         skill_provider,
         hermes_data_dir(),
+        None,
     );
 }
 
-fn register_builtin_tools_with_data_dir(
+/// Register built-in tools using an explicit Hermes home for local memory.
+///
+/// This binds the memory tool to the same home selected by the ingress, rather
+/// than allowing `FileMemoryBackend` to read a process environment fallback.
+pub fn register_builtin_tools_with_home(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    hermes_home: PathBuf,
+) {
+    register_builtin_tools_with_data_dir_and_memory_home(
+        registry,
+        terminal_backend,
+        skill_provider,
+        hermes_data_dir(),
+        Some(hermes_home),
+    );
+}
+
+/// Register built-ins with the exact context that policy evaluation and the
+/// containment-sensitive terminal handler must share.
+///
+/// This compatibility helper retains legacy memory-home resolution. Production
+/// ingress must use [`register_builtin_tools_with_execution_context_and_home`].
+pub fn register_builtin_tools_with_execution_context(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    execution_context: Arc<ExecutionContainmentContext>,
+) {
+    registry.set_execution_containment_context(execution_context);
+    register_builtin_tools(registry, terminal_backend, skill_provider);
+}
+
+/// Register built-ins with shared execution containment and an explicit
+/// Hermes home for the subject-bound local-memory backend.
+pub fn register_builtin_tools_with_execution_context_and_home(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    execution_context: Arc<ExecutionContainmentContext>,
+    hermes_home: PathBuf,
+) {
+    registry.set_execution_containment_context(execution_context);
+    register_builtin_tools_with_home(registry, terminal_backend, skill_provider, hermes_home);
+}
+
+fn register_builtin_tools_with_data_dir_and_memory_home(
     registry: &ToolRegistry,
     terminal_backend: Arc<dyn TerminalBackend>,
     skill_provider: Arc<dyn SkillProvider>,
     data_dir: PathBuf,
+    memory_home: Option<PathBuf>,
 ) {
     fn reg(
         registry: &ToolRegistry,
@@ -48,7 +105,7 @@ fn register_builtin_tools_with_data_dir(
         let schema = handler.schema();
         let name = schema.name.clone();
         let desc = schema.description.clone();
-        registry.register(
+        registry.register_vetted(
             name,
             toolset,
             schema,
@@ -59,6 +116,7 @@ fn register_builtin_tools_with_data_dir(
             desc,
             emoji,
             None,
+            VettedToolEffect::LocalOneShot,
         );
     }
     fn reg_with_check(
@@ -72,8 +130,18 @@ fn register_builtin_tools_with_data_dir(
         let schema = handler.schema();
         let name = schema.name.clone();
         let desc = schema.description.clone();
-        registry.register(
-            name, toolset, schema, handler, check_fn, env_deps, true, desc, emoji, None,
+        registry.register_vetted(
+            name,
+            toolset,
+            schema,
+            handler,
+            check_fn,
+            env_deps,
+            true,
+            desc,
+            emoji,
+            None,
+            VettedToolEffect::LocalOneShot,
         );
     }
 
@@ -110,15 +178,26 @@ fn register_builtin_tools_with_data_dir(
     );
 
     // -- Terminal ------------------------------------------------------------
-    reg_with_check(
-        registry,
+    let terminal_handler = Arc::new(crate::tools::terminal::TerminalHandler::with_execution_context(
+        terminal_backend.clone(),
+        registry.execution_containment_context(),
+    ));
+    let terminal_schema = terminal_handler.schema();
+    let terminal_name = terminal_schema.name.clone();
+    let terminal_description = terminal_schema.description.clone();
+    registry.register_vetted_containment(
+        terminal_name,
         "terminal",
-        Arc::new(crate::tools::terminal::TerminalHandler::new(
-            terminal_backend.clone(),
-        )),
-        "💻",
-        vec![],
+        terminal_schema,
+        terminal_handler.clone(),
+        terminal_handler,
         terminal_requirements_check.clone(),
+        vec![],
+        true,
+        terminal_description,
+        "💻",
+        None,
+        VettedToolEffect::LocalOneShot,
     );
     reg_with_check(
         registry,
@@ -346,15 +425,11 @@ fn register_builtin_tools_with_data_dir(
     );
 
     // -- Memory --------------------------------------------------------------
-    reg(
-        registry,
-        "memory",
-        Arc::new(crate::tools::memory::MemoryHandler::new(Arc::new(
-            crate::backends::memory::FileMemoryBackend::new(),
-        ))),
-        "🧠",
-        vec![],
-    );
+    let memory_backend = match memory_home {
+        Some(home) => crate::backends::memory::FileMemoryBackend::with_home(home),
+        None => crate::backends::memory::FileMemoryBackend::new(),
+    };
+    registry.register_vetted_memory(Arc::new(memory_backend));
 
     // -- Session search ------------------------------------------------------
     {
@@ -402,7 +477,10 @@ fn register_builtin_tools_with_data_dir(
     );
 
     // -- Code execution ------------------------------------------------------
-    reg(
+    // Host code execution uses the same availability gate and policy dispatch
+    // boundary as terminal commands; it is not registered as a sandboxed
+    // bypass.
+    reg_with_check(
         registry,
         "code_execution",
         Arc::new(crate::tools::code_execution::ExecuteCodeHandler::new(
@@ -410,6 +488,7 @@ fn register_builtin_tools_with_data_dir(
         )),
         "🖥️",
         vec![],
+        terminal_requirements_check.clone(),
     );
 
     // -- Delegation ----------------------------------------------------------
@@ -635,16 +714,14 @@ fn register_builtin_tools_with_data_dir(
         "voice",
         Arc::new(crate::tools::transcription::TranscriptionHandler),
         "🎙️",
-        vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
-    );
-
-    // -- Voice mode ----------------------------------------------------------
-    reg(
-        registry,
-        "voice",
-        Arc::new(crate::tools::voice_mode::VoiceModeHandler),
-        "🎤",
-        vec![],
+        vec![
+            "VOICE_TOOLS_OPENAI_KEY".into(),
+            "HERMES_OPENAI_API_KEY".into(),
+            "OPENAI_API_KEY".into(),
+            "GROQ_API_KEY".into(),
+            "MISTRAL_API_KEY".into(),
+            "TOOL_GATEWAY_USER_TOKEN".into(),
+        ],
     );
 
     // -- TTS Premium ---------------------------------------------------------
@@ -859,15 +936,6 @@ fn register_builtin_tools_with_data_dir(
         vec![],
     );
 
-    // -- Deterministic replay trace control ---------------------------------
-    reg(
-        registry,
-        "system",
-        Arc::new(crate::tools::replay_trace_control::ReplayTraceControlHandler::new()),
-        "🧬",
-        vec![],
-    );
-
     // -- Runtime recovery runbooks ------------------------------------------
     reg(
         registry,
@@ -951,11 +1019,11 @@ mod tests {
     use async_trait::async_trait;
     use hermes_core::{AgentError, CommandOutput, Skill, SkillMeta};
     use serde_json::Value;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn lock_env() -> parking_lot::MutexGuard<'static, ()> {
+        TEST_ENV_LOCK.lock()
     }
 
     struct EnvGuard {
@@ -1088,7 +1156,7 @@ mod tests {
 
     fn registered_all_names_with_data_dir(data_dir: PathBuf) -> Vec<String> {
         let registry = ToolRegistry::new();
-        register_builtin_tools_with_data_dir(
+        register_builtin_tools_with_home(
             &registry,
             Arc::new(MockTerminalBackend),
             Arc::new(MockSkillProvider),
@@ -1184,8 +1252,8 @@ mod tests {
             "invalid backend should keep raw trace control"
         );
         assert!(
-            names.contains(&"replay_trace_control".to_string()),
-            "invalid backend should keep replay trace control"
+            !names.contains(&"replay_trace_control".to_string()),
+            "legacy replay_trace_control must not be registered"
         );
         assert!(
             names.contains(&"runbook_control".to_string()),
@@ -1325,6 +1393,10 @@ mod tests {
                 "builtin registry should expose {expected}"
             );
         }
+        assert!(
+            !names.contains(&"replay_trace_control".to_string()),
+            "legacy replay_trace_control must not be registered"
+        );
     }
 
     #[test]
@@ -1355,5 +1427,131 @@ mod tests {
             !names.contains(&"browser_close".to_string()),
             "Rust browser backend intentionally has no Python supervisor close tool"
         );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn builtin_registry_dispatches_configured_tts_through_shipped_path() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
+        let _lock = lock_env();
+        let home = tempfile::tempdir().expect("temp home");
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let output = data_dir.path().join("registry-smoke.wav");
+        let fixture = data_dir.path().join("fixture.wav");
+        let consumed_input = data_dir.path().join("consumed-input.txt");
+        use std::os::unix::fs::PermissionsExt;
+
+        let wrapper = data_dir.path().join("registry-tts-wrapper");
+        std::fs::write(&wrapper, "#!/bin/sh\ncp \"$1\" \"$2\"\ncp \"$3\" \"$4\"\n").unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&38_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&8_000_u32.to_le_bytes());
+        wav.extend_from_slice(&16_000_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&2_u32.to_le_bytes());
+        wav.extend_from_slice(&0_i16.to_le_bytes());
+        std::fs::write(&fixture, &wav).unwrap();
+        let config = serde_json::json!({
+            "provider": "registry-smoke",
+            "providers": {
+                "registry-smoke": {
+                    "type": "command",
+                    "command": format!(
+                        "{} {{input_path}} {{voice}} {{model}} {{output_path}}",
+                        wrapper.display()
+                    ),
+                    "model": fixture,
+                    "output_format": "wav"
+                }
+            }
+        })
+        .to_string();
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _tts_config = EnvGuard::set("HERMES_TTS_CONFIG_JSON", &config);
+        let registry = ToolRegistry::new();
+        register_builtin_tools_with_home(
+            &registry,
+            Arc::new(MockTerminalBackend),
+            Arc::new(MockSkillProvider),
+            home.path().to_path_buf(),
+        );
+
+        let raw = registry
+            .dispatch_async(
+                "text_to_speech",
+                serde_json::json!({
+                    "text": "registry shipped-path smoke",
+                    "voice": consumed_input,
+                    "output_path": output
+                }),
+            )
+            .await;
+        let result: Value = serde_json::from_str(&raw).expect("structured tool result");
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["provider"], "registry-smoke");
+        assert_eq!(result["file_path"], output.to_string_lossy().to_string());
+        assert_eq!(result["media_tag"], format!("MEDIA:{}", output.display()));
+        let delivered = std::fs::read(&output).unwrap();
+        assert_eq!(&delivered[..4], b"RIFF");
+        assert_eq!(&delivered[8..12], b"WAVE");
+        assert_eq!(delivered, wav);
+        assert_eq!(
+            std::fs::read_to_string(consumed_input).unwrap(),
+            "registry shipped-path smoke"
+        );
+    }
+
+    #[tokio::test]
+    async fn builtin_registry_dispatches_transcription_through_shipped_path() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
+        let _lock = lock_env();
+        let home = tempfile::tempdir().expect("temp home");
+        let data_dir = tempfile::tempdir().expect("temp data dir");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .and(header("authorization", "Bearer registry-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("registry transcript"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let audio = data_dir.path().join("inbound.wav");
+        std::fs::write(&audio, b"registry audio fixture").unwrap();
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _key = EnvGuard::set("OPENAI_API_KEY", "registry-key");
+        let _base = EnvGuard::set("STT_OPENAI_BASE_URL", &server.uri());
+        let _allowed = EnvGuard::set(
+            "HERMES_MEDIA_ALLOW_DIRS",
+            data_dir.path().to_string_lossy().as_ref(),
+        );
+        let registry = ToolRegistry::new();
+        register_builtin_tools_with_home(
+            &registry,
+            Arc::new(MockTerminalBackend),
+            Arc::new(MockSkillProvider),
+            home.path().to_path_buf(),
+        );
+
+        let raw = registry
+            .dispatch_async(
+                "transcription",
+                serde_json::json!({
+                    "audio_path": audio,
+                    "provider": "openai"
+                }),
+            )
+            .await;
+        let result: Value = serde_json::from_str(&raw).expect("structured tool result");
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(result["status"], "transcribed");
+        assert_eq!(result["provider"], "openai");
+        assert_eq!(result["text"], "registry transcript");
     }
 }

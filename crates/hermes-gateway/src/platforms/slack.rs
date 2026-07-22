@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 use crate::channel_directory::{ChannelDirectoryProvider, ChannelEntry};

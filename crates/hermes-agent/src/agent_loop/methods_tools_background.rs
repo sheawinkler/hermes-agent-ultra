@@ -295,26 +295,12 @@ impl AgentLoop {
 
     fn route_learning_stats_for_key(&self, key: &str) -> Option<RouteLearningStats> {
         let now_ms = now_unix_ms();
-        let mut persist_snapshot: Option<HashMap<String, RouteLearningStats>> = None;
-        let stats = if let Ok(mut map) = self.route_learning.lock() {
-            let mut changed = Self::prune_route_learning_locked(&mut map, now_ms);
-            let out = map
-                .get(key)
-                .and_then(|stats| Self::route_learning_effective_stats(stats, now_ms));
-            if out.is_none() && map.remove(key).is_some() {
-                changed = true;
-            }
-            if changed {
-                persist_snapshot = Some(map.clone());
-            }
-            out
-        } else {
-            None
+        let Ok(mut map) = self.route_learning.lock() else {
+            return None;
         };
-        if let Some(snapshot) = persist_snapshot {
-            self.save_route_learning_state(&snapshot);
-        }
-        stats
+        let _ = Self::prune_route_learning_locked(&mut map, now_ms);
+        map.get(key)
+            .and_then(|stats| Self::route_learning_effective_stats(stats, now_ms))
     }
 
     fn route_learning_score(stats: Option<&RouteLearningStats>, cheap_bias: f64) -> f64 {
@@ -346,7 +332,6 @@ impl AgentLoop {
         }
         let key = self.route_learning_key_for_route(route, response_model);
         let alpha = smart_routing_learning_alpha();
-        let mut persist_snapshot: Option<HashMap<String, RouteLearningStats>> = None;
         if let Ok(mut map) = self.route_learning.lock() {
             let now_ms = now_unix_ms();
             let _ = Self::prune_route_learning_locked(&mut map, now_ms);
@@ -367,10 +352,6 @@ impl AgentLoop {
                 entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
             }
             entry.updated_at_unix_ms = now_ms;
-            persist_snapshot = Some(map.clone());
-        }
-        if let Some(snapshot) = persist_snapshot {
-            self.save_route_learning_state(&snapshot);
         }
     }
 
@@ -430,7 +411,7 @@ impl AgentLoop {
                         primary_score,
                         cheap_score,
                         margin,
-                        "smart routing online-learning selected primary route"
+                        "smart routing process-local statistics selected primary route"
                     );
                     return None;
                 }
@@ -453,7 +434,7 @@ impl AgentLoop {
                         "{} [cheap_score={:.3} primary_score={:.3}]",
                         label, cheap_score, primary_score
                     )),
-                    routing_reason: Some("simple_turn_online_learning".to_string()),
+                    routing_reason: Some("simple_turn_process_local_stats".to_string()),
                     signature,
                 })
             }
@@ -549,24 +530,28 @@ impl AgentLoop {
     async fn handle_max_iterations(
         &self,
         ctx: &mut ContextManager,
+        active_run: Option<&Arc<ActiveRun>>,
     ) -> Result<Option<Message>, AgentError> {
         ctx.add_message(Message::system(
             "[SYSTEM] Maximum conversation turns reached. Please provide a brief summary of \
              what was accomplished and any remaining tasks.",
         ));
-        let (_, model_name) = self.extract_provider_and_model(self.config.model.as_str());
+        let (provider_name, model_name) =
+            self.extract_provider_and_model(self.config.model.as_str());
+        let extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
         let response = self
-            .llm_provider
-            .chat_completion(
+            .governed_chat_completion(
+                active_run,
+                self.llm_provider.as_ref(),
+                provider_name.as_str(),
+                model_name,
                 ctx.get_messages(),
                 &[],
                 self.config.max_tokens,
                 self.config.temperature,
-                Some(model_name),
-                self.extra_body_for_api_mode(&self.config.api_mode).as_ref(),
+                extra_body.as_ref(),
             )
-            .await
-            .map_err(|e| AgentError::LlmApi(e.to_string()))?;
+            .await?;
         Ok(Some(response.message))
     }
 
@@ -574,6 +559,7 @@ impl AgentLoop {
         &self,
         ctx: &mut ContextManager,
         consecutive_error_turns: u32,
+        active_run: Option<&Arc<ActiveRun>>,
         failed_calls: u32,
         total_calls: usize,
     ) -> Result<Option<Message>, AgentError> {
@@ -581,19 +567,22 @@ impl AgentLoop {
             "[SYSTEM] Tool-loop guard triggered after {} consecutive error turn(s). Latest turn failed {}/{} tool call(s). Stop calling tools and provide a concise final response with what succeeded, what failed, and precise next manual step(s).",
             consecutive_error_turns, failed_calls, total_calls
         )));
-        let (_, model_name) = self.extract_provider_and_model(self.config.model.as_str());
+        let (provider_name, model_name) =
+            self.extract_provider_and_model(self.config.model.as_str());
+        let extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
         let response = self
-            .llm_provider
-            .chat_completion(
+            .governed_chat_completion(
+                active_run,
+                self.llm_provider.as_ref(),
+                provider_name.as_str(),
+                model_name,
                 ctx.get_messages(),
                 &[],
                 self.config.max_tokens,
                 self.config.temperature,
-                Some(model_name),
-                self.extra_body_for_api_mode(&self.config.api_mode).as_ref(),
+                extra_body.as_ref(),
             )
-            .await
-            .map_err(|e| AgentError::LlmApi(e.to_string()))?;
+            .await?;
         Ok(Some(response.message))
     }
 
@@ -664,11 +653,56 @@ impl AgentLoop {
         tool_schemas: &[ToolSchema],
         contextlattice_connect_intent: bool,
         parent_budget_remaining_usd: Option<f64>,
+        active_run: Option<Arc<ActiveRun>>,
         tool_errors: &mut Vec<hermes_core::ToolErrorRecord>,
-    ) -> Vec<ToolResult> {
+    ) -> Result<Vec<ToolResult>, AgentError> {
         let mut join_set = JoinSet::new();
         let tool_concurrency = tool_concurrency.max(1);
         let mut results = Vec::with_capacity(tool_calls.len());
+        let mut seen_tool_call_ids = HashSet::new();
+        let mut duplicate_tool_call_ids = HashSet::new();
+        for tool_call in tool_calls {
+            if !seen_tool_call_ids.insert(tool_call.id.as_str()) {
+                duplicate_tool_call_ids.insert(tool_call.id.as_str());
+            }
+        }
+        for tool_call in tool_calls {
+            if duplicate_tool_call_ids.contains(tool_call.id.as_str()) {
+                let error = format!(
+                    "Duplicate tool_call_id '{}' in assistant turn {}; no invocation was executed.",
+                    tool_call.id, turn
+                );
+                tool_errors.push(hermes_core::ToolErrorRecord {
+                    tool_name: tool_call.function.name.clone(),
+                    error: error.clone(),
+                    turn,
+                });
+                results.push(ToolResult::err(&tool_call.id, error));
+            }
+        }
+        let mut policy_rejected_tool_call_ids = HashSet::new();
+        for tool_call in tool_calls {
+            if duplicate_tool_call_ids.contains(tool_call.id.as_str())
+                || tool_call.function.name != "delegate_task"
+            {
+                continue;
+            }
+            let requests_background = serde_json::from_str::<Value>(&tool_call.function.arguments)
+                .ok()
+                .and_then(|args| args.get("background").and_then(Value::as_bool))
+                .unwrap_or(false);
+            if requests_background {
+                let error =
+                    "background delegation requires durable scheduling and governed completion delivery";
+                policy_rejected_tool_call_ids.insert(tool_call.id.as_str());
+                tool_errors.push(hermes_core::ToolErrorRecord {
+                    tool_name: tool_call.function.name.clone(),
+                    error: error.to_string(),
+                    turn,
+                });
+                results.push(ToolResult::err(&tool_call.id, error));
+            }
+        }
         let max_delegate_depth = self.resolve_max_delegate_depth();
         let current_delegate_depth = self.delegate_depth;
         let orchestrator = self.sub_agent_orchestrator.clone();
@@ -679,7 +713,12 @@ impl AgentLoop {
         // applied upstream via `cap_delegates`.
         let mut orchestrated: Vec<ToolResult> = Vec::new();
         if let Some(orch) = orchestrator.as_ref() {
-            for tc in tool_calls {
+            for (tool_slot, tc) in tool_calls.iter().enumerate() {
+                if duplicate_tool_call_ids.contains(tc.id.as_str())
+                    || policy_rejected_tool_call_ids.contains(tc.id.as_str())
+                {
+                    continue;
+                }
                 if tc.function.name != "delegate_task" {
                     continue;
                 }
@@ -748,19 +787,48 @@ impl AgentLoop {
                     child_depth: current_delegate_depth + 1,
                     max_depth: max_delegate_depth,
                     parent_budget_remaining_usd,
+                    parent_run_id: active_run.as_ref().map(|run| run.run_id()),
                     background,
                 };
-                // Orchestrator internally runs the child on its own
-                // `tokio::spawn` task, which erases the child future and breaks
-                // async recursion between parent / child `execute_tool_calls`.
-                let output = orch.execute(req).await;
+                // Delegation is an external effect: commit a lease-bound parent
+                // intent before the child task may be spawned.
+                let active = active_run.as_ref().ok_or_else(|| {
+                    AgentError::Config(
+                        "delegation requires an active authoritative run record".to_string(),
+                    )
+                })?;
+                let invocation_key = format!("turn-{turn}:slot-{tool_slot}");
+                let output = active
+                    .execute_delegation(&tc.id, &invocation_key, parsed.clone(), orch.execute(req))
+                    .await
+                    .map_err(|error| {
+                        AgentError::ToolExecution(format!(
+                            "run ledger rejected delegation: {error}"
+                        ))
+                    })?;
                 orchestrated.push(ToolResult::ok(&tc.id, output));
             }
         }
 
-        for tc in tool_calls {
+        for (tool_slot, tc) in tool_calls.iter().enumerate() {
+            if duplicate_tool_call_ids.contains(tc.id.as_str())
+                || policy_rejected_tool_call_ids.contains(tc.id.as_str())
+            {
+                continue;
+            }
             // Skip `delegate_task` when an orchestrator already handled it.
             if orchestrator.is_some() && tc.function.name == "delegate_task" {
+                continue;
+            }
+            if self.config.skip_memory && tc.function.name == "memory" {
+                let message =
+                    "Memory tools are disabled for this agent invocation.".to_string();
+                tool_errors.push(hermes_core::ToolErrorRecord {
+                    tool_name: tc.function.name.clone(),
+                    error: message.clone(),
+                    turn,
+                });
+                results.push(ToolResult::err(&tc.id, message));
                 continue;
             }
             if contextlattice_connect_intent
@@ -777,6 +845,7 @@ impl AgentLoop {
                 continue;
             }
             let tool_call_id = tc.id.clone();
+            let invocation_key = format!("turn-{turn}:slot-{tool_slot}");
             let tool_name = tc.function.name.clone();
             let raw_args = tc.function.arguments.clone();
             let registry = self.tool_registry.clone();
@@ -784,6 +853,8 @@ impl AgentLoop {
             let max_delegate_depth = max_delegate_depth;
             let current_delegate_depth = current_delegate_depth;
             let parent_budget_remaining_usd = parent_budget_remaining_usd;
+            let active_run = active_run.clone();
+            let invocation_key = invocation_key.clone();
 
             join_set.spawn(async move {
                 let params: Value = match serde_json::from_str(&raw_args) {
@@ -794,7 +865,7 @@ impl AgentLoop {
                              Please check your parameters and retry with valid JSON.",
                             tool_name, e
                         );
-                        return ToolResult::err(&tool_call_id, error_msg);
+                        return Ok(ToolResult::err(&tool_call_id, error_msg));
                     }
                 };
                 let middleware_ctx = ToolExecutionMiddlewareContext {
@@ -804,6 +875,83 @@ impl AgentLoop {
                     original_args: params.clone(),
                     turn,
                 };
+
+                if let Some(active_run) = active_run {
+                    let Some(entry) = registry.get(&tool_name).cloned() else {
+                        return Ok(Self::execute_tool_call_terminal(
+                            &registry,
+                            &tool_call_id,
+                            &tool_name,
+                            params,
+                            max_delegate_depth,
+                            current_delegate_depth,
+                            parent_budget_remaining_usd,
+                        ));
+                    };
+                    let execution_trust = if plugin_manager
+                        .as_ref()
+                        .and_then(|manager| manager.lock().ok())
+                        .is_some_and(|mut manager| manager.has_tool_execution_middleware())
+                    {
+                        ToolExecutionTrust::Untrusted
+                    } else {
+                        entry.execution_trust
+                    };
+                    let entry_handler = Arc::clone(&entry.handler);
+                    let governed_tool_name = tool_name.clone();
+                    let governed_handler = Arc::new(move |mut next_params: Value| {
+                        if governed_tool_name == "delegate_task" {
+                            if current_delegate_depth >= max_delegate_depth {
+                                return Err(ToolError::InvalidParams(format!(
+                                    "Delegation depth limit reached ({current_delegate_depth}/{max_delegate_depth})."
+                                )));
+                            }
+                            if let Some(obj) = next_params.as_object_mut() {
+                                obj.insert(
+                                    "child_depth".to_string(),
+                                    Value::from(current_delegate_depth + 1),
+                                );
+                                obj.insert("max_depth".to_string(), Value::from(max_delegate_depth));
+                                if let Some(remaining) = parent_budget_remaining_usd {
+                                    obj.insert(
+                                        "parent_budget_remaining_usd".to_string(),
+                                        Value::from(remaining),
+                                    );
+                                }
+                            }
+                        }
+                        match entry_handler(next_params) {
+                            Ok(output) if looks_like_tool_error_output(&output) => {
+                                Err(ToolError::ExecutionFailed(output))
+                            }
+                            result => result,
+                        }
+                    });
+                    let governed_entry = ToolEntry {
+                        schema: entry.schema,
+                        handler: governed_handler,
+                        execution_trust,
+                    };
+                    return match active_run
+                        .execute_tool(
+                            &tool_call_id,
+                            &invocation_key,
+                            &tool_name,
+                            params,
+                            governed_entry,
+                        )
+                        .await
+                    {
+                        Ok(output) => Ok(ToolResult::ok(&tool_call_id, output)),
+                        Err(GovernedToolExecutionError::Outcome(error)) => {
+                            Ok(ToolResult::err(&tool_call_id, error.to_string()))
+                        }
+                        Err(GovernedToolExecutionError::Runtime(error)) => Err(AgentError::Io(
+                            format!("governed tool runtime failed: {error}"),
+                        )),
+                    };
+                }
+
                 let terminal = |next_params: Value| {
                     Self::execute_tool_call_terminal(
                         &registry,
@@ -815,9 +963,9 @@ impl AgentLoop {
                         parent_budget_remaining_usd,
                     )
                 };
-                if let Some(pm) = plugin_manager {
+                Ok(if let Some(pm) = plugin_manager {
                     match pm.lock() {
-                        Ok(pm) => pm.run_tool_execution_middleware(middleware_ctx, terminal),
+                        Ok(mut pm) => pm.run_tool_execution_middleware(middleware_ctx, terminal),
                         Err(_) => {
                             tracing::warn!(
                                 "Plugin manager lock poisoned while running tool execution middleware"
@@ -827,12 +975,12 @@ impl AgentLoop {
                     }
                 } else {
                     terminal(params)
-                }
+                })
             });
             if join_set.len() >= tool_concurrency {
                 if let Some(result) = join_set.join_next().await {
                     match result {
-                        Ok(tool_result) => {
+                        Ok(Ok(tool_result)) => {
                             if tool_result.is_error {
                                 let tc = tool_calls
                                     .iter()
@@ -847,8 +995,11 @@ impl AgentLoop {
                             }
                             results.push(tool_result);
                         }
-                        Err(e) => {
-                            tracing::error!("Task join error: {}", e);
+                        Ok(Err(error)) => return Err(error),
+                        Err(error) => {
+                            return Err(AgentError::ToolExecution(format!(
+                                "tool task join failed: {error}"
+                            )))
                         }
                     }
                 }
@@ -872,7 +1023,7 @@ impl AgentLoop {
         }
         while let Some(result) = join_set.join_next().await {
             match result {
-                Ok(tool_result) => {
+                Ok(Ok(tool_result)) => {
                     if tool_result.is_error {
                         // Record the error but we still add the result to context
                         let tc = tool_calls
@@ -888,13 +1039,16 @@ impl AgentLoop {
                     }
                     results.push(tool_result);
                 }
-                Err(e) => {
-                    tracing::error!("Task join error: {}", e);
+                Ok(Err(error)) => return Err(error),
+                Err(error) => {
+                    return Err(AgentError::ToolExecution(format!(
+                        "tool task join failed: {error}"
+                    )))
                 }
             }
         }
 
-        results
+        Ok(results)
     }
 
     fn resolve_max_delegate_depth(&self) -> u32 {
@@ -966,69 +1120,20 @@ impl AgentLoop {
     }
 
     /// Metrics (always) + optional Python-style memory/skill review LLM pass on session end.
-    fn spawn_background_review(&self, turn: u32, ctx: &ContextManager, review_memory_at_end: bool) {
+    fn spawn_background_review(
+        &self,
+        turn: u32,
+        ctx: &ContextManager,
+        review_memory_at_end: bool,
+        parent_run_id: Option<RunId>,
+    ) {
         self.emit_background_review_metrics(turn, ctx);
-        if !self.config.background_review_enabled {
-            return;
+        let _ = (review_memory_at_end, parent_run_id);
+        if self.config.background_review_enabled {
+            tracing::error!(
+                "post-response review skipped: durable scheduling and governed outbox are required"
+            );
         }
-        let mut review_skills = false;
-        if self.config.skill_creation_nudge_interval > 0
-            && self
-                .tool_registry
-                .names()
-                .iter()
-                .any(|n| n == "skill_manage")
-        {
-            if let Ok(mut c) = self.evolution_counters.lock() {
-                if c.iters_since_skill >= self.config.skill_creation_nudge_interval {
-                    review_skills = true;
-                    c.iters_since_skill = 0;
-                }
-            }
-        }
-        let review_memory = review_memory_at_end;
-        if !review_memory && !review_skills {
-            return;
-        }
-        let prompt: &'static str = match (review_memory, review_skills) {
-            (true, true) => COMBINED_REVIEW_PROMPT,
-            (true, false) => MEMORY_REVIEW_PROMPT,
-            (false, true) => SKILL_REVIEW_PROMPT,
-            _ => return,
-        };
-        let mut hist = ctx.get_messages().to_vec();
-        hist.push(Message::user(prompt));
-        let mut cfg = self.config.clone();
-        cfg.background_review_enabled = false;
-        cfg.background_review_metrics_enabled = false;
-        cfg.memory_nudge_interval = 0;
-        cfg.skill_creation_nudge_interval = 0;
-        cfg.max_concurrent_delegates = 0;
-        cfg.quiet_mode = true;
-        cfg.max_turns = if cfg.max_turns == 0 {
-            16
-        } else {
-            cfg.max_turns.min(16)
-        };
-        let tools = self.tool_registry.clone();
-        let provider = self.llm_provider.clone();
-        let review_cb = self.callbacks.background_review_callback.clone();
-        tokio::spawn(async move {
-            let agent = AgentLoop::new(cfg, tools, provider);
-            match agent.run(hist, None).await {
-                Ok(result) => {
-                    if let Some(cb) = review_cb.as_ref() {
-                        if let Some(summary) = summarize_background_review_result(&result.messages)
-                        {
-                            cb(&summary);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::debug!(error = %e, "background memory/skill review failed");
-                }
-            }
-        });
     }
 
     /// Recover todo-state hints from historical messages at loop start.

@@ -1,6 +1,56 @@
 const CLI_SESSIONS_ACTIONS: &str =
     "list, export, delete, prune, optimize, repair, stats, rename, browse";
 
+/// Session cleanup intentionally does not govern persistent memory.
+const SESSION_MEMORY_REMAINS_NOTICE: &str =
+    "Persistent memory remains unchanged. Session cleanup does not erase memory; use `hermes memory forget` with an authorized subject.";
+
+fn render_session_delete_completion(session_id: &str) -> String {
+    format!("Deleted session '{}'.\n{}", session_id, SESSION_MEMORY_REMAINS_NOTICE)
+}
+
+fn render_session_prune_completion(pruned: u32) -> String {
+    format!(
+        "Pruned {} session(s).\n{}",
+        pruned, SESSION_MEMORY_REMAINS_NOTICE
+    )
+}
+
+fn session_export_memory_notice() -> &'static str {
+    "Session export contains session data only; persistent memory was not exported."
+}
+
+#[cfg(test)]
+mod session_memory_governance_tests {
+    use super::{
+        render_session_delete_completion, render_session_prune_completion,
+        session_export_memory_notice,
+    };
+
+    #[test]
+    fn session_delete_reports_that_memory_remains() {
+        let receipt = render_session_delete_completion("session-1");
+        assert!(receipt.contains("Deleted session 'session-1'."));
+        assert!(receipt.contains("Persistent memory remains unchanged."));
+        assert!(receipt.contains("hermes memory forget"));
+    }
+
+    #[test]
+    fn session_prune_reports_that_memory_remains() {
+        let receipt = render_session_prune_completion(2);
+        assert!(receipt.contains("Pruned 2 session(s)."));
+        assert!(receipt.contains("Persistent memory remains unchanged."));
+    }
+
+    #[test]
+    fn session_export_never_claims_to_export_memory() {
+        assert_eq!(
+            session_export_memory_notice(),
+            "Session export contains session data only; persistent memory was not exported."
+        );
+    }
+}
+
 pub struct CliSessionsOptions {
     pub action: Option<String>,
     pub session: Option<String>,
@@ -14,6 +64,8 @@ pub struct CliSessionsOptions {
     pub yes: bool,
     pub source: Option<String>,
     pub older_than: Option<u64>,
+    /// Maximum rows shown by `sessions list` after sort/classification.
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -882,6 +934,29 @@ fn render_prune_preview(candidates: &[SessionSnapshotEntry]) -> String {
     )
 }
 
+/// Normalize `--limit` so an explicit zero still shows at least one row.
+fn sessions_list_row_limit(limit: usize) -> usize {
+    limit.max(1)
+}
+
+/// Sort key for `sessions list`: canonical first, then message count, mtime, id.
+fn sort_sessions_list_entries(
+    entries: &mut [(String, u64, std::time::SystemTime, bool, bool, usize)],
+) {
+    entries.sort_by(|a, b| {
+        b.3.cmp(&a.3)
+            .then_with(|| b.5.cmp(&a.5))
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+}
+
+/// Bound displayed rows after sort; returns `(shown_count, omitted_count)`.
+fn sessions_list_visible_range(total: usize, limit: usize) -> (usize, usize) {
+    let shown = total.min(sessions_list_row_limit(limit));
+    (shown, total.saturating_sub(shown))
+}
+
 /// Handle `hermes sessions [action] [--id ...] [--name ...]`.
 pub async fn handle_cli_sessions(
     options: CliSessionsOptions,
@@ -900,7 +975,10 @@ pub async fn handle_cli_sessions(
         yes,
         source,
         older_than,
+        limit,
     } = options;
+    // Bound is applied only after classification/sort below.
+    let list_limit = sessions_list_row_limit(limit);
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -937,24 +1015,19 @@ pub async fn handle_cli_sessions(
                     }
                 }
             }
-            entries.sort_by(|a, b| {
-                b.3.cmp(&a.3)
-                    .then_with(|| b.5.cmp(&a.5))
-                    .then_with(|| b.2.cmp(&a.2))
-                    .then_with(|| a.0.cmp(&b.0))
-            });
+            sort_sessions_list_entries(&mut entries);
             if entries.is_empty() {
                 println!("No saved sessions.");
             } else {
+                let total = entries.len();
                 let canonical_count = entries.iter().filter(|entry| entry.3).count();
-                let artifact_count = entries.len().saturating_sub(canonical_count);
+                let artifact_count = total.saturating_sub(canonical_count);
                 println!(
                     "Saved sessions ({} total; {} canonical; {} artifacts):",
-                    entries.len(),
-                    canonical_count,
-                    artifact_count
+                    total, canonical_count, artifact_count
                 );
-                for (name, size, _, canonical, valid, messages) in &entries {
+                let (shown, omitted) = sessions_list_visible_range(total, list_limit);
+                for (name, size, _, canonical, valid, messages) in entries.iter().take(shown) {
                     let kind = if *canonical {
                         "session"
                     } else if *valid {
@@ -963,6 +1036,12 @@ pub async fn handle_cli_sessions(
                         "invalid"
                     };
                     println!("  • {} ({} bytes, {} msgs, {})", name, size, messages, kind);
+                }
+                if omitted > 0 {
+                    println!(
+                        "… {} more session(s). Use `--limit` to change row count.",
+                        omitted
+                    );
                 }
             }
         }
@@ -1019,6 +1098,7 @@ pub async fn handle_cli_sessions(
 
             let rendered = render_session_exports(&snapshots, export_format, export_only)?;
             write_session_export_output(export_output.as_deref(), &rendered)?;
+            eprintln!("{}", session_export_memory_notice());
             if let Some(output) = export_output.as_deref().filter(|value| *value != "-") {
                 let count = if export_only == Some(SessionExportOnly::UserPrompts) {
                     iter_user_prompt_records(&snapshots).len()
@@ -1059,7 +1139,7 @@ pub async fn handle_cli_sessions(
             }
             let deleted = delete_session_snapshot_by_query(&sessions_dir, &resolved.id)?
                 .unwrap_or_else(|| resolved.id.clone());
-            println!("Deleted session '{}'.", deleted);
+            println!("{}", render_session_delete_completion(&deleted));
         }
         "stats" => {
             if !sessions_dir.exists() {
@@ -1115,7 +1195,7 @@ pub async fn handle_cli_sessions(
                     pruned += 1;
                 }
             }
-            println!("Pruned {} session(s).", pruned);
+            println!("{}", render_session_prune_completion(pruned));
         }
         "optimize" => {
             let persistence = SessionPersistence::new(hermes_config::hermes_home());

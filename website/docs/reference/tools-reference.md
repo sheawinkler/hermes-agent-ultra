@@ -215,7 +215,8 @@ Opt-in toolset (not loaded in the default `hermes-cli` set). Add via `--toolsets
 
 | Tool | Description | Requires environment |
 |------|-------------|----------------------|
-| `text_to_speech` | Convert text to speech audio. Returns a MEDIA: path that the platform delivers as a voice message. On Telegram it plays as a voice bubble, on Discord/WhatsApp as an audio attachment. In CLI mode, saves to ~/voice-memos/. Voice and provider… | — |
+| `text_to_speech` | Generate speech audio into a validated media file. Gateways **may** attach that file on the current turn when the platform supports outbound audio; delivery is not an always-on speak engine and is not a guaranteed voice bubble. Unsupported providers fail closed. See [Voice & TTS](/docs/user-guide/features/tts). | Provider keys as configured |
+| `transcription` | Callable HTTP speech-to-text (`TranscriptionHandler`: OpenAI/Nous-managed, Groq, Mistral). Messaging may only prepend `[transcription_candidate]` for audio paths — ingress does **not** auto-invoke this tool. No local faster-whisper / whisper-CLI / xAI STT in this handler. See [Transcription tool](/docs/user-guide/features/tts#transcription-tool-stt). | `VOICE_TOOLS_OPENAI_KEY` / OpenAI keys, `GROQ_API_KEY`, or `MISTRAL_API_KEY` |
 
 ## `discord` toolset
 

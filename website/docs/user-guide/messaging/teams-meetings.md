@@ -1,51 +1,57 @@
 ---
 sidebar_position: 6
 title: "Teams Meetings"
-description: "Set up the Microsoft Teams meeting summary pipeline with Microsoft Graph webhooks"
+description: "Rust Teams meeting pipeline: CLI fetch/replay, Graph artifact checks, and STT fallback limits — not an automatic webhook consumer"
 ---
 
 # Microsoft Teams Meetings
 
-Use the Teams meeting pipeline when you want Hermes to ingest Microsoft Graph meeting events, fetch transcripts first, fall back to recordings plus STT when needed, and deliver a structured summary to downstream sinks.
+The **Rust** Teams meeting surface is a **CLI-driven** pipeline library plus `hermes teams-pipeline` commands. It can resolve a meeting via Microsoft Graph, prefer transcript artifacts, fall back to recording download + STT (with hard size limits), store job records locally, and **manually replay** a stored job.
 
-This page focuses on setup and enablement:
-- Graph credentials
-- webhook listener configuration
-- Teams delivery modes
-- pipeline config shape
+It is **not** a complete automatic “Graph webhook → summary → Notion/Linear/Teams” product in this runtime:
 
-For day-2 operations, go-live checks, and the operator worksheet, use the dedicated guide: [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline).
+| Claim | Rust reality |
+|-------|----------------|
+| Gateway / `msgraph_webhook` receives Graph notifications and runs the pipeline | **Unsupported** — no Rust gateway adapter invokes `TeamsMeetingPipeline::run_notification` |
+| Presence of `notion` / `linear` / `teams_delivery` under `meeting_pipeline` | **Fail-closed** — `TeamsPipelineConfig::from_value` rejects those keys even when `enabled: false`; CLI validate/run fail rather than no-op |
+| Python `teams_pipeline` / `msgraph_webhook` gateway plugin | **Upstream/source reference only** — not installed by the Rust Docker/release package; not the Rust CLI wiring |
 
-## What This Feature Does
+For day-2 operator commands under the same Rust contract: [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline). Optional historical webhook plugin notes: [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook) (source/reference — not a shipped Rust consumer).
 
-The pipeline:
-1. receives Microsoft Graph webhook events
-2. resolves the meeting and prefers transcript artifacts first
-3. falls back to recording download plus STT when no usable transcript is available
-4. stores durable job state and sink records locally
-5. can write summaries to Notion, Linear, and Microsoft Teams
+## What the Rust path does
 
-Operator actions stay in the CLI (the `teams-pipeline` subcommand is registered by the `teams_pipeline` plugin — enable it via `hermes plugins enable teams_pipeline` or set `plugins.enabled: [teams_pipeline]` in `config.yaml`):
+1. **Manual / CLI job run** — `hermes teams-pipeline run|replay <job-id> --organizer-user-id <entra-object-id-uuid>` loads a stored job and runs artifact resolution + optional STT + summary generation in-process. `--organizer-user-id` is **required**, non-blank, and must be a Microsoft Entra **object ID UUID** (not UPN/email).
+2. **Artifact inspection** — `hermes teams-pipeline fetch --organizer-user-id <entra-object-id-uuid> (--meeting-id <id>|--join-web-url <url>)` resolves a meeting and prints transcript/recording metadata. Same required organizer UUID; no sink delivery.
+3. **Graph subscription admin** — create/list/renew/delete/maintain Graph subscriptions and check token health (subscription HTTP admin only — **not** a notification consumer).
+4. **Config / store validation** — `hermes teams-pipeline validate` checks Graph app-only env credentials (`MSGRAPH_*`), parses `platforms.teams.extra.meeting_pipeline` into runtime config, and reports local store path/stats. It does **not** inspect `msgraph_webhook` enablement or Teams delivery mode fields.
+5. **Local job store** — durable job JSON under the Teams pipeline store path (default under Hermes home; overridable).
 
-```bash
-hermes teams-pipeline validate
-hermes teams-pipeline list
-hermes teams-pipeline maintain-subscriptions
-```
+Optional STT fallback uses the same `TranscriptionHandler` as the agent tool, with the Teams pipeline passing its **internal temp root** as an extra trusted media root for files it wrote (see [Voice & TTS — Transcription](/docs/user-guide/features/tts#transcription-tool-stt)).
+
+## Verified media / Graph limits (Rust)
+
+These caps are enforced in the Rust pipeline implementation:
+
+| Limit | Value |
+|-------|--------|
+| Max recording download | **512 MiB** |
+| Max transcript payload | **8 MiB** |
+| Max STT upload segment | **24_000_000 bytes** (~24 MB; margin under common 25 MB provider caps) |
+| Max ffmpeg audio segments | **128** |
+| Graph JSON / pagination bounds | additional internal caps (4 MiB single JSON, pagination page/item/byte ceilings) |
+
+Oversized artifacts fail closed rather than partial-upload guessing.
 
 ## Prerequisites
 
-Before enabling the meetings pipeline, make sure you have:
+- Working Hermes install with the `teams-pipeline` CLI entrypoint
+- Microsoft Graph **app-only** credentials for the meeting resources you will fetch
+- Existing [Microsoft Teams bot setup](/docs/user-guide/messaging/teams) only if you use the **separate** Teams messaging adapter for chat — it is not wired as a pipeline sink writer on the Rust CLI path
+- `ffmpeg` if you enable recording → audio extract for STT fallback
 
-- a working Hermes install
-- the existing [Microsoft Teams bot setup](/docs/user-guide/messaging/teams) if you want Teams outbound delivery
-- Microsoft Graph application credentials with the permissions required for the meeting resources you plan to subscribe to
-- a public HTTPS URL that Microsoft Graph can call for webhook delivery
-- `ffmpeg` installed if you want recording-plus-STT fallback
+A public HTTPS Graph webhook URL is **not** required for the Rust CLI/manual path. Subscription admin commands can still talk to Graph; nothing in Rust gateway code consumes those notifications today.
 
-## Step 1: Add Microsoft Graph Credentials
-
-Add Graph app-only credentials to `~/.hermes/.env`:
+## Step 1: Microsoft Graph credentials
 
 ```bash
 MSGRAPH_TENANT_ID=<tenant-id>
@@ -53,181 +59,88 @@ MSGRAPH_CLIENT_ID=<client-id>
 MSGRAPH_CLIENT_SECRET=<client-secret>
 ```
 
-These credentials are used by:
-- the Graph client foundation
-- subscription maintenance commands
-- meeting resolution and artifact fetches
-- Graph-based Teams outbound delivery when you do not provide a dedicated Teams access token
+Used by the Graph client for meeting resolution, artifact fetches, token health, and subscription admin.
 
-## Step 2: Enable the Graph Webhook Listener
+## Step 2: Pipeline knobs (optional)
 
-The webhook listener is a gateway platform named `msgraph_webhook`. At minimum, enable it and set a client state value:
-
-```bash
-MSGRAPH_WEBHOOK_ENABLED=true
-MSGRAPH_WEBHOOK_PORT=8646
-MSGRAPH_WEBHOOK_CLIENT_STATE=<random-shared-secret>
-MSGRAPH_WEBHOOK_ACCEPTED_RESOURCES=communications/onlineMeetings
-```
-
-The listener exposes:
-- `/msgraph/webhook` for Graph notifications
-- `/health` for a simple health check
-
-You need to route your public HTTPS endpoint to that listener. For example, if your public domain is `https://ops.example.com`, your Graph notification URL would typically be:
-
-```text
-https://ops.example.com/msgraph/webhook
-```
-
-## Step 3: Configure Teams Delivery and Pipeline Behavior
-
-The meeting pipeline reads its runtime config from the existing `teams` platform entry. Pipeline-specific knobs live under `teams.extra.meeting_pipeline`. Teams outbound delivery stays on the normal Teams platform config surface.
-
-Example `~/.hermes/config.yaml`:
+Pipeline knobs live under `platforms.teams.extra.meeting_pipeline` when a `teams` platform entry exists. **Do not** put `notion`, `linear`, or `teams_delivery` in this object on the Rust path — their presence is rejected.
 
 ```yaml
 platforms:
-  msgraph_webhook:
-    enabled: true
-    extra:
-      port: 8646
-      client_state: "replace-me"
-      accepted_resources:
-        - "communications/onlineMeetings"
-
   teams:
     enabled: true
     extra:
-      client_id: "your-teams-client-id"
-      client_secret: "your-teams-client-secret"
-      tenant_id: "your-teams-tenant-id"
-
-      # outbound summary delivery
-      delivery_mode: "graph" # or incoming_webhook
-      team_id: "team-id"
-      channel_id: "channel-id"
-      # incoming_webhook_url: "https://..."
-
       meeting_pipeline:
         transcript_min_chars: 80
         transcript_required: false
         transcription_fallback: true
         ffmpeg_extract_audio: true
-        notion:
-          enabled: false
-        linear:
-          enabled: false
+        # Do NOT add notion / linear / teams_delivery here on Rust —
+        # TeamsPipelineConfig rejects those keys (fail closed).
 ```
 
-## Teams Delivery Modes
+`build_pipeline_runtime_config` reads **only** `platforms.teams.extra.meeting_pipeline` (or `{}`). It does **not** merge top-level Teams `delivery_mode` / channel / webhook fields. Parsing that object through `TeamsPipelineConfig::from_value` fails if unsupported sink keys are present.
 
-The pipeline supports two Teams summary-delivery modes inside the existing Teams plugin.
-
-### `incoming_webhook`
-
-Use this when you want a simple webhook post into Teams without channel-message creation through Graph.
-
-Required config:
-
-```yaml
-platforms:
-  teams:
-    enabled: true
-    extra:
-      delivery_mode: "incoming_webhook"
-      incoming_webhook_url: "https://..."
-```
-
-### `graph`
-
-Use this when you want Hermes to post the summary through Microsoft Graph into a Teams chat or channel.
-
-Supported targets:
-- `chat_id`
-- `team_id` + `channel_id`
-- `team_id` + `home_channel` fallback for the existing Teams platform
-
-Example:
-
-```yaml
-platforms:
-  teams:
-    enabled: true
-    extra:
-      delivery_mode: "graph"
-      team_id: "team-id"
-      channel_id: "channel-id"
-```
-
-## Step 4: Start the Gateway
-
-Start Hermes normally after updating config:
+## Step 3: CLI operations
 
 ```bash
-hermes gateway run
+# Inspect / validate
+hermes teams-pipeline validate
+hermes teams-pipeline token-health
+hermes teams-pipeline list
+hermes teams-pipeline show <job-id>
+
+# Fetch artifacts (manual local path only)
+# --organizer-user-id REQUIRED: Microsoft Entra object ID UUID (not UPN/email)
+hermes teams-pipeline fetch --organizer-user-id <entra-object-id-uuid> --meeting-id <id>
+# or: --join-web-url <url>
+
+# Manually run / replay a stored job (local summary only; same required organizer UUID)
+hermes teams-pipeline run <job-id> --organizer-user-id <entra-object-id-uuid>
+# alias: hermes teams-pipeline replay <job-id> --organizer-user-id <entra-object-id-uuid>
+
+# Graph subscription administration (not a notification consumer)
+hermes teams-pipeline subscriptions
+hermes teams-pipeline subscribe --resource <graph-resource> --notification-url <url> ...
+hermes teams-pipeline maintain-subscriptions
 ```
 
-Or, if you run Hermes in Docker, start the gateway the same way you already do for your deployment.
+Jobs appear in `list` when something has already written them into the local store (manual seeding, tests, or a **non-Rust** orchestrator). The Rust gateway does not create jobs from live Graph webhooks.
 
-Check the listener:
+## What is not shipped (Rust)
 
-```bash
-curl http://localhost:8646/health
-```
+- No `msgraph_webhook` platform adapter in `hermes-gateway` that accepts Graph POSTs and calls `run_notification`
+- No automatic “start gateway → meetings summarize themselves” loop
+- No external sink config under Rust `meeting_pipeline` — `notion` / `linear` / `teams_delivery` keys are **rejected** (not silently skipped), even with `enabled: false`
+- No claim that an upstream Python plugin is packaged into the Rust release artifact
 
-## Step 5: Create Graph Subscriptions
+### Optional Python / source plugin (separate)
 
-Use the plugin CLI to create and inspect subscriptions.
-
-Examples:
-
-```bash
-hermes teams-pipeline subscribe \
-  --resource communications/onlineMeetings/getAllTranscripts \
-  --notification-url https://ops.example.com/msgraph/webhook \
-  --client-state "$MSGRAPH_WEBHOOK_CLIENT_STATE"
-
-hermes teams-pipeline subscribe \
-  --resource communications/onlineMeetings/getAllRecordings \
-  --notification-url https://ops.example.com/msgraph/webhook \
-  --client-state "$MSGRAPH_WEBHOOK_CLIENT_STATE"
-```
-
-:::warning Graph subscriptions expire in 72 hours
-
-Microsoft Graph caps webhook subscriptions at 72 hours and will not auto-renew them. You MUST schedule `hermes teams-pipeline maintain-subscriptions` before going live, or notifications will silently stop three days after any manual subscription creation. See [Automating subscription renewal](/docs/guides/operate-teams-meeting-pipeline#automating-subscription-renewal-required-for-production) in the operator runbook — three options (Hermes cron, systemd timer, plain crontab).
-
-:::
-
-For subscription maintenance and day-2 operator flows, continue with the guide: [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline).
+Automatic webhook orchestration or Notion/Linear/Teams sinks, if they exist at all, belong to an **out-of-tree / source** Python gateway plugin you maintain yourself. That surface is **not** the Rust CLI contract and is **not** installed by the Docker/release package. Do not mix Python plugin YAML (including sink blocks) into the Rust `meeting_pipeline` object expecting a soft ignore.
 
 ## Validation
 
-Run the built-in validation snapshot:
-
 ```bash
 hermes teams-pipeline validate
-```
-
-Useful companion checks:
-
-```bash
 hermes teams-pipeline token-health
-hermes teams-pipeline subscriptions
 ```
+
+`validate` returns Graph credential booleans, `runtime: "manual_local_only"`, an `external_sinks` unsupported notice, store path/stats, and any meeting_pipeline parse issues. It does **not** report `msgraph_webhook` enabled state or Teams delivery configuration.
 
 ## Troubleshooting
 
 | Problem | What to check |
 |---------|---------------|
-| Graph webhook validation fails | Confirm the public URL is correct and reachable, and that Graph is calling the exact `/msgraph/webhook` path |
-| Jobs do not appear in `hermes teams-pipeline list` | Confirm `msgraph_webhook` is enabled and that subscriptions point at the right notification URL |
-| Transcript-first never succeeds | Check Graph permissions for transcript resources and whether the transcript artifact exists for that meeting |
-| Recording fallback fails | Confirm `ffmpeg` is installed and the Graph app can access recording artifacts |
-| Teams summary delivery fails | Re-check `delivery_mode`, target IDs, and Teams auth config |
+| Expected automatic summaries after Graph events | Unsupported on Rust — use CLI `fetch`/`run` with `--organizer-user-id`, or a separate orchestrator |
+| `meeting_pipeline` contains `notion` / `linear` / `teams_delivery` | Expected fail-closed parse/validate error — remove those keys on Rust |
+| `fetch`/`run` errors about `--organizer-user-id` | Required non-blank Microsoft Entra **object ID UUID** (not UPN/email) on every Graph artifact fetch/run |
+| Jobs do not appear in `list` | Nothing has written the local store; Rust gateway does not enqueue from webhooks |
+| Transcript-first never succeeds | Graph permissions and transcript artifact existence for that meeting |
+| Recording / STT fallback fails | `ffmpeg`, recording permissions, and media limits (512 MiB recording, ~24 MB STT segment) |
+| Expecting `validate` to check webhook/delivery setup | It does not — only Graph env credentials, meeting_pipeline parse, and store stats |
 
 ## Related Docs
 
-- [Microsoft Teams bot setup](/docs/user-guide/messaging/teams)
-- [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline)
+- [Microsoft Teams bot setup](/docs/user-guide/messaging/teams) (outbound messaging adapter — separate from pipeline sinks)
+- [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline) (operator worksheet; verify against this Rust contract)
+- [Voice & TTS — Transcription](/docs/user-guide/features/tts#transcription-tool-stt) (STT tool + approved media roots)

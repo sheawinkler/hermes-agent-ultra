@@ -14,8 +14,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use hermes_agent::plugins::PluginManifest;
-use hermes_agent::{MemoryProviderPlugin, SessionPersistence};
+use hermes_agent::{MemoryProviderPlugin, RunRuntime, SessionPersistence};
 use hermes_app_runtime::{
     apply_cli_chat_runtime_env, query_mode_model_not_found,
     query_mode_remediation_target_from_catalog, query_mode_tools_enabled,
@@ -44,20 +43,19 @@ use hermes_tools::skill_commands::{
 use hermes_tools::ToolPolicyEngine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::alpha_runtime::{
     append_counterfactual, append_objective_learning_entry, build_objective_dag_from_contract,
     canonical_objective_behavior_mode, canonical_objective_lifecycle_status,
     clear_objective_contract, clear_objective_contract_wait_barrier, clear_objective_dag,
-    clear_objective_learning_ledger, enqueue_loop_event, ensure_alpha_runtime_bootstrap,
+    clear_objective_learning_ledger, ensure_alpha_runtime_bootstrap,
     ensure_trading_runtime_bootstrap, load_alpha_loops, load_claim_verifier_policy,
     load_contextlattice_policy, load_last_trading_alpha_report, load_objective_contract,
     load_objective_dag, load_objective_ensemble_policy, load_objective_eval_trend,
     load_objective_learning_ledger, load_objective_profile, load_objective_simulation_policy,
     load_quorum_policy, objective_lifecycle_is_active, objective_profile_specialized_for,
-    recover_orphan_loop_events, refresh_trading_alpha_report, render_mission_board,
-    render_trading_alpha_board, replay_loop_queue, reset_objective_profile_generalized,
+    refresh_trading_alpha_report, render_mission_board, render_trading_alpha_board,
+    reset_objective_profile_generalized,
     set_claim_verifier_enabled, set_contextlattice_policy_mode,
     set_objective_contract_behavior_mode, set_objective_contract_lifecycle_status,
     set_objective_contract_wait_pid, set_objective_contract_wait_seconds,

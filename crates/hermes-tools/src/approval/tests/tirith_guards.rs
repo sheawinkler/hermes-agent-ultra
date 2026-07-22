@@ -1,5 +1,5 @@
 #[test]
-fn test_combined_guards_container_backends_skip_all_checks() {
+fn test_combined_guards_do_not_trust_container_backend_labels() {
     for environment in ["docker", "singularity", "modal", "daytona"] {
         let result = check_all_command_guards_with_context(
             "rm -rf /",
@@ -14,8 +14,15 @@ fn test_combined_guards_container_backends_skip_all_checks() {
         )
         .unwrap();
         assert!(
-            result.approved,
-            "container backend {environment} should skip host guards"
+            !result.approved,
+            "container backend {environment} must not skip host guards"
+        );
+        assert!(
+            result
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .contains("hardline security policy")
         );
     }
 }

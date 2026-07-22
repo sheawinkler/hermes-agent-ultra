@@ -33,5 +33,5 @@ This ledger maps the 15 requested competitive "illegal-seeming" outcomes to firs
 Run:
 
 ```sh
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target scripts/run-ultra-feature-benchmarks.sh
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} scripts/run-ultra-feature-benchmarks.sh
 ```

@@ -22,7 +22,7 @@ Checks:
   - installs hermes-agent-ultra and hermes-ultra into a temp bin directory
   - leaves an existing hermes command untouched unless legacy alias is opted in
   - verifies version, setup help, auth status, memory status, route health,
-    systems release/status, and one-true-harness tool registry entries
+    systems release/status, and audited capability-inventory registry entries
 
 Environment:
   HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS
@@ -217,13 +217,15 @@ assert_contains "${ROUTE_HEALTH_OUT}" '"summary"'
 assert_contains "${ROUTE_HEALTH_OUT}" '"overall"'
 
 SYSTEMS_OUT="$(run_capture systems-status "${BIN_DIR}/hermes-ultra" systems status --json)"
-assert_contains "${SYSTEMS_OUT}" '"kind": "hermes.systems.status"'
+assert_contains "${SYSTEMS_OUT}" '"kind": "hermes.systems.surface_availability"'
+assert_contains "${SYSTEMS_OUT}" '"production_completeness_assessed": false'
 assert_contains "${SYSTEMS_OUT}" "Provider capability registry"
-assert_contains "${SYSTEMS_OUT}" "Release gate"
+assert_contains "${SYSTEMS_OUT}" "Release evidence"
 
 RELEASE_OUT="$(run_capture systems-release "${BIN_DIR}/hermes-ultra" systems release --json)"
-assert_contains "${RELEASE_OUT}" '"kind": "hermes.systems.release_gate"'
-assert_contains "${RELEASE_OUT}" '"passed": true'
+assert_contains "${RELEASE_OUT}" '"kind": "hermes.systems.release_evidence_inventory"'
+assert_contains "${RELEASE_OUT}" '"validation_executed": false'
+assert_contains "${RELEASE_OUT}" '"release_ready": false'
 
 TOOLS_OUT="$(run_capture tools-list "${BIN_DIR}/hermes-ultra" tools list)"
 for surface in harness_cockpit tool_policy_simulate objective_snapshot ops_snapshot integrations_snapshot auth_snapshot skills_list skill_view; do

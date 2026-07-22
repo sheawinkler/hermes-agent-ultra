@@ -130,40 +130,9 @@ static COMPILED_BLOCKED_URLS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         .collect()
 });
 
-static COMPILED_RELAXED_RM_COMMANDS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [
-        // Shell-like rm command lines; used to distinguish safe temp cleanup
-        // from broad destructive removal in relaxed mode.
-        r"(?im)\brm\s+-[A-Za-z]*[rf][A-Za-z]*[^\n]*",
-    ]
-    .iter()
-    .filter_map(|p| Regex::new(p).ok())
-    .collect()
-});
-
 pub const MAX_SKILL_FILE_COUNT: usize = 200;
 pub const MAX_SINGLE_SKILL_FILE_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SkillGuardMode {
-    Strict,
-    Relaxed,
-    Off,
-}
-
-impl SkillGuardMode {
-    fn from_env() -> Self {
-        let raw = std::env::var("HERMES_SKILL_GUARD_MODE")
-            .ok()
-            .or_else(|| std::env::var("HERMES_GUARD_MODE").ok())
-            .unwrap_or_else(|| "strict".to_string());
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "off" | "disabled" | "none" => Self::Off,
-            "relaxed" | "loose" | "permissive" => Self::Relaxed,
-            _ => Self::Strict,
-        }
-    }
-}
 
 /// Trust tier used by install-policy decisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,38 +212,11 @@ fn finding(
     }
 }
 
-/// Resolve an install source into a trust tier.
-pub fn resolve_trust_level(source: &str) -> SkillTrustLevel {
-    let mut normalized = source.trim().trim_matches('/').to_ascii_lowercase();
-    if normalized == "official" {
-        return SkillTrustLevel::Builtin;
-    }
-    for prefix in ["skills-sh/", "skils-sh/"] {
-        if let Some(rest) = normalized.strip_prefix(prefix) {
-            normalized = rest.to_string();
-            break;
-        }
-    }
-
-    const TRUSTED_REPOS: &[&str] = &[
-        "openai/skills",
-        "anthropic/skills",
-        "anthropics/skills",
-        "addyosmani/agent-skills",
-        "google/skills",
-        "huggingface/skills",
-        "mattpocock/skills",
-        "nvidia/skills",
-    ];
-
-    if TRUSTED_REPOS
-        .iter()
-        .any(|repo| normalized == *repo || normalized.starts_with(&format!("{repo}/")))
-    {
-        SkillTrustLevel::Trusted
-    } else {
-        SkillTrustLevel::Community
-    }
+/// Source labels are presentation metadata only. A URL, repository name, or
+/// branch string never supplies package trust; only `SkillTrustVerifier`
+/// admission can do that.
+pub fn resolve_trust_level(_source: &str) -> SkillTrustLevel {
+    SkillTrustLevel::Community
 }
 
 /// Collapse findings into the same coarse verdict used by install policy.
@@ -389,6 +331,22 @@ fn display_rel(path: &Path, root: &Path) -> String {
         .join("/")
 }
 
+/// Detached trust metadata is outside the executable package payload so the
+/// lock can carry the package manifest without creating a hash cycle. This is
+/// deliberately exact: any other package-local `.hub/**` file remains
+/// scanned as payload.
+fn is_detached_trust_metadata(path: &Path, root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    relative == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_LOCK_FILE)
+        || relative
+            == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_REVOCATIONS_FILE)
+        || relative
+            == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_KEYRING_FILE)
+}
+
+
 pub fn scan_skill_file(path: &Path, root: &Path) -> Vec<SkillScanFinding> {
     let rel = display_rel(path, root);
     let Ok(bytes) = fs::read(path) else {
@@ -473,8 +431,8 @@ pub fn scan_skill_file(path: &Path, root: &Path) -> Vec<SkillScanFinding> {
 }
 
 pub fn check_skill_structure(skill_dir: &Path) -> Vec<SkillScanFinding> {
-    let root = match skill_dir.canonicalize() {
-        Ok(root) => root,
+    let root_meta = match fs::symlink_metadata(skill_dir) {
+        Ok(meta) => meta,
         Err(_) => {
             return vec![finding(
                 "missing_skill_dir",
@@ -487,6 +445,17 @@ pub fn check_skill_structure(skill_dir: &Path) -> Vec<SkillScanFinding> {
             )]
         }
     };
+    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+        return vec![finding(
+            "symlink_payload",
+            "high",
+            "structural",
+            "",
+            0,
+            "",
+            "skill root must be a non-symlink directory",
+        )];
+    }
 
     let mut findings = Vec::new();
     let mut files = 0usize;
@@ -498,30 +467,48 @@ pub fn check_skill_structure(skill_dir: &Path) -> Vec<SkillScanFinding> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            if is_detached_trust_metadata(&path, skill_dir) {
+                continue;
+            }
             let rel = display_rel(&path, skill_dir);
             let Ok(meta) = fs::symlink_metadata(&path) else {
+                findings.push(finding(
+                    "unreadable_file",
+                    "medium",
+                    "structural",
+                    &rel,
+                    0,
+                    "",
+                    "skill payload metadata could not be read",
+                ));
                 continue;
             };
             if meta.file_type().is_symlink() {
-                match path.canonicalize() {
-                    Ok(target) if target.starts_with(&root) => {}
-                    _ => findings.push(finding(
-                        "symlink_escape",
-                        "high",
-                        "structural",
-                        &rel,
-                        0,
-                        "",
-                        "symlink escapes skill directory boundary",
-                    )),
-                }
+                let escapes_root = fs::canonicalize(&path)
+                    .map(|target| !target.starts_with(skill_dir))
+                    .unwrap_or(true);
+                findings.push(finding(
+                    if escapes_root {
+                        "symlink_escape"
+                    } else {
+                        "symlink_payload"
+                    },
+                    "high",
+                    "structural",
+                    &rel,
+                    0,
+                    "",
+                    if escapes_root {
+                        "symlink payload escapes the skill root"
+                    } else {
+                        "symlink payload is not allowed"
+                    },
+                ));
                 continue;
             }
             if meta.is_dir() {
                 stack.push(path);
-                continue;
-            }
-            if meta.is_file() {
+            } else if meta.is_file() {
                 files += 1;
                 if meta.len() as usize > MAX_SINGLE_SKILL_FILE_BYTES {
                     findings.push(finding(
@@ -534,6 +521,16 @@ pub fn check_skill_structure(skill_dir: &Path) -> Vec<SkillScanFinding> {
                         "skill file exceeds size limit",
                     ));
                 }
+            } else {
+                findings.push(finding(
+                    "non_regular_file",
+                    "medium",
+                    "structural",
+                    &rel,
+                    0,
+                    "",
+                    "non-regular payload is not allowed",
+                ));
             }
         }
     }
@@ -567,6 +564,9 @@ pub fn scan_skill_dir(skill_dir: &Path, source: &str) -> SkillScanReport {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            if is_detached_trust_metadata(&path, skill_dir) {
+                continue;
+            }
             let Ok(meta) = fs::symlink_metadata(&path) else {
                 continue;
             };
@@ -591,154 +591,23 @@ pub fn scan_skill_dir(skill_dir: &Path, source: &str) -> SkillScanReport {
     }
 }
 
-/// Decide whether a scanned skill may be installed.
-///
-/// Mirrors upstream's force contract: `--force` may override caution-level
-/// community blocks, but it must not override a dangerous verdict for
-/// community or trusted external sources.
+/// Legacy coarse inputs are not a package-admission capability. Callers must
+/// materialize a v2 package and use `SkillTrustVerifier`; therefore neither a
+/// source label nor `force` can bypass signature, revocation, digest, scan, or
+/// compatibility verification.
 pub fn should_allow_install(
-    trust_level: SkillTrustLevel,
-    verdict: SkillScanVerdict,
-    finding_count: usize,
-    force: bool,
+    _trust_level: SkillTrustLevel,
+    _verdict: SkillScanVerdict,
+    _finding_count: usize,
+    _force: bool,
 ) -> (bool, String) {
-    use SkillScanVerdict::{Caution, Dangerous, Safe};
-    use SkillTrustLevel::{AgentCreated, Builtin, Community, Trusted};
-
-    let decision = match (trust_level, verdict) {
-        (Builtin, _) => "allow",
-        (Trusted, Safe | Caution) => "allow",
-        (Trusted, Dangerous) => "block",
-        (Community, Safe) => "allow",
-        (Community, Caution | Dangerous) => "block",
-        (AgentCreated, Safe | Caution) => "allow",
-        (AgentCreated, Dangerous) => "ask",
-    };
-
-    if decision == "allow" {
-        return (
-            true,
-            format!(
-                "Allowed ({} source, {} verdict)",
-                trust_level.as_str(),
-                verdict.as_str()
-            ),
-        );
-    }
-
-    if force && !(verdict == Dangerous && matches!(trust_level, Community | Trusted)) {
-        return (
-            true,
-            format!(
-                "Force-installed despite {} verdict ({} findings)",
-                verdict.as_str(),
-                finding_count
-            ),
-        );
-    }
-
-    if verdict == Dangerous && matches!(trust_level, Community | Trusted) {
-        return (
-            false,
-            format!(
-                "Blocked ({} source + dangerous verdict, {} findings). --force does not override a dangerous verdict.",
-                trust_level.as_str(),
-                finding_count
-            ),
-        );
-    }
-
-    if decision == "ask" {
-        return (
-            false,
-            format!(
-                "Requires confirmation ({} source + {} verdict, {} findings)",
-                trust_level.as_str(),
-                verdict.as_str(),
-                finding_count
-            ),
-        );
-    }
-
     (
         false,
-        format!(
-            "Blocked ({} source + {} verdict, {} findings). Use --force to override.",
-            trust_level.as_str(),
-            verdict.as_str(),
-            finding_count
-        ),
+        "Legacy source/verdict admission is disabled; use the v2 SkillTrustVerifier"
+            .to_string(),
     )
 }
 
-fn relaxed_rm_target_is_safe(target: &str) -> bool {
-    let raw = target
-        .trim()
-        .trim_matches(|c| matches!(c, '"' | '\'' | '`'));
-    if raw.is_empty() {
-        return false;
-    }
-    let t = raw.to_ascii_lowercase();
-    if t == "/" || t == "*" || t == "/*" || t == "~" || t == "~/" || t == "~/*" {
-        return false;
-    }
-    if t.starts_with("/tmp")
-        || t.starts_with("/var/tmp")
-        || t.starts_with("$tmpdir")
-        || t.starts_with("${tmpdir}")
-        || t.starts_with("./tmp")
-        || t.starts_with("tmp/")
-        || t.starts_with("./.tmp")
-        || t.starts_with(".tmp/")
-        || t.starts_with("./target")
-        || t.starts_with("target/")
-        || t.starts_with("./dist")
-        || t.starts_with("dist/")
-        || t.starts_with("./build")
-        || t.starts_with("build/")
-        || t.starts_with("./.cache")
-        || t.starts_with(".cache/")
-        || t.starts_with("./.pytest_cache")
-        || t.starts_with(".pytest_cache/")
-        || t.starts_with("./__pycache__")
-        || t.starts_with("__pycache__/")
-    {
-        return true;
-    }
-    false
-}
-
-fn relaxed_rm_command_is_safe(command: &str) -> bool {
-    let mut saw_target = false;
-    for token in command.split_whitespace() {
-        let tok = token.trim().trim_matches(|c| matches!(c, ';' | '&' | '|'));
-        if tok.is_empty() {
-            continue;
-        }
-        if tok.eq_ignore_ascii_case("rm") {
-            continue;
-        }
-        if tok.starts_with('-') {
-            continue;
-        }
-        saw_target = true;
-        if !relaxed_rm_target_is_safe(tok) {
-            return false;
-        }
-    }
-    saw_target
-}
-
-fn relaxed_mode_has_unsafe_rm(content: &str) -> bool {
-    for re in COMPILED_RELAXED_RM_COMMANDS.iter() {
-        for mat in re.find_iter(content) {
-            if !relaxed_rm_command_is_safe(mat.as_str()) {
-                return true;
-            }
-        }
-    }
-    false
-}
 
 // ---------------------------------------------------------------------------
 // SkillGuard
@@ -754,9 +623,6 @@ pub struct SkillGuard {
     blocked_patterns: Vec<String>,
     /// Additional user-provided blocked URL patterns.
     blocked_urls: Vec<String>,
-    /// Optional mode override used by tests and embedded callers that need
-    /// deterministic behavior without mutating process-wide environment.
-    mode_override: Option<SkillGuardMode>,
 }
 
 impl Default for SkillGuard {
@@ -764,7 +630,6 @@ impl Default for SkillGuard {
         Self {
             blocked_patterns: Vec::new(),
             blocked_urls: Vec::new(),
-            mode_override: None,
         }
     }
 }
@@ -775,18 +640,9 @@ impl SkillGuard {
         Self {
             blocked_patterns,
             blocked_urls,
-            mode_override: None,
         }
     }
 
-    #[cfg(test)]
-    fn with_mode(mode: SkillGuardMode) -> Self {
-        Self {
-            blocked_patterns: Vec::new(),
-            blocked_urls: Vec::new(),
-            mode_override: Some(mode),
-        }
-    }
 
     /// Validate a skill's content and structure.
     ///
@@ -833,28 +689,15 @@ impl SkillGuard {
     /// Unlike `validate_skill`, this does not enforce formatting/structure
     /// requirements and is safe to run against third-party skill bundles.
     pub fn scan_security_only(&self, skill: &Skill) -> Result<(), SkillError> {
-        let mode = self.mode_override.unwrap_or_else(SkillGuardMode::from_env);
-        match mode {
-            SkillGuardMode::Strict => {
-                // Check built-in dangerous patterns.
-                for (regex, reason) in COMPILED_DANGEROUS.iter() {
-                    if regex.is_match(&skill.content) {
-                        return Err(SkillError::GuardViolation(format!(
-                            "Blocked content: {}",
-                            reason
-                        )));
-                    }
-                }
+        // Production enforcement is always strict; no environment or runtime
+        // guard mode can weaken package admission.
+        for (regex, reason) in COMPILED_DANGEROUS.iter() {
+            if regex.is_match(&skill.content) {
+                return Err(SkillError::GuardViolation(format!(
+                    "Blocked content: {}",
+                    reason
+                )));
             }
-            SkillGuardMode::Relaxed => {
-                // User-relaxed mode: only block destructive rm operations.
-                if relaxed_mode_has_unsafe_rm(&skill.content) {
-                    return Err(SkillError::GuardViolation(
-                        "Blocked content: destructive rm operation detected".to_string(),
-                    ));
-                }
-            }
-            SkillGuardMode::Off => {}
         }
 
         // Check custom blocked patterns.
@@ -869,12 +712,65 @@ impl SkillGuard {
             }
         }
 
-        if mode == SkillGuardMode::Strict {
-            // Validate any URLs found in the content.
-            self.validate_urls_in_content(&skill.content)?;
-        }
+        self.validate_urls_in_content(&skill.content)?;
 
         Ok(())
+
+    }
+
+    /// Run the complete directory scanner used by package trust verification.
+    ///
+    /// This intentionally bypasses environment-selected guard modes: package
+    /// identity evidence must be reproducible and cannot be disabled at runtime.
+    pub fn scan_bundle(&self, skill_dir: &Path, source: &str) -> SkillScanReport {
+        let mut report = scan_skill_dir(skill_dir, source);
+        let mut stack = vec![skill_dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if is_detached_trust_metadata(&path, skill_dir) {
+                    continue;
+                }
+                let Ok(metadata) = fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                if metadata.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if !metadata.is_file() {
+                    continue;
+                }
+                let Ok(content) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                let probe = Skill {
+                    name: report.skill_name.clone(),
+                    content,
+                    category: None,
+                    description: None,
+                };
+                if let Err(error) = self.scan_security_only(&probe) {
+                    report.findings.push(finding(
+                        "guard_security_violation",
+                        "critical",
+                        "guard",
+                        &display_rel(&path, skill_dir),
+                        0,
+                        "",
+                        &error.to_string(),
+                    ));
+                }
+            }
+        }
+        report.verdict = determine_verdict(&report.findings);
+        report
     }
 
     /// Validate a URL against blocked patterns.
@@ -1090,20 +986,18 @@ mod tests {
         assert!(validate_skill(&skill).is_err());
     }
 
-    #[test]
-    fn test_relaxed_mode_allows_tmp_cleanup_rm() {
-        let skill = make_skill("ok", "# Skill\n1. rm -rf /tmp/hermes-ultra-cache");
-        assert!(SkillGuard::with_mode(SkillGuardMode::Relaxed)
-            .validate_skill(&skill)
-            .is_ok());
-    }
 
     #[test]
-    fn test_relaxed_mode_blocks_root_rm() {
+    fn guard_mode_environment_cannot_disable_production_scanning() {
+        let previous = std::env::var_os("HERMES_SKILL_GUARD_MODE");
+        std::env::set_var("HERMES_SKILL_GUARD_MODE", "off");
         let skill = make_skill("bad", "# Skill\n1. rm -rf /");
-        assert!(SkillGuard::with_mode(SkillGuardMode::Relaxed)
-            .validate_skill(&skill)
-            .is_err());
+        assert!(SkillGuard::default().validate_skill(&skill).is_err());
+        if let Some(previous) = previous {
+            std::env::set_var("HERMES_SKILL_GUARD_MODE", previous);
+        } else {
+            std::env::remove_var("HERMES_SKILL_GUARD_MODE");
+        }
     }
 
     #[test]
@@ -1143,65 +1037,27 @@ mod tests {
     }
 
     #[test]
-    fn force_does_not_override_dangerous_community_install() {
+    fn legacy_source_verdict_gate_never_admits_or_honors_force() {
         let (allowed, reason) = should_allow_install(
-            SkillTrustLevel::Community,
-            SkillScanVerdict::Dangerous,
-            2,
+            SkillTrustLevel::Builtin,
+            SkillScanVerdict::Safe,
+            0,
             true,
         );
         assert!(!allowed);
-        assert!(reason.contains("does not override"));
-        assert!(!reason.contains("Use --force to override"));
+        assert!(reason.contains("v2 SkillTrustVerifier"));
     }
 
     #[test]
-    fn force_can_override_non_dangerous_community_install_block() {
-        let (allowed, reason) = should_allow_install(
-            SkillTrustLevel::Community,
-            SkillScanVerdict::Caution,
-            1,
-            true,
-        );
-        assert!(allowed);
-        assert!(reason.contains("Force-installed"));
-    }
-
-    #[test]
-    fn trust_level_resolution_matches_known_skill_sources() {
-        assert_eq!(resolve_trust_level("official"), SkillTrustLevel::Builtin);
-        assert_eq!(
-            resolve_trust_level("openai/skills/frontend-design"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("skills-sh/NVIDIA/skills/cuopt"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("mattpocock/skills/domain-modeling"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("google/skills/cloud"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("addyosmani/agent-skills/code-review-and-quality"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("skils-sh/anthropics/skills/frontend-design"),
-            SkillTrustLevel::Trusted
-        );
-        assert_eq!(
-            resolve_trust_level("openai/skills-evil"),
-            SkillTrustLevel::Community
-        );
-        assert_eq!(
-            resolve_trust_level("official/attacker-skill"),
-            SkillTrustLevel::Community
-        );
+    fn source_labels_never_claim_trust() {
+        for source in [
+            "official",
+            "openai/skills/frontend-design",
+            "skills-sh/NVIDIA/skills/cuopt",
+            "official/attacker-skill",
+        ] {
+            assert_eq!(resolve_trust_level(source), SkillTrustLevel::Community);
+        }
     }
 
     #[test]
@@ -1262,7 +1118,7 @@ mod tests {
 
         let report = scan_skill_dir(&skill, "NVIDIA/skills/safe-skill");
         assert_eq!(report.skill_name, "safe-skill");
-        assert_eq!(report.trust_level, SkillTrustLevel::Trusted);
+        assert_eq!(report.trust_level, SkillTrustLevel::Community);
         assert_eq!(report.verdict, SkillScanVerdict::Safe);
         assert!(report.findings.is_empty());
     }

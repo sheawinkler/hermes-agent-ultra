@@ -362,9 +362,8 @@
     }
 
     #[test]
-    fn test_smart_model_routing_openai_codex_reads_auth_store_token() {
+    fn test_smart_model_routing_selects_openai_codex_provider_override() {
         use futures::stream::BoxStream;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
         struct DummyProvider;
         #[async_trait::async_trait]
@@ -399,28 +398,9 @@
             }
         }
 
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let home = std::env::temp_dir().join(format!("hermes-auth-fixture-{}", nonce));
-        let auth_dir = home.join("auth");
-        std::fs::create_dir_all(&auth_dir).expect("create auth dir");
-        std::fs::write(
-            auth_dir.join("tokens.json"),
-            r#"{
-  "openai-codex": {
-    "provider": "openai-codex",
-    "access_token": "codex-oauth-token",
-    "token_type": "bearer",
-    "refresh_token": null,
-    "scope": null,
-    "expires_at": "2099-01-01T00:00:00Z"
-  }
-}"#,
-        )
-        .expect("write token store");
 
+        let state = tempfile::tempdir().expect("route state");
+        let home = state.path().join("home");
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
             "openai-codex".to_string(),
@@ -464,13 +444,12 @@
             selected.as_ref().and_then(|r| r.provider.as_deref()),
             Some("openai-codex")
         );
-        // Best effort cleanup.
-        let _ = std::fs::remove_dir_all(home);
     }
 
-    #[test]
-    fn test_openai_runtime_reads_openai_oauth_token_store_entry() {
+    #[tokio::test]
+    async fn test_openai_runtime_reads_encrypted_cli_oauth_token_store_entry() {
         use futures::stream::BoxStream;
+        use hermes_auth::{FileTokenStore, OAuthCredential};
         use std::time::{SystemTime, UNIX_EPOCH};
 
         struct DummyProvider;
@@ -511,22 +490,24 @@
             .expect("clock")
             .as_nanos();
         let home = std::env::temp_dir().join(format!("hermes-openai-auth-fixture-{}", nonce));
-        let auth_dir = home.join("auth");
-        std::fs::create_dir_all(&auth_dir).expect("create auth dir");
-        std::fs::write(
-            auth_dir.join("tokens.json"),
-            r#"{
-  "openai": {
-    "provider": "openai",
-    "access_token": "openai-oauth-token",
-    "token_type": "bearer",
-    "refresh_token": null,
-    "scope": null,
-    "expires_at": "2099-01-01T00:00:00Z"
-  }
-}"#,
-        )
-        .expect("write token store");
+        let token_path = home.join("auth").join("tokens.json");
+        let cli_store = FileTokenStore::new(&token_path)
+            .await
+            .expect("CLI token store");
+        cli_store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "openai-oauth-token".to_string(),
+                refresh_token: None,
+                token_type: "bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            })
+            .await
+            .expect("CLI credential");
+        assert!(!std::fs::read_to_string(&token_path)
+            .expect("encrypted token store")
+            .contains("openai-oauth-token"));
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -557,5 +538,309 @@
         );
         let resolved = agent.resolve_runtime_api_key("openai", None, None);
         assert_eq!(resolved.as_deref(), Some("openai-oauth-token"));
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+
+    #[tokio::test]
+    async fn smart_route_provider_override_refreshes_its_vault_not_the_model_prefix_vault() {
+        use futures::stream::BoxStream;
+        use hermes_auth::{FileTokenStore, OAuthCredential};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        struct NoCallProvider {
+            calls: Arc<std::sync::atomic::AtomicUsize>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for NoCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("unexpected"),
+                    usage: None,
+                    model: "unexpected".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let state = tempfile::tempdir().expect("route OAuth state");
+        let home = state.path().join("home");
+        let token_path = home.join("auth").join("tokens.json");
+        let store = FileTokenStore::new(&token_path)
+            .await
+            .expect("encrypted OAuth vault");
+        store
+            .upsert(OAuthCredential {
+                provider: "qwen-oauth".to_string(),
+                access_token: "qwen-expired-token".to_string(),
+                refresh_token: Some("qwen-refresh-token".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            })
+            .await
+            .expect("expired routed credential");
+        store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "openai-must-remain-untouched".to_string(),
+                refresh_token: Some("openai-refresh-token".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            })
+            .await
+            .expect("expired model-prefix credential");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("route OAuth fixture listener");
+        let address = listener.local_addr().expect("route OAuth fixture address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("one refresh request");
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await.expect("read refresh request");
+            let body = r#"{"access_token":"qwen-refreshed-token","refresh_token":"qwen-rotated-refresh","token_type":"Bearer","expires_in":3600}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write refresh response");
+        });
+
+        let endpoint = format!("http://{address}/token");
+        let mut runtime_providers = HashMap::new();
+        for provider in ["qwen-oauth", "openai"] {
+            runtime_providers.insert(
+                provider.to_string(),
+                RuntimeProviderConfig {
+                    oauth_token_url: Some(endpoint.clone()),
+                    oauth_client_id: Some("route-oauth-client".to_string()),
+                    ..RuntimeProviderConfig::default()
+                },
+            );
+        }
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            hermes_home: Some(home.to_string_lossy().to_string()),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("qwen-oauth".to_string()),
+                    // The route model deliberately retains the wrong prefix:
+                    // provider override, not model parsing, owns the vault key.
+                    model: Some("openai:gpt-4o-mini".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+            },
+            ..AgentConfig::default()
+        };
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(state.path()).expect("route OAuth runtime"),
+        );
+        let agent = AgentLoop::new(
+            config.clone(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(NoCallProvider {
+                calls: calls.clone(),
+            }),
+        )
+        .with_run_runtime(runtime.clone());
+        let route = agent
+            .resolve_smart_runtime_route(&[Message::user("帮我总结这段话")])
+            .expect("smart route");
+        assert_eq!(route.provider.as_deref(), Some("qwen-oauth"));
+        let effective_provider =
+            agent.effective_provider_for_model_call(route.model.as_str(), Some(&route));
+        assert_eq!(effective_provider, "qwen-oauth");
+
+        let containment =
+            hermes_environments::ExecutionContainmentContext::manual(config.execution_mode)
+                .expect("manual route OAuth test context");
+        let active = runtime
+            .start_run(
+                &config,
+                &containment,
+                &ToolRegistry::new(),
+                crate::run_runtime::PreparedRunStartEvidence::new(
+                    &[],
+                    &[],
+                    crate::run_runtime::PreparedSystemPromptEvidence::Stored {
+                        content: "route OAuth test",
+                    },
+                ),
+                &crate::run_runtime::RunInvocationContext::default(),
+                None,
+            )
+            .expect("route OAuth run starts");
+        agent
+            .resolve_governed_oauth_before_model_call(Some(&active), &effective_provider)
+            .await
+            .expect("routed vault refresh");
+        tokio::time::timeout(Duration::from_secs(1), server)
+            .await
+            .expect("routed provider reached refresh endpoint")
+            .expect("refresh fixture task");
+
+        assert_eq!(
+            store
+                .get("qwen-oauth")
+                .await
+                .expect("routed credential")
+                .access_token,
+            "qwen-refreshed-token"
+        );
+        assert_eq!(
+            store
+                .get("openai")
+                .await
+                .expect("model-prefix credential")
+                .access_token,
+            "openai-must-remain-untouched"
+        );
+        let inspection = runtime
+            .inspect_run(active.run_id())
+            .expect("inspect routed refresh run");
+        let refresh_intents = inspection
+            .events
+            .iter()
+            .filter_map(|event| {
+                serde_json::from_str::<serde_json::Value>(event.public_payload.as_str()).ok()
+            })
+            .filter(|payload| payload["schema"] == "hermes.oauth-refresh-intent/v1")
+            .collect::<Vec<_>>();
+        assert_eq!(refresh_intents.len(), 1);
+        assert_eq!(refresh_intents[0]["provider"], "qwen-oauth");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        active
+            .finish(TerminalReason::Completed)
+            .await
+            .expect("route OAuth run finish");
+    }
+
+    #[tokio::test]
+    async fn test_expired_encrypted_oauth_credential_fails_closed_with_remediation() {
+        use futures::stream::BoxStream;
+        use hermes_auth::{FileTokenStore, OAuthCredential};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("hermes-expired-auth-fixture-{}", nonce));
+        let token_path = home.join("auth").join("tokens.json");
+        let store = FileTokenStore::new(&token_path)
+            .await
+            .expect("CLI token store");
+        store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "expired-runtime-sentinel".to_string(),
+                refresh_token: Some("refresh-runtime-sentinel".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            })
+            .await
+            .expect("expired CLI credential");
+        let store_before = std::fs::read(&token_path).expect("read encrypted token store");
+
+
+        let agent = AgentLoop::new(
+            AgentConfig {
+                hermes_home: Some(home.to_string_lossy().to_string()),
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let error = match agent.build_runtime_provider(
+            "openai",
+            "gpt-4o",
+            None,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            Ok(_) => panic!("expired credential must not build a provider"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("hermes auth refresh openai"));
+        assert!(!error.to_string().contains("expired-runtime-sentinel"));
+        assert!(!format!("{error:?}").contains("refresh-runtime-sentinel"));
+        assert_eq!(
+            std::fs::read(&token_path).expect("read encrypted token store"),
+            store_before,
+            "runtime credential resolution must not refresh or rewrite the token store"
+        );
         let _ = std::fs::remove_dir_all(home);
     }

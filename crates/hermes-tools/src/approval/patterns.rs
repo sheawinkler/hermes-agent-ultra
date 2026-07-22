@@ -127,7 +127,6 @@ static SUDO_STDIN_GUARD: LazyLock<Regex> = LazyLock::new(|| {
 static DELETE_FROM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bdelete\s+from\b").unwrap());
 
-static CONTAINER_BACKENDS: &[&str] = &["docker", "singularity", "modal", "daytona"];
 
 struct CommandPatternRule {
     regex: Regex,

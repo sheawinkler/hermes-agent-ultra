@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+use hermes_core::{
+    tool_schema, JsonSchema, MemorySubjectStorageKey, ToolError, ToolHandler, ToolSchema,
+};
 
 use std::sync::Arc;
 
@@ -15,17 +17,28 @@ use std::sync::Arc;
 /// Backend for persistent memory operations (MEMORY.md and USER.md).
 #[async_trait]
 pub trait MemoryBackend: Send + Sync {
-    /// Add a memory entry.
-    async fn add(&self, target: &str, content: &str) -> Result<String, ToolError>;
-    /// Replace a memory entry.
+    /// Add a memory entry for the immutable authenticated subject filter.
+    async fn add(
+        &self,
+        filter: &MemorySubjectStorageKey,
+        target: &str,
+        content: &str,
+    ) -> Result<String, ToolError>;
+    /// Replace a memory entry for the immutable authenticated subject filter.
     async fn replace(
         &self,
+        filter: &MemorySubjectStorageKey,
         target: &str,
         old_text: &str,
         new_content: &str,
     ) -> Result<String, ToolError>;
-    /// Remove a memory entry.
-    async fn remove(&self, target: &str, old_text: &str) -> Result<String, ToolError>;
+    /// Remove a memory entry for the immutable authenticated subject filter.
+    async fn remove(
+        &self,
+        filter: &MemorySubjectStorageKey,
+        target: &str,
+        old_text: &str,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -35,11 +48,36 @@ pub trait MemoryBackend: Send + Sync {
 /// Tool for managing persistent memory (MEMORY.md and USER.md).
 pub struct MemoryHandler {
     backend: Arc<dyn MemoryBackend>,
+    subject_filter: Option<MemorySubjectStorageKey>,
 }
 
 impl MemoryHandler {
+    /// Unbound handlers fail closed. The dispatch bridge must bind the opaque
+    /// authenticated filter before a memory operation can reach a backend.
     pub fn new(backend: Arc<dyn MemoryBackend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            subject_filter: None,
+        }
+    }
+
+    pub fn with_subject_filter(
+        backend: Arc<dyn MemoryBackend>,
+        subject_filter: MemorySubjectStorageKey,
+    ) -> Self {
+        Self {
+            backend,
+            subject_filter: Some(subject_filter),
+        }
+    }
+
+    fn subject_filter(&self) -> Result<&MemorySubjectStorageKey, ToolError> {
+        self.subject_filter.as_ref().ok_or_else(|| {
+            ToolError::ExecutionFailed(
+                "Authenticated memory subject binding is unavailable; refusing unbound memory operation."
+                    .to_string(),
+            )
+        })
     }
 }
 
@@ -60,6 +98,7 @@ impl ToolHandler for MemoryHandler {
             ));
         }
 
+        let filter = self.subject_filter()?;
         match action {
             "add" => {
                 let content = params
@@ -68,33 +107,33 @@ impl ToolHandler for MemoryHandler {
                     .ok_or_else(|| {
                         ToolError::InvalidParams("Missing 'content' parameter".into())
                     })?;
-                self.backend.add(target, content).await
+                self.backend.add(filter, target, content).await
             }
             "replace" => {
                 let old_text =
                     params
                         .get("old_text")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| {
-                            ToolError::InvalidParams("Missing 'old_text' parameter".into())
-                        })?;
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ToolError::InvalidParams("Missing 'old_text' parameter".into())
+                    })?;
                 let content = params
                     .get("content")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| {
                         ToolError::InvalidParams("Missing 'content' parameter".into())
                     })?;
-                self.backend.replace(target, old_text, content).await
+                self.backend.replace(filter, target, old_text, content).await
             }
             "remove" => {
                 let old_text =
                     params
                         .get("old_text")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| {
-                            ToolError::InvalidParams("Missing 'old_text' parameter".into())
-                        })?;
-                self.backend.remove(target, old_text).await
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ToolError::InvalidParams("Missing 'old_text' parameter".into())
+                    })?;
+                self.backend.remove(filter, target, old_text).await
             }
             other => Err(ToolError::InvalidParams(format!(
                 "Unknown action: '{}'. Use 'add', 'replace', or 'remove'.",
@@ -147,15 +186,30 @@ impl ToolHandler for MemoryHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn subject_filter() -> MemorySubjectStorageKey {
+        let subject = hermes_core::MemorySubject::local_owner(
+            hermes_core::MemorySurface::Local,
+            "memory-handler-test",
+        )
+        .expect("subject");
+        subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes([43_u8; 32]))
+    }
+
 
     struct MockMemoryBackend;
     #[async_trait]
     impl MemoryBackend for MockMemoryBackend {
-        async fn add(&self, target: &str, content: &str) -> Result<String, ToolError> {
+        async fn add(
+            &self,
+            _filter: &MemorySubjectStorageKey,
+            target: &str,
+            content: &str,
+        ) -> Result<String, ToolError> {
             Ok(format!("Added: {} => {}", target, content))
         }
         async fn replace(
             &self,
+            _filter: &MemorySubjectStorageKey,
             target: &str,
             old_text: &str,
             new_content: &str,
@@ -165,14 +219,20 @@ mod tests {
                 target, old_text, new_content
             ))
         }
-        async fn remove(&self, target: &str, old_text: &str) -> Result<String, ToolError> {
+        async fn remove(
+            &self,
+            _filter: &MemorySubjectStorageKey,
+            target: &str,
+            old_text: &str,
+        ) -> Result<String, ToolError> {
             Ok(format!("Removed: {} => {}", target, old_text))
         }
     }
 
     #[tokio::test]
     async fn test_memory_add() {
-        let handler = MemoryHandler::new(Arc::new(MockMemoryBackend));
+        let handler =
+            MemoryHandler::with_subject_filter(Arc::new(MockMemoryBackend), subject_filter());
         let result = handler
             .execute(json!({"action": "add", "target": "memory", "content": "User prefers concise answers"}))
             .await
@@ -182,7 +242,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_replace() {
-        let handler = MemoryHandler::new(Arc::new(MockMemoryBackend));
+        let handler =
+            MemoryHandler::with_subject_filter(Arc::new(MockMemoryBackend), subject_filter());
         let result = handler
             .execute(
                 json!({"action":"replace","target":"user","old_text":"prefers concise","content":"Prefers concise Chinese answers"}),
@@ -190,6 +251,16 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("Replaced"));
+    }
+
+    #[tokio::test]
+    async fn test_memory_unbound_handler_fails_closed() {
+        let handler = MemoryHandler::new(Arc::new(MockMemoryBackend));
+        let error = handler
+            .execute(json!({"action": "add", "target": "memory", "content": "entry"}))
+            .await
+            .expect_err("unbound handler must reject");
+        assert!(error.to_string().contains("subject binding is unavailable"));
     }
 
     #[tokio::test]

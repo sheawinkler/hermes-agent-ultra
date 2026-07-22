@@ -165,7 +165,6 @@ The default implementation returns (any `None` widgets are filtered out):
     image_bar,              # attached images indicator
     input_area,             # user text input
     input_rule_bot,         # ─── border below input
-    voice_status_bar,       # voice mode status (conditional)
     completions_menu,       # autocomplete dropdown
 ]
 ```

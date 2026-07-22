@@ -11,7 +11,7 @@ impl TelegramAdapter {
             .and_then(|parameters| parameters.retry_after)
         {
             return GatewayError::RateLimited {
-                retry_after_secs: Some(retry_after_secs),
+                retry_after: Some(std::time::Duration::from_secs(retry_after_secs)),
             };
         }
 
@@ -64,7 +64,7 @@ impl TelegramAdapter {
                 retries += 1;
                 if retries > RATE_LIMIT_MAX_RETRIES {
                     return Err(GatewayError::RateLimited {
-                        retry_after_secs: Some(retry_after),
+                        retry_after: Some(std::time::Duration::from_secs(retry_after)),
                     });
                 }
 
@@ -81,7 +81,8 @@ impl TelegramAdapter {
                 let text = resp.text().await.unwrap_or_default();
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     return Err(GatewayError::RateLimited {
-                        retry_after_secs: Self::retry_after_from_telegram_body(&text),
+                        retry_after: Self::retry_after_from_telegram_body(&text)
+                            .map(std::time::Duration::from_secs),
                     });
                 }
                 return Err(GatewayError::SendFailed(format!(
@@ -123,9 +124,19 @@ impl TelegramAdapter {
             "gif" => ("sendAnimation", "animation"),
             "mp4" | "mov" | "avi" | "mkv" | "webm" => ("sendVideo", "video"),
             "mp3" | "aac" | "m4a" => ("sendAudio", "audio"),
-            "ogg" | "oga" => ("sendVoice", "voice"),
             "webm_sticker" | "tgs" => ("sendSticker", "sticker"),
             _ => ("sendDocument", "document"),
+        }
+
+    }
+    fn media_method_for_delivery(
+        ext: &str,
+        send_as_voice: bool,
+    ) -> (&'static str, &'static str) {
+        if send_as_voice && matches!(ext, "ogg" | "oga" | "mp3" | "m4a") {
+            ("sendVoice", "voice")
+        } else {
+            Self::media_method_for_extension(ext)
         }
     }
 }

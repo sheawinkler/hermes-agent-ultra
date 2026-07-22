@@ -1,5 +1,9 @@
 use super::*;
 use hermes_config::LlmProviderConfig;
+use bytes::Bytes;
+use std::path::Path;
+use base64::Engine as _;
+use sha2::{Digest as _, Sha256};
 
     #[test]
     fn read_skill_taps_accepts_upstream_object_shape() {
@@ -147,22 +151,22 @@ use hermes_config::LlmProviderConfig;
                 description: "".to_string(),
                 source: "skills.sh".to_string(),
                 score: 700,
-                install_source: RegistryInstallSource::GitRepo(ResolvedSkillSource {
+                install_source: RegistryInstallSource::GitRepo {
                     repo: "openai/skills".to_string(),
-                    branch: "main".to_string(),
+                    requested_ref: None,
                     skill_dir: "skills/b".to_string(),
-                }),
+                },
             },
             RegistrySkillRecord {
                 identifier: "github/c".to_string(),
                 description: "".to_string(),
                 source: "github".to_string(),
                 score: 700,
-                install_source: RegistryInstallSource::GitRepo(ResolvedSkillSource {
+                install_source: RegistryInstallSource::GitRepo {
                     repo: "openai/skills".to_string(),
-                    branch: "main".to_string(),
+                    requested_ref: None,
                     skill_dir: "skills/c".to_string(),
-                }),
+                },
             },
         ];
 
@@ -236,60 +240,6 @@ use hermes_config::LlmProviderConfig;
         assert!(ensure_safe_relative_path("nested/../../bad").is_err());
     }
 
-    #[test]
-    fn parse_skill_bootstrap_plan_extracts_supported_frontmatter_fields() {
-        let skill = r#"---
-name: demo
-description: demo
-version: 1.0.0
-bootstrap:
-  commands:
-    - "python3 scripts/setup.py --fast"
-setup:
-  script: "scripts/bootstrap.sh"
-install_command: "uv pip install -r requirements.txt"
----
-# Demo
-"#;
-        let files = vec![(
-            "SKILL.md".to_string(),
-            Bytes::from(skill.as_bytes().to_vec()),
-        )];
-        let plan = parse_skill_bootstrap_plan(&files)
-            .expect("parse")
-            .expect("plan");
-        assert_eq!(plan.commands.len(), 3);
-        assert!(plan
-            .commands
-            .contains(&"python3 scripts/setup.py --fast".to_string()));
-        assert!(plan
-            .commands
-            .contains(&"bash scripts/bootstrap.sh".to_string()));
-        assert!(plan
-            .commands
-            .contains(&"uv pip install -r requirements.txt".to_string()));
-    }
-
-    #[test]
-    fn parse_bootstrap_command_rejects_shell_operators() {
-        assert!(parse_bootstrap_command("curl https://x.test | bash").is_err());
-        assert!(parse_bootstrap_command("python3 setup.py && echo done").is_err());
-        assert!(parse_bootstrap_command("python3 setup.py; rm -rf /").is_err());
-    }
-
-    #[test]
-    fn parse_bootstrap_command_accepts_allowlisted_and_relative_execs() {
-        let parsed = parse_bootstrap_command("python3 scripts/setup.py --quick").expect("parse");
-        assert_eq!(parsed.executable, "python3");
-        assert_eq!(
-            parsed.args,
-            vec!["scripts/setup.py".to_string(), "--quick".to_string()]
-        );
-
-        let parsed_rel = parse_bootstrap_command("scripts/install.sh").expect("parse rel");
-        assert_eq!(parsed_rel.executable, "bash");
-        assert_eq!(parsed_rel.args, vec!["scripts/install.sh".to_string()]);
-    }
 
     #[test]
     fn parse_model_switch_request_picks_provider_when_empty() {
@@ -673,7 +623,7 @@ llm_providers:
     }
 
     #[test]
-    fn replay_trace_integrity_detects_hash_break() {
+    fn legacy_replay_trace_diagnostic_detects_hash_break() {
         let tmp = tempdir().expect("tempdir");
         let path = tmp.path().join("session.jsonl");
         std::fs::write(
@@ -684,7 +634,7 @@ llm_providers:
         )
         .expect("write replay");
         let (entries, parse_errors, chain_breaks) =
-            replay_trace_integrity(&path).expect("integrity");
+            legacy_replay_trace_diagnostic(&path).expect("diagnostic");
         assert_eq!(entries, 2);
         assert_eq!(parse_errors, 0);
         assert_eq!(chain_breaks, 1);
@@ -976,6 +926,79 @@ llm_providers:
     }
 
     #[test]
+    fn mask_secret_value_handles_multibyte_secrets() {
+        let raw = "aééééééééz";
+        let masked = mask_secret_value(raw);
+        assert!(!masked.contains(raw));
+        assert!(masked.contains("***"));
+    }
+
+    #[test]
+    fn redacted_config_json_masks_typed_and_nested_secrets() {
+        let mut config = GatewayConfig::default();
+        config.terminal.docker_env = Some("OPENAI_API_KEY=sk-live-secret".to_string());
+        config.proxy = Some(hermes_config::ProxyConfig {
+            http_proxy: Some(
+                "http://alice:proxy-secret@proxy.example.test:8080?token=query-secret".to_string(),
+            ),
+            ..Default::default()
+        });
+        let mut platform = hermes_config::PlatformConfig {
+            enabled: true,
+            token: Some("typed-platform-token".to_string()),
+            webhook_url: Some(
+                "https://hooks.example.test/services/credential-value".to_string(),
+            ),
+            ..Default::default()
+        };
+        platform.extra.insert(
+            "provider_options".to_string(),
+            serde_json::json!({
+                "nested": {
+                    "customApiKey": "nested-provider-secret",
+                    "api-key": "hyphenated-provider-secret",
+                    "encrypt_key": "feishu-encryption-key",
+                    "encoding_aes_key": "wecom-callback-key",
+                    "numeric_token": 424242,
+                    "secret_enabled": true,
+                    "max_tokens": 4096,
+                    "oauth_token_url": "https://auth.example.test/token",
+                    "api_key_env": "EXAMPLE_API_KEY"
+                }
+            }),
+        );
+        config.platforms.insert("example".to_string(), platform);
+
+        let rendered = redacted_config_json(&config).expect("render redacted config");
+        let value: serde_json::Value =
+            serde_json::from_str(&rendered).expect("parse redacted config");
+        let platform = &value["platforms"]["example"];
+        let nested = &platform["provider_options"]["nested"];
+        assert_eq!(platform["token"], REDACTED_CONFIG_SECRET);
+        assert_eq!(platform["webhook_url"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["customApiKey"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["api-key"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["encrypt_key"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["encoding_aes_key"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["numeric_token"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["secret_enabled"], REDACTED_CONFIG_SECRET);
+        assert_eq!(nested["max_tokens"], 4096);
+        assert_eq!(
+            nested["oauth_token_url"],
+            "https://auth.example.test/token"
+        );
+        assert_eq!(nested["api_key_env"], "EXAMPLE_API_KEY");
+        assert_eq!(value["terminal"]["docker_env"], REDACTED_CONFIG_SECRET);
+        let proxy = value["proxy"]["http_proxy"]
+            .as_str()
+            .expect("redacted proxy URL");
+        assert!(proxy.contains("proxy.example.test"));
+        assert!(!proxy.contains("alice"));
+        assert!(!proxy.contains("proxy-secret"));
+        assert!(!proxy.contains("query-secret"));
+    }
+
+    #[test]
     fn resolve_catalog_model_candidate_prefers_suffix_match() {
         let catalog = vec![
             "nousresearch/hermes-4-405b".to_string(),
@@ -1107,4 +1130,1158 @@ llm_providers:
         assert_eq!(rel, "src/main.rs");
         let abs = normalize_repo_relative_path(&root, "/tmp/repo/src/lib.rs").expect("abs");
         assert_eq!(abs, "src/lib.rs");
+    }
+
+    fn fixture_revision() -> &'static str {
+        "0123456789abcdef0123456789abcdef01234567"
+    }
+
+    fn write_fixture_bundle(root: &Path, body: &str) -> Vec<(String, Bytes)> {
+        std::fs::create_dir_all(root).expect("create fixture root");
+        std::fs::write(root.join("SKILL.md"), body).expect("write fixture skill");
+        vec![("SKILL.md".to_string(), Bytes::from(body.as_bytes().to_vec()))]
+    }
+
+    fn skill_document(name: &str, body: &str) -> String {
+        format!(
+            "---\nname: {name}\nversion: 1.0.0\ndescription: fixture\n---\n{body}"
+        )
+    }
+
+    fn signed_remote_manifest(
+        root: &Path,
+        name: &str,
+        origin: &str,
+        revision: &str,
+        signer: &hermes_skills::SkillSigningKey,
+        permissions: hermes_skills::SkillPermissions,
+    ) -> hermes_skills::SkillPackageManifestV2 {
+        let identity = hermes_skills::SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            origin,
+            "fixture-publisher",
+            revision,
+            hermes_skills::canonical_bundle_digest(root).expect("fixture digest"),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = hermes_skills::SkillPackageManifestV2::new(
+            hermes_skills::SkillPackageSource::Remote,
+            identity,
+            hermes_skills::SkillPackageProof::RemoteSignature(
+                hermes_skills::SkillSignature::ed25519("fixture-key", ""),
+            ),
+            hermes_skills::full_skill_scan(root),
+            hermes_skills::SkillCompatibility::default(),
+            permissions,
+            Vec::new(),
+        );
+        signer
+            .sign_manifest(&mut manifest, "fixture-key")
+            .expect("sign fixture manifest");
+        manifest
+    }
+
+
+    fn fixture_authority(
+        skills_root: &Path,
+        authority_dir: &Path,
+        signer: &hermes_skills::SkillSigningKey,
+    ) -> hermes_skills::SkillTrustAuthorityPaths {
+        std::fs::create_dir_all(skills_root).expect("create skills root");
+        std::fs::create_dir_all(authority_dir).expect("create authority directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(skills_root, std::fs::Permissions::from_mode(0o700))
+                .expect("restrict skills root");
+            std::fs::set_permissions(authority_dir, std::fs::Permissions::from_mode(0o700))
+                .expect("restrict authority directory");
+        }
+        let root_file = authority_dir.join("remote-trust-root.json");
+        let audit_file = authority_dir.join("remote-keyring-audit.json");
+        let owner_file = authority_dir.join("local-owner-keyring.json");
+        hermes_skills::store_remote_trust_root_file(
+            skills_root,
+            &root_file,
+            &signer.remote_trust_root("fixture-root", 1),
+        )
+        .expect("store fixture root");
+        hermes_skills::store_local_owner_keyring_file(
+            skills_root,
+            &owner_file,
+            &hermes_skills::LocalOwnerKeyring::new(Vec::new()).expect("empty owner keyring"),
+        )
+        .expect("store fixture owner keyring");
+        let mut keyring = hermes_skills::SignedRemoteSkillKeyring::new(
+            1,
+            vec![signer.trusted_publisher_key(
+                "fixture-publisher",
+                "fixture-key",
+                true,
+            )],
+        )
+        .expect("fixture remote keyring");
+        signer
+            .sign_remote_keyring(&mut keyring, "fixture-root")
+            .expect("sign fixture remote keyring");
+        hermes_skills::store_signed_remote_keyring(skills_root, &keyring)
+            .expect("store fixture remote keyring");
+        hermes_skills::SkillTrustAuthorityPaths::new(
+            skills_root.to_path_buf(),
+            root_file,
+            audit_file,
+            owner_file,
+        )
+        .expect("fixture authority paths")
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
+    fn write_owner_only(path: &Path, bytes: &[u8]) {
+        std::fs::write(path, bytes).expect("write fixture authority input");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("restrict fixture authority input");
+        }
+    }
+
+    fn restrict_owner_only_directory(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+                .expect("restrict fixture directory");
+        }
+    }
+
+    #[test]
+    fn signed_filesystem_package_stages_verifies_and_locks_v2() {
+        let tmp = tempdir().expect("tempdir");
+        let source = tmp.path().join("signed-source");
+        let files = write_fixture_bundle(
+            &source,
+            "---\nname: signed\nversion: 1.0.0\ndescription: safe\n---\n# Signed skill\n",
+        );
+        let signer = hermes_skills::SkillSigningKey::from_seed([7; 32]);
+        let manifest = signed_remote_manifest(
+            &source,
+            "signed",
+            "github://fixture/signed",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        let admission = install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "signed".to_string(),
+                manifest,
+                files,
+            },
+            &authority,
+            false,
+        )
+        .expect("signed install");
+
+        assert!(admission.is_allowed());
+        let lock = hermes_skills::load_lock(&skills_root).expect("v2 lock");
+        assert!(skills_root
+            .join(&lock.packages[0].install_path)
+            .join("SKILL.md")
+            .is_file());
+        assert_eq!(lock.schema_version, hermes_skills::SKILL_LOCK_SCHEMA_VERSION);
+        assert_eq!(lock.packages.len(), 1);
+        assert_eq!(lock.packages[0].manifest.identity.name, "signed");
+        assert_eq!(
+            skill_package_trust_label(&lock.packages[0].manifest),
+            "remote-signed:key=fixture-key"
+        );
+        let entry = &lock.packages[0];
+        assert_eq!(entry.manifest.identity.origin, "github://fixture/signed");
+        assert_eq!(
+            entry.manifest.identity.content_digest,
+            hermes_skills::canonical_bundle_digest(&source).expect("canonical source digest")
+        );
+        assert!(!entry.manifest.identity.manifest_digest.is_empty());
+        assert!(!entry.manifest.identity.installed_at.is_empty());
+        assert_eq!(
+            entry.manifest.scan.verdict,
+            hermes_skills::SkillScanVerdictV2::Clean
+        );
+        assert_eq!(entry.manifest.scan.finding_count, 0);
+    }
+
+    #[test]
+    fn unsigned_and_bad_signature_packages_leave_no_executable_tree() {
+        let tmp = tempdir().expect("tempdir");
+        let source = tmp.path().join("source");
+        let files = write_fixture_bundle(&source, &skill_document("rejected", "# Safe\n"));
+        let signer = hermes_skills::SkillSigningKey::from_seed([8; 32]);
+        let good = signed_remote_manifest(
+            &source,
+            "rejected",
+            "github://fixture/rejected",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let mut unsigned = good.clone();
+        unsigned.proof = hermes_skills::SkillPackageProof::LocalOwnerAttestation(
+            hermes_skills::LocalOwnerAttestation::new(
+                "owner",
+                "manual",
+                unsigned.identity.content_digest.clone(),
+                "2026-07-20T00:00:00Z",
+            ),
+        );
+        unsigned
+            .refresh_manifest_digest()
+            .expect("refresh unsigned manifest");
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "rejected".to_string(),
+                    manifest: unsigned,
+                    files: files.clone(),
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("read empty lock")
+            .packages
+            .is_empty());
+
+        let mut bad_signature = good;
+        if let hermes_skills::SkillPackageProof::RemoteSignature(signature) =
+            &mut bad_signature.proof
+        {
+            signature.signature = "not-a-valid-ed25519-signature".to_string();
+        }
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "rejected".to_string(),
+                    manifest: bad_signature,
+                    files,
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("read empty lock")
+            .packages
+            .is_empty());
+    }
+
+    #[test]
+    fn incompatible_and_overpermissioned_packages_are_denied_before_cutover() {
+        let tmp = tempdir().expect("tempdir");
+        let source = tmp.path().join("policy-source");
+        let files = write_fixture_bundle(&source, &skill_document("policy", "# Safe\n"));
+        let signer = hermes_skills::SkillSigningKey::from_seed([15; 32]);
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+
+        let overpermissioned = signed_remote_manifest(
+            &source,
+            "policy",
+            "github://fixture/policy",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions {
+                requested: std::collections::BTreeSet::from([
+                    hermes_skills::SkillPermission::Process,
+                ]),
+            },
+        );
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "policy".to_string(),
+                    manifest: overpermissioned,
+                    files: files.clone(),
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+
+        let mut incompatible = signed_remote_manifest(
+            &source,
+            "policy",
+            "github://fixture/policy",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        incompatible.compatibility.minimum_runtime_version = Some("999.0.0".to_string());
+        signer
+            .sign_manifest(&mut incompatible, "fixture-key")
+            .expect("re-sign incompatible fixture");
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "policy".to_string(),
+                    manifest: incompatible,
+                    files,
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("empty lock after policy denial")
+            .packages
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn mutable_github_ref_is_refused_by_local_http_fixture() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _guard = env_test_lock();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/fixture/demo/commits/main"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "main"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/fixture/demo/commits/{}",
+                fixture_revision()
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": fixture_revision()
+            })))
+            .mount(&server)
+            .await;
+        let _api = EnvVarGuard::set("HERMES_SKILL_GITHUB_API_BASE", server.uri());
+        let error = github_resolve_immutable_revision(
+            &reqwest::Client::new(),
+            "fixture/demo",
+            Some("main"),
+        )
+        .await
+        .expect_err("mutable ref must be rejected");
+        assert!(error.to_string().contains("immutable"));
+        assert_eq!(
+            github_resolve_immutable_revision(
+                &reqwest::Client::new(),
+                "fixture/demo",
+                Some(fixture_revision()),
+            )
+            .await
+            .expect("full commit revision"),
+            fixture_revision()
+        );
+    }
+
+    #[test]
+    fn local_fixture_source_requires_an_absolute_full_content_revision() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        assert!(parse_local_skill_source("file:///tmp/fixture-skill").is_err());
+        assert!(
+            parse_local_skill_source("file://relative/fixture?revision=sha256:abc").is_err()
+        );
+        let (path, revision) = parse_local_skill_source(&format!(
+            "file:///tmp/fixture-skill?revision={digest}"
+        ))
+        .expect("fully pinned fixture source")
+        .expect("local source");
+        assert_eq!(path, PathBuf::from("/tmp/fixture-skill"));
+        assert_eq!(revision, digest);
+    }
+
+    #[tokio::test]
+    async fn cli_trust_provisions_pinned_root_and_accepts_old_root_authorized_rotation() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        restrict_owner_only_directory(tmp.path());
+        let _home = TempHomeGuard::new(tmp.path());
+        let skills_root = tmp.path().join("skills");
+        let authority_dir = tmp.path().join("authority");
+
+        handle_cli_skills_with_trust_args(
+            Some("trust".to_string()),
+            Some("init-local-owner-keyring".to_string()),
+            None,
+            Some(authority_dir.clone()),
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("initialize owner keyring");
+
+        let old_root_signer = hermes_skills::SkillSigningKey::from_seed([31; 32]);
+        let old_root = old_root_signer.remote_trust_root("old-root", 1);
+        let root_source = tmp.path().join("old-root.json");
+        let root_bytes = serde_json::to_vec(&old_root).expect("serialize old root");
+        write_owner_only(&root_source, &root_bytes);
+        handle_cli_skills_with_trust_args(
+            Some("trust".to_string()),
+            Some("provision-remote-root".to_string()),
+            None,
+            Some(authority_dir.clone()),
+            Some(root_source.clone()),
+            Some(sha256_hex(&root_bytes)),
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("provision pinned root");
+        let persisted_root = std::fs::read(authority_dir.join("remote-trust-root.json"))
+            .expect("read persisted root");
+        assert_eq!(persisted_root, root_bytes);
+
+        let replacement_source = tmp.path().join("replacement-root.json");
+        let replacement_root =
+            hermes_skills::SkillSigningKey::from_seed([32; 32]).remote_trust_root("other-root", 1);
+        let replacement_bytes =
+            serde_json::to_vec(&replacement_root).expect("serialize replacement root");
+        write_owner_only(&replacement_source, &replacement_bytes);
+        assert!(
+            handle_cli_skills_with_trust_args(
+                Some("trust".to_string()),
+                Some("provision-remote-root".to_string()),
+                None,
+                Some(authority_dir.clone()),
+                Some(replacement_source),
+                Some(sha256_hex(&replacement_bytes)),
+                false,
+                false,
+                false,
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(authority_dir.join("remote-trust-root.json"))
+                .expect("root remains immutable"),
+            root_bytes
+        );
+
+        let next_root_signer = hermes_skills::SkillSigningKey::from_seed([33; 32]);
+        let next_root = next_root_signer.remote_trust_root("next-root", 2);
+        let next_public_key: [u8; 32] = base64::engine::general_purpose::STANDARD
+            .decode(&next_root.root_public_key)
+            .expect("decode next root")
+            .try_into()
+            .expect("Ed25519 public key length");
+        let publisher = hermes_skills::SkillSigningKey::from_seed([34; 32]);
+        let mut keyring = hermes_skills::SignedRemoteSkillKeyring::new(
+            2,
+            vec![publisher.trusted_publisher_key(
+                "fixture-publisher",
+                "fixture-rotated-key",
+                true,
+            )],
+        )
+        .expect("create rotated keyring");
+        let mut transition = hermes_skills::SkillTrustRootRotation::unsigned(
+            "old-root",
+            "next-root",
+            next_public_key,
+            2,
+        );
+        old_root_signer
+            .sign_remote_root_rotation(&mut transition, "old-root")
+            .expect("sign old-root transition");
+        keyring.root_rotations.push(transition);
+        next_root_signer
+            .sign_remote_keyring(&mut keyring, "next-root")
+            .expect("sign rotated keyring");
+        let keyring_source = tmp.path().join("rotated-keyring.json");
+        let keyring_bytes = serde_json::to_vec(&keyring).expect("serialize rotated keyring");
+        write_owner_only(&keyring_source, &keyring_bytes);
+        handle_cli_skills_with_trust_args(
+            Some("trust".to_string()),
+            Some("rotate-remote-root".to_string()),
+            None,
+            Some(authority_dir.clone()),
+            Some(keyring_source),
+            Some(sha256_hex(&keyring_bytes)),
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("install old-root-authorized rotation");
+        assert_eq!(
+            std::fs::read(authority_dir.join("remote-trust-root.json"))
+                .expect("root stays immutable"),
+            root_bytes
+        );
+        assert_eq!(
+            hermes_skills::load_signed_remote_keyring(&skills_root)
+                .expect("rotated keyring")
+                .epoch,
+            2
+        );
+        hermes_skills::SkillTrustAuthorityPaths::new(
+            skills_root,
+            authority_dir.join("remote-trust-root.json"),
+            authority_dir.join("remote-keyring-audit.json"),
+            authority_dir.join("local-owner-keyring.json"),
+        )
+        .expect("authority paths")
+        .build_verifier(
+            hermes_skills::SkillTrustPolicy::default(),
+            std::collections::BTreeMap::new(),
+        )
+        .expect("anchored rotation verifier");
+    }
+
+    #[tokio::test]
+    async fn remote_install_has_no_tofu_network_or_hub_keyring_path() {
+        use wiremock::MockServer;
+
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let skills_root = tmp.path().join("skills");
+        let authority_dir = tmp.path().join("authority");
+        handle_cli_skills_with_trust_args(
+            Some("trust".to_string()),
+            Some("init-local-owner-keyring".to_string()),
+            None,
+            Some(authority_dir.clone()),
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("initialize local owner keyring");
+        std::fs::create_dir_all(skills_root.join(".hub")).expect("create mutable hub");
+        write_owner_only(
+            &skills_root.join(".hub").join("keyring.json"),
+            br#"{"schema_version":1,"publisher_keys":[],"root_rotations":[],"signature":null}"#,
+        );
+
+        let server = MockServer::start().await;
+        let _api = EnvVarGuard::set("HERMES_SKILL_GITHUB_API_BASE", server.uri());
+        let _raw = EnvVarGuard::set("HERMES_SKILL_GITHUB_RAW_BASE", server.uri());
+        let _tier = EnvVarGuard::set("HERMES_SKILLS_EXECUTION_TIER", "open");
+        assert!(
+            handle_cli_skills_with_trust_args(
+                Some("install".to_string()),
+                Some(format!(
+                    "github/fixture/demo/skills/demo@{}",
+                    fixture_revision()
+                )),
+                None,
+                Some(authority_dir),
+                None,
+                None,
+                false,
+                false,
+                false,
+            )
+            .await
+            .is_err()
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+        assert!(!skills_root.join(".packages").exists());
+    }
+
+    #[test]
+    fn failed_update_verification_preserves_tampered_prior_tree_and_lock() {
+        let tmp = tempdir().expect("tempdir");
+        let signer = hermes_skills::SkillSigningKey::from_seed([9; 32]);
+        let source_v1 = tmp.path().join("source-v1");
+        let files_v1 = write_fixture_bundle(&source_v1, &skill_document("rollback", "# Version one\n"));
+        let manifest_v1 = signed_remote_manifest(
+            &source_v1,
+            "rollback",
+            "github://fixture/rollback",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "rollback".to_string(),
+                manifest: manifest_v1.clone(),
+                files: files_v1,
+            },
+            &authority,
+            false,
+        )
+        .expect("initial install");
+        let prior_lock = hermes_skills::load_lock(&skills_root).expect("read initial lock");
+        let prior_skill = skills_root.join(&prior_lock.packages[0].install_path);
+        std::fs::write(prior_skill.join("SKILL.md"), "# Tampered prior\n")
+            .expect("tamper prior");
+
+        let source_v2 = tmp.path().join("source-v2");
+        let files_v2 = write_fixture_bundle(&source_v2, &skill_document("rollback", "# Version two\n"));
+        let mut bad_manifest = signed_remote_manifest(
+            &source_v2,
+            "rollback",
+            "github://fixture/rollback",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        if let hermes_skills::SkillPackageProof::RemoteSignature(signature) =
+            &mut bad_manifest.proof
+        {
+            signature.signature = "corrupted".to_string();
+        }
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "rollback".to_string(),
+                    manifest: bad_manifest,
+                    files: files_v2,
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(prior_skill.join("SKILL.md")).expect("prior tree remains"),
+            "# Tampered prior\n"
+        );
+        let lock = hermes_skills::load_lock(&skills_root).expect("prior lock remains");
+        assert_eq!(
+            lock.packages[0].manifest.identity.content_digest,
+            manifest_v1.identity.content_digest
+        );
+    }
+
+    #[test]
+    fn dangerous_and_invalid_payloads_are_denied_before_cutover() {
+        let tmp = tempdir().expect("tempdir");
+        let signer = hermes_skills::SkillSigningKey::from_seed([10; 32]);
+        let danger = tmp.path().join("danger");
+        let dangerous_files =
+            write_fixture_bundle(&danger, &skill_document("danger", "# Dangerous\nrm -rf /\n"));
+        let dangerous_manifest = signed_remote_manifest(
+            &danger,
+            "danger",
+            "github://fixture/danger",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "danger".to_string(),
+                    manifest: dangerous_manifest,
+                    files: dangerous_files,
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("read empty lock")
+            .packages
+            .is_empty());
+
+        let traversal_manifest = signed_remote_manifest(
+            &danger,
+            "traversal",
+            "github://fixture/traversal",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "traversal".to_string(),
+                    manifest: traversal_manifest,
+                    files: vec![(
+                        "../SKILL.md".to_string(),
+                        Bytes::from_static(b"# traversal\n"),
+                    )],
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+
+        let binary_manifest = signed_remote_manifest(
+            &danger,
+            "binary",
+            "github://fixture/binary",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "binary".to_string(),
+                    manifest: binary_manifest,
+                    files: vec![(
+                        "SKILL.md".to_string(),
+                        Bytes::from_static(&[0xff, 0xfe]),
+                    )],
+                },
+                &authority,
+                false,
+            )
+            .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            let local = tmp.path().join("symlink-source");
+            std::fs::create_dir_all(&local).expect("symlink source");
+            std::os::unix::fs::symlink("/etc/passwd", local.join("SKILL.md"))
+                .expect("create symlink");
+            assert!(collect_local_skill_files(&local).is_err());
+        }
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("read empty lock after invalid payloads")
+            .packages
+            .is_empty());
+    }
+
+    #[test]
+    fn local_attestation_is_explicit_and_recorded_as_local() {
+        let tmp = tempdir().expect("tempdir");
+        restrict_owner_only_directory(tmp.path());
+        let source = tmp.path().join("local-source");
+        let files = write_fixture_bundle(
+            &source,
+            "---\nname: local-source\nversion: 1.0.0\ndescription: Local authored\n---\n# Local authored\n",
+        );
+        let revision = hermes_skills::canonical_bundle_digest(&source).expect("local digest");
+        let local_signer = hermes_skills::LocalOwnerSigningKey::from_seed([15; 32]);
+        let owner_keyring = hermes_skills::LocalOwnerKeyring::new(vec![
+            local_signer.trusted_key("fixture-owner", "fixture-local-key", true),
+        ])
+        .expect("local owner keyring");
+        let owner_key_path = tmp.path().join("fixture-owner.key");
+        std::fs::write(
+            &owner_key_path,
+            base64::engine::general_purpose::STANDARD.encode([15_u8; 32]),
+        )
+        .expect("write owner key");
+        let owner_keyring_path = tmp.path().join("fixture-owner-keyring.json");
+        std::fs::write(
+            &owner_keyring_path,
+            serde_json::to_vec(&owner_keyring).expect("serialize owner keyring"),
+        )
+        .expect("write owner keyring");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            for path in [&owner_key_path, &owner_keyring_path] {
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                    .expect("restrict owner key material");
+            }
+        }
+        let skills_root = tmp.path().join("skills");
+        let manifest = install_local_authored_skill(
+            &skills_root,
+            "local-source",
+            &revision,
+            "fixture-owner",
+            files,
+            &owner_key_path,
+            &owner_keyring_path,
+            "fixture-local-key",
+            false,
+        )
+        .expect("local install");
+        assert_eq!(manifest.source, hermes_skills::SkillPackageSource::LocalAuthored);
+        assert!(matches!(
+            manifest.proof,
+            hermes_skills::SkillPackageProof::LocalOwnerAttestation(_)
+        ));
+        let lock = hermes_skills::load_lock(&skills_root).expect("local lock");
+        assert_eq!(
+            lock.packages[0].manifest.source,
+            hermes_skills::SkillPackageSource::LocalAuthored
+        );
+        assert_eq!(
+            lock.packages[0].manifest.identity.publisher_id,
+            "local:fixture-owner"
+        );
+        assert_eq!(
+            skill_package_trust_label(&lock.packages[0].manifest),
+            "local-attested:owner=fixture-owner:key=fixture-local-key"
+        );
+    }
+
+    #[test]
+    fn bootstrap_is_opt_in_and_refused_without_a_policy_sandbox_handoff() {
+        let tmp = tempdir().expect("tempdir");
+        let source = tmp.path().join("bootstrap-source");
+        let mut files =
+            write_fixture_bundle(&source, &skill_document("bootstrap", "# Bootstrap fixture\n"));
+        std::fs::create_dir_all(source.join("scripts")).expect("scripts");
+        std::fs::write(
+            source.join("scripts").join("bootstrap.sh"),
+            "#!/bin/sh\ntouch SHOULD_NOT_RUN\n",
+        )
+        .expect("bootstrap script");
+        files.push((
+            "scripts/bootstrap.sh".to_string(),
+            Bytes::from_static(b"#!/bin/sh\ntouch SHOULD_NOT_RUN\n"),
+        ));
+        let signer = hermes_skills::SkillSigningKey::from_seed([11; 32]);
+        let permissions = hermes_skills::SkillPermissions::default();
+        let manifest = signed_remote_manifest(
+            &source,
+            "bootstrap",
+            "github://fixture/bootstrap",
+            fixture_revision(),
+            &signer,
+            permissions,
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        assert!(!bootstrap_requested(None));
+        install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "bootstrap".to_string(),
+                manifest: manifest.clone(),
+                files: files.clone(),
+            },
+            &authority,
+            false,
+        )
+        .expect("default installation without bootstrap");
+        assert!(!skills_root.join("SHOULD_NOT_RUN").exists());
+        assert!(
+            install_verified_skill_material(
+                &skills_root,
+                SkillInstallMaterial {
+                    install_name: "bootstrap".to_string(),
+                    manifest,
+                    files,
+                },
+                &authority,
+                true,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            hermes_skills::load_lock(&skills_root)
+                .expect("retained lock")
+                .packages
+                .len(),
+            1
+        );
+        assert!(!skills_root.join("SHOULD_NOT_RUN").exists());
+    }
+
+    #[tokio::test]
+    async fn enforced_audit_quarantines_a_revoked_signed_package() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let source = tmp.path().join("revoked-source");
+        let files = write_fixture_bundle(&source, &skill_document("revoked", "# Revoked fixture\n"));
+        let signer = hermes_skills::SkillSigningKey::from_seed([12; 32]);
+        let manifest = signed_remote_manifest(
+            &source,
+            "revoked",
+            "github://fixture/revoked",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority_dir = tmp.path().join("authority");
+        let authority = fixture_authority(&skills_root, &authority_dir, &signer);
+        install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "revoked".to_string(),
+                manifest: manifest.clone(),
+                files,
+            },
+            &authority,
+            false,
+        )
+        .expect("initial install");
+
+        let mut revocations = hermes_skills::SignedSkillRevocationList::empty();
+        revocations.issued_at = "2026-07-20T00:00:00Z".to_string();
+        revocations.revoked.push(hermes_skills::SkillRevocation {
+            name: Some(manifest.identity.name.clone()),
+            publisher_id: Some(manifest.identity.publisher_id.clone()),
+            immutable_source_revision: Some(manifest.identity.immutable_source_revision.clone()),
+            content_digest: Some(manifest.identity.content_digest.clone()),
+            key_id: None,
+            reason: "fixture revocation".to_string(),
+            revoked_at: "2026-07-20T00:00:00Z".to_string(),
+        });
+        signer
+            .sign_revocations(&mut revocations, "fixture-key")
+            .expect("sign revocations");
+        hermes_skills::store_revocations(&skills_root, &revocations).expect("store revocations");
+
+        let result = handle_cli_skills_with_trust_args(
+            Some("audit".to_string()),
+            None,
+            Some("--enforce".to_string()),
+            Some(authority_dir),
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        let lock = hermes_skills::load_lock(&skills_root).expect("quarantined lock");
+        assert_eq!(
+            lock.packages[0]
+                .quarantine
+                .as_ref()
+                .expect("quarantine")
+                .reason,
+            hermes_skills::SkillQuarantineReason::RevokedPackage
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_the_v2_lock_entry_before_best_effort_cleanup() {
+        let tmp = tempdir().expect("tempdir");
+        let source = tmp.path().join("uninstall-source");
+        let files =
+            write_fixture_bundle(&source, &skill_document("uninstall", "# Uninstall fixture\n"));
+        let signer = hermes_skills::SkillSigningKey::from_seed([13; 32]);
+        let manifest = signed_remote_manifest(
+            &source,
+            "uninstall",
+            "github://fixture/uninstall",
+            fixture_revision(),
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let skills_root = tmp.path().join("skills");
+        let authority = fixture_authority(&skills_root, &tmp.path().join("authority"), &signer);
+        install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "uninstall".to_string(),
+                manifest,
+                files,
+            },
+            &authority,
+            false,
+        )
+        .expect("install");
+        let installed_path = hermes_skills::load_lock(&skills_root)
+            .expect("lock")
+            .packages[0]
+            .install_path
+            .clone();
+
+        let result = uninstall_verified_skill(&skills_root, "uninstall").expect("uninstall");
+        assert!(result.removed.is_some());
+        assert!(result.cleanup_error.is_none());
+        assert!(hermes_skills::load_lock(&skills_root)
+            .expect("lock")
+            .packages
+            .is_empty());
+        assert!(!skills_root.join(installed_path).exists());
+    }
+
+    #[tokio::test]
+    async fn tampered_update_download_from_local_http_fixture_rolls_back() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let signer = hermes_skills::SkillSigningKey::from_seed([14; 32]);
+        let skills_root = tmp.path().join("skills");
+        let authority_dir = tmp.path().join("authority");
+        let authority = fixture_authority(&skills_root, &authority_dir, &signer);
+
+        let source_v1 = tmp.path().join("update-v1");
+        let files_v1 = write_fixture_bundle(&source_v1, &skill_document("update", "# Prior package\n"));
+        let prior_manifest = signed_remote_manifest(
+            &source_v1,
+            "update",
+            "github://fixture/update/skills/update",
+            "1111111111111111111111111111111111111111",
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        install_verified_skill_material(
+            &skills_root,
+            SkillInstallMaterial {
+                install_name: "update".to_string(),
+                manifest: prior_manifest.clone(),
+                files: files_v1,
+            },
+            &authority,
+            false,
+        )
+        .expect("prior install");
+        let prior_path = skills_root.join(
+            hermes_skills::load_lock(&skills_root)
+                .expect("prior lock")
+                .packages[0]
+                .install_path
+                .clone(),
+        );
+
+        let source_v2 = tmp.path().join("update-v2");
+        let _ = write_fixture_bundle(&source_v2, &skill_document("update", "# Signed update payload\n"));
+        let update_revision = "2222222222222222222222222222222222222222";
+        let update_manifest = signed_remote_manifest(
+            &source_v2,
+            "update",
+            "github://fixture/update/skills/update",
+            update_revision,
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let manifest_path = tmp.path().join("update-manifest.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec(&update_manifest).expect("serialize manifest"),
+        )
+        .expect("write manifest");
+
+        let foreign_manifest = signed_remote_manifest(
+            &source_v2,
+            "update",
+            "github://fixture/foreign/skills/update",
+            update_revision,
+            &signer,
+            hermes_skills::SkillPermissions::default(),
+        );
+        let foreign_manifest_path = tmp.path().join("foreign-update-manifest.json");
+        std::fs::write(
+            &foreign_manifest_path,
+            serde_json::to_vec(&foreign_manifest).expect("serialize foreign manifest"),
+        )
+        .expect("write foreign manifest");
+
+        let server = MockServer::start().await;
+        let _api = EnvVarGuard::set("HERMES_SKILL_GITHUB_API_BASE", server.uri());
+        let _raw = EnvVarGuard::set("HERMES_SKILL_GITHUB_RAW_BASE", server.uri());
+        let foreign_result = handle_cli_skills_with_trust_args(
+            Some("update".to_string()),
+            None,
+            Some(format!(
+                "--apply --manifest {}",
+                foreign_manifest_path.display()
+            )),
+            Some(authority_dir.clone()),
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await;
+        assert!(
+            foreign_result
+                .expect_err("foreign source update must be refused")
+                .to_string()
+                .contains("provenance switch")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/fixture/update/commits/{update_revision}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": update_revision
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/fixture/update/git/trees/{update_revision}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "tree": [{
+                    "path": "skills/update/SKILL.md",
+                    "type": "blob"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/fixture/update/{update_revision}/skills/update/SKILL.md"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string("# Tampered download\n"))
+            .mount(&server)
+            .await;
+
+        assert!(
+            handle_cli_skills_with_trust_args(
+                Some("update".to_string()),
+                None,
+                Some(format!("--apply --manifest {}", manifest_path.display())),
+                Some(authority_dir),
+                None,
+                None,
+                false,
+                false,
+                false,
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(prior_path.join("SKILL.md")).expect("prior skill remains"),
+            skill_document("update", "# Prior package\n")
+        );
+        let lock = hermes_skills::load_lock(&skills_root).expect("prior lock");
+        assert_eq!(
+            lock.packages[0].manifest.identity.content_digest,
+            prior_manifest.identity.content_digest
+        );
     }

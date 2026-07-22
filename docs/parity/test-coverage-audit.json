@@ -25,7 +25,7 @@
     "pass": true
   },
   "audit_unit": "upstream_behavior_or_test_intent",
-  "completed_sigma_harness_moves": [
+  "completed_harness_moves": [
     {
       "artifacts": [
         "docs/parity/harness-trend-ledger.json",
@@ -49,9 +49,9 @@
         "docs/parity/harness-budget.json",
         "docs/parity/harness-budget.md"
       ],
-      "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
+      "rationale": "Record runtime and fixture-reference hygiene budgets across releases so regression coverage growth stays deterministic, bounded, and reviewable; this does not establish capability promotion.",
       "status": "complete",
-      "title": "Cross-version harness budget"
+      "title": "Cross-version fixture-reference hygiene budget"
     }
   ],
   "coverage_manifests": [
@@ -610,7 +610,7 @@
       ]
     }
   ],
-  "next_sigma_harness_moves": [],
+  "next_harness_moves": [],
   "schema_version": 1,
   "source_artifacts": {
     "coverage_manifests": [

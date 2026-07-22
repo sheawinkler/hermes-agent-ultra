@@ -4,12 +4,20 @@
 //! coupling platform adapters to a concrete Rust agent implementation.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tokio::sync::watch;
 
 use crate::commands::should_bypass_active_session;
+
+use crate::gateway::{IncomingMessage, IncomingSender};
+
+const MAX_ACTIVE_SESSION_LANES: usize = 64;
+const MAX_PENDING_PER_SESSION: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionSource {
@@ -163,6 +171,50 @@ pub enum ProcessingOutcome {
     Cancelled,
 }
 
+/// Authoritative completion state for one accepted ingress route.
+///
+/// `Retryable` means no handler/model/tool or external delivery began and the
+/// inbound journal may safely return to pending. `Backpressured` is an
+/// admission-only refusal: no route side effect occurred, and the live
+/// consumer must retain FIFO work and retry after its bounded delay.
+/// `Uncertain` means an external or handler side effect may have occurred and
+/// must be quarantined.
+#[derive(Debug)]
+pub enum GatewayRouteOutcome {
+    Committed,
+    /// A full inbound route failed before handler/model/tool execution or any
+    /// external delivery/notification. `retry_after` preserves an exact
+    /// provider pacing hint when one exists; spool owners must persist it as
+    /// an absolute deadline rather than reducing it to local backoff.
+    Retryable {
+        error: hermes_core::errors::GatewayError,
+        retry_after: Option<Duration>,
+    },
+    /// Admission was refused before a worker or handler was created.
+    Backpressured { retry_after: Duration },
+    /// A provider accepted a prefix and supplied an exact safe continuation.
+    Partial(hermes_core::errors::PartialDelivery),
+    /// An external or handler side effect may have occurred and must be
+    /// quarantined instead of replayed.
+    Uncertain(hermes_core::errors::GatewayError),
+}
+
+impl GatewayRouteOutcome {
+    pub fn into_result(self) -> Result<(), hermes_core::errors::GatewayError> {
+        match self {
+            Self::Committed => Ok(()),
+            Self::Retryable { error, .. } | Self::Uncertain(error) => Err(error),
+            Self::Backpressured { retry_after } => Err(
+                hermes_core::errors::GatewayError::Platform(format!(
+                    "gateway ingress capacity reached; retry after {} ms",
+                    retry_after.as_millis()
+                )),
+            ),
+            Self::Partial(partial) => Err(hermes_core::errors::GatewayError::PartialDelivery(partial)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusyInputMode {
     Queue,
@@ -189,6 +241,20 @@ pub trait ActiveSessionControl: Send + Sync {
     }
 }
 
+pub(crate) fn interrupt_control(control: &dyn ActiveSessionControl, message: &str) -> bool {
+    std::panic::catch_unwind(AssertUnwindSafe(|| control.interrupt(message))).is_ok()
+}
+
+fn steer_control(control: &dyn ActiveSessionControl, message: &str) -> bool {
+    std::panic::catch_unwind(AssertUnwindSafe(|| control.steer(message))).unwrap_or(false)
+}
+
+fn control_activity_summary(control: &dyn ActiveSessionControl) -> Option<AgentActivitySummary> {
+    std::panic::catch_unwind(AssertUnwindSafe(|| control.activity_summary()))
+        .ok()
+        .flatten()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BusyMessageDecision {
     pub handled: bool,
@@ -198,29 +264,290 @@ pub struct BusyMessageDecision {
     pub ack: Option<String>,
 }
 
-impl BusyMessageDecision {
-    fn ignored() -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IngressValidation {
+    DeduplicatedAtIngress,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueuedTurnKind {
+    Message,
+    Retry,
+}
+
+/// A gateway-internal queue item constructed only after ingress validation.
+///
+/// The validation marker is intentionally private: platform payloads can never
+/// claim that they have already passed the gateway's ingress checks.
+#[derive(Debug)]
+pub(crate) struct QueuedIncoming {
+    incoming: IncomingMessage,
+    /// Verified sender provenance retained across queue drain.
+    #[cfg_attr(not(test), allow(dead_code))]
+    sender: IncomingSender,
+    _ingress_validation: IngressValidation,
+    agent_text_override: Option<String>,
+    dedup_key: Option<String>,
+    turn_kind: QueuedTurnKind,
+    completion_tx: Option<
+        tokio::sync::oneshot::Sender<
+            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+        >,
+    >,
+}
+
+impl QueuedIncoming {
+    pub(crate) fn from_validated_ingress(
+        incoming: IncomingMessage,
+        sender: IncomingSender,
+    ) -> Self {
         Self {
-            handled: false,
-            queued: false,
-            interrupted: false,
-            steered: false,
-            ack: None,
+            incoming,
+            sender,
+            _ingress_validation: IngressValidation::DeduplicatedAtIngress,
+            agent_text_override: None,
+            dedup_key: None,
+            turn_kind: QueuedTurnKind::Message,
+            completion_tx: None,
+        }
+    }
+
+    pub(crate) fn with_agent_text_override(mut self, text: impl Into<String>) -> Self {
+        self.agent_text_override = Some(text.into());
+        self
+    }
+
+    pub(crate) fn with_dedup_key(mut self, key: Option<String>) -> Self {
+        self.dedup_key = key;
+        self
+    }
+
+    pub(crate) fn with_turn_kind(mut self, turn_kind: QueuedTurnKind) -> Self {
+        self.turn_kind = turn_kind;
+        self
+    }
+
+    pub(crate) fn with_completion_sender(
+        mut self,
+        completion_tx: tokio::sync::oneshot::Sender<
+            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+        >,
+    ) -> Self {
+        self.completion_tx = Some(completion_tx);
+        self
+    }
+
+    pub(crate) fn clear_completion_sender(&mut self) {
+        self.completion_tx.take();
+    }
+
+    pub(crate) fn take_completion_sender(
+        &mut self,
+    ) -> Option<
+        tokio::sync::oneshot::Sender<
+            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+        >,
+    > {
+        self.completion_tx.take()
+    }
+
+    pub(crate) fn incoming(&self) -> &IncomingMessage {
+        &self.incoming
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sender(&self) -> IncomingSender {
+        self.sender.clone()
+    }
+
+    pub(crate) fn agent_text_override(&self) -> Option<&str> {
+        self.agent_text_override.as_deref()
+    }
+
+    pub(crate) fn dedup_key(&self) -> Option<&str> {
+        self.dedup_key.as_deref()
+    }
+
+    pub(crate) fn turn_kind(&self) -> QueuedTurnKind {
+        self.turn_kind
+    }
+}
+
+/// Cancellation and completion state shared by all clones of one turn lease.
+struct TurnLifecycle {
+    cancelled: watch::Sender<bool>,
+    finished: watch::Sender<bool>,
+}
+
+impl TurnLifecycle {
+    fn new() -> Self {
+        let (cancelled, _) = watch::channel(false);
+        let (finished, _) = watch::channel(false);
+        Self {
+            cancelled,
+            finished,
+        }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.send_replace(true);
+    }
+
+    fn finish(&self) {
+        self.finished.send_replace(true);
+    }
+
+    async fn wait_cancelled(&self) {
+        let mut cancelled = self.cancelled.subscribe();
+        while !*cancelled.borrow_and_update() {
+            if cancelled.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
+    async fn wait_finished(&self) {
+        let mut finished = self.finished.subscribe();
+        while !*finished.borrow_and_update() {
+            if finished.changed().await.is_err() {
+                break;
+            }
         }
     }
 }
 
+pub(crate) struct TurnExecutionGuard(Arc<TurnLifecycle>);
+
+impl Drop for TurnExecutionGuard {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
+/// Ownership for one active gateway turn.
+///
+/// A lease expires when its session is reset or a successor turn claims the
+/// lane, so late work cannot complete or deliver into a newer session state.
+#[derive(Clone)]
+pub(crate) struct TurnLease {
+    session_key: String,
+    turn_id: u64,
+    lifecycle: Arc<TurnLifecycle>,
+}
+
+impl fmt::Debug for TurnLease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TurnLease")
+            .field("session_key", &self.session_key)
+            .field("turn_id", &self.turn_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for TurnLease {
+    fn eq(&self, other: &Self) -> bool {
+        self.session_key == other.session_key && self.turn_id == other.turn_id
+    }
+}
+
+impl Eq for TurnLease {}
+
+impl TurnLease {
+    pub(crate) fn session_key(&self) -> &str {
+        &self.session_key
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.lifecycle.cancel();
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        self.lifecycle.wait_cancelled().await;
+    }
+
+    pub(crate) async fn wait_finished(&self) {
+        self.lifecycle.wait_finished().await;
+    }
+
+    pub(crate) fn execution_guard(&self) -> TurnExecutionGuard {
+        TurnExecutionGuard(self.lifecycle.clone())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueueAdmission {
+    Queued,
+    Full,
+    Inactive,
+}
+
+pub(crate) enum BusyAdmission {
+    Claimed {
+        lease: TurnLease,
+        entry: QueuedIncoming,
+    },
+    Queued(BusyMessageDecision),
+    AtCapacity,
+}
+
+pub(crate) enum TurnCompletion {
+    Stale,
+    Completed {
+        next: Option<(TurnLease, QueuedIncoming)>,
+    },
+}
+
+impl TurnCompletion {
+    #[cfg(test)]
+    fn into_next(self) -> Option<(TurnLease, QueuedIncoming)> {
+        match self {
+            Self::Stale => None,
+            Self::Completed { next } => next,
+        }
+    }
+
+    #[cfg(test)]
+    fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionBarrier {
+    Reset,
+    ResetDrainingAfterFailure,
+    IdleExpiry,
+}
+
+pub(crate) enum ResetAdmission {
+    Started {
+        lease: TurnLease,
+        revoked_lease: Option<TurnLease>,
+        released_dedup_keys: Vec<String>,
+    },
+    AlreadyInProgress {
+        draining_after_failure: bool,
+    },
+    TransitionInProgress,
+    AtCapacity,
+}
+
 #[derive(Clone)]
 struct ActiveSession {
+    lease: TurnLease,
     control: Option<Arc<dyn ActiveSessionControl>>,
+    dedup_key: Option<String>,
+    barrier: Option<SessionBarrier>,
     started_at: Instant,
 }
 
 pub struct BusySessionCoordinator {
     active: HashMap<String, ActiveSession>,
-    pending: HashMap<String, VecDeque<MessageEvent>>,
+    pending: HashMap<String, VecDeque<QueuedIncoming>>,
+    next_turn_id: u64,
     busy_ack_ts: HashMap<String, Instant>,
     ack_cooldown: Duration,
+    resource_limits_enabled: bool,
 }
 
 impl Default for BusySessionCoordinator {
@@ -231,67 +558,321 @@ impl Default for BusySessionCoordinator {
 
 impl BusySessionCoordinator {
     pub fn new(ack_cooldown: Duration) -> Self {
+        Self::with_resource_limits(ack_cooldown, false)
+    }
+
+    pub fn with_resource_limits(ack_cooldown: Duration, resource_limits_enabled: bool) -> Self {
         Self {
             active: HashMap::new(),
             pending: HashMap::new(),
+            next_turn_id: 0,
             busy_ack_ts: HashMap::new(),
             ack_cooldown,
+            resource_limits_enabled,
         }
     }
 
-    pub fn mark_active_at(
+    fn next_lease(&mut self, session_key: &str) -> TurnLease {
+        self.next_turn_id = self.next_turn_id.wrapping_add(1);
+        TurnLease {
+            session_key: session_key.to_string(),
+            turn_id: self.next_turn_id,
+            lifecycle: Arc::new(TurnLifecycle::new()),
+        }
+    }
+
+    fn has_lane_capacity(&self, session_key: &str) -> bool {
+        !self.resource_limits_enabled
+            || self.active.contains_key(session_key)
+            || self.active.len() < MAX_ACTIVE_SESSION_LANES
+    }
+
+    pub(crate) fn mark_active_at(
         &mut self,
         session_key: impl Into<String>,
         control: Option<Arc<dyn ActiveSessionControl>>,
         now: Instant,
-    ) {
+    ) -> TurnLease {
+        self.mark_active_at_with_dedup(session_key.into(), control, now, None)
+    }
+
+    fn mark_active_at_with_dedup(
+        &mut self,
+        session_key: String,
+        control: Option<Arc<dyn ActiveSessionControl>>,
+        now: Instant,
+        dedup_key: Option<String>,
+    ) -> TurnLease {
+        let lease = self.next_lease(&session_key);
         self.active.insert(
-            session_key.into(),
+            session_key,
             ActiveSession {
+                lease: lease.clone(),
                 control,
+                dedup_key,
+                barrier: None,
                 started_at: now,
             },
         );
+        lease
     }
 
-    pub fn mark_active(
+    pub(crate) fn mark_active(
         &mut self,
         session_key: impl Into<String>,
         control: Option<Arc<dyn ActiveSessionControl>>,
-    ) {
-        self.mark_active_at(session_key, control, Instant::now());
+    ) -> TurnLease {
+        self.mark_active_at(session_key, control, Instant::now())
     }
 
-    pub fn finish(
+    /// Atomically claim an idle session lane or append to the current lane.
+    ///
+    /// The returned lease is the sole authority allowed to complete the active
+    /// turn. Since the active marker is installed while holding this lock, two
+    /// first messages cannot both invoke a handler.
+    pub(crate) fn claim_idle_or_enqueue(
         &mut self,
         session_key: &str,
-        _outcome: ProcessingOutcome,
-    ) -> Option<MessageEvent> {
-        self.active.remove(session_key);
-        self.busy_ack_ts.remove(session_key);
-        self.pop_pending(session_key)
+        entry: QueuedIncoming,
+        mode: BusyInputMode,
+        now: Instant,
+    ) -> BusyAdmission {
+        if !self.has_lane_capacity(session_key) {
+            return BusyAdmission::AtCapacity;
+        }
+        let Some(active) = self.active.get(session_key).cloned() else {
+            let dedup_key = entry.dedup_key().map(str::to_string);
+            return BusyAdmission::Claimed {
+                lease: self.mark_active_at_with_dedup(
+                    session_key.to_string(),
+                    None,
+                    now,
+                    dedup_key,
+                ),
+                entry,
+            };
+        };
+
+        let text = entry.incoming().text.clone();
+        let decision = match mode {
+            BusyInputMode::Queue => {
+                if !self.queue_entry(session_key, entry) {
+                    return BusyAdmission::AtCapacity;
+                }
+                BusyMessageDecision {
+                    handled: true,
+                    queued: true,
+                    interrupted: false,
+                    steered: false,
+                    ack: self.should_ack_at(session_key, now).then(|| {
+                        "Queued for the next turn. I will respond once the current task finishes."
+                            .to_string()
+                    }),
+                }
+            }
+            BusyInputMode::Interrupt => {
+                if !self.queue_entry(session_key, entry) {
+                    return BusyAdmission::AtCapacity;
+                }
+                let interrupted = active
+                    .control
+                    .as_deref()
+                    .is_some_and(|control| interrupt_control(control, &text));
+                BusyMessageDecision {
+                    handled: true,
+                    queued: true,
+                    interrupted,
+                    steered: false,
+                    ack: self.should_ack_at(session_key, now).then(|| {
+                        if interrupted {
+                            interrupt_ack(active.started_at, active.control.as_deref(), now)
+                        } else {
+                            "Queued for the next turn. I will respond once the current task finishes."
+                                .to_string()
+                        }
+                    }),
+                }
+            }
+            BusyInputMode::Steer => {
+                let steered = active
+                    .control
+                    .as_deref()
+                    .is_some_and(|control| steer_control(control, &text));
+                if steered {
+                    BusyMessageDecision {
+                        handled: true,
+                        queued: false,
+                        interrupted: false,
+                        steered: true,
+                        ack: self.should_ack_at(session_key, now).then(|| {
+                            "Steered the running task with your latest message.".to_string()
+                        }),
+                    }
+                } else {
+                    if !self.queue_entry(session_key, entry) {
+                        return BusyAdmission::AtCapacity;
+                    }
+                    BusyMessageDecision {
+                        handled: true,
+                        queued: true,
+                        interrupted: false,
+                        steered: false,
+                        ack: self.should_ack_at(session_key, now).then(|| {
+                            "Queued for the next turn. I will respond once the current task finishes."
+                                .to_string()
+                        }),
+                    }
+                }
+            }
+        };
+        BusyAdmission::Queued(decision)
     }
 
-    pub fn reset_session(&mut self, session_key: &str) -> Option<MessageEvent> {
-        self.active.remove(session_key);
+    /// Complete an owned turn and atomically claim its FIFO successor.
+    pub(crate) fn complete_turn(
+        &mut self,
+        lease: &TurnLease,
+        _outcome: ProcessingOutcome,
+    ) -> TurnCompletion {
+        let is_owner = self
+            .active
+            .get(lease.session_key())
+            .is_some_and(|active| active.lease == *lease);
+        if !is_owner {
+            return TurnCompletion::Stale;
+        }
+
+        self.active.remove(lease.session_key());
+        self.busy_ack_ts.remove(lease.session_key());
+        let next = self.pop_pending(lease.session_key()).map(|entry| {
+            let dedup_key = entry.dedup_key().map(str::to_string);
+            let next = self.mark_active_at_with_dedup(
+                lease.session_key().to_string(),
+                None,
+                Instant::now(),
+                dedup_key,
+            );
+            (next, entry)
+        });
+        TurnCompletion::Completed { next }
+    }
+
+    pub(crate) fn mark_reset_draining_after_failure(&mut self, lease: &TurnLease) -> bool {
+        let Some(active) = self.active.get_mut(lease.session_key()) else {
+            return false;
+        };
+        if active.lease != *lease || active.barrier != Some(SessionBarrier::Reset) {
+            return false;
+        }
+        active.barrier = Some(SessionBarrier::ResetDrainingAfterFailure);
+        true
+    }
+
+    /// Revoke the old lease, preserve its queued ingress, and install an
+    /// active reset barrier. New and existing queued ingress stay behind the
+    /// barrier until the revoked worker terminates and reset work completes.
+    pub(crate) fn begin_reset_session(&mut self, session_key: &str) -> ResetAdmission {
+        if !self.has_lane_capacity(session_key) {
+            return ResetAdmission::AtCapacity;
+        }
+        if let Some(barrier) = self
+            .active
+            .get(session_key)
+            .and_then(|active| active.barrier)
+        {
+            return match barrier {
+                SessionBarrier::Reset => ResetAdmission::AlreadyInProgress {
+                    draining_after_failure: false,
+                },
+                SessionBarrier::ResetDrainingAfterFailure => ResetAdmission::AlreadyInProgress {
+                    draining_after_failure: true,
+                },
+                SessionBarrier::IdleExpiry => ResetAdmission::TransitionInProgress,
+            };
+        }
+
+        let mut released_dedup_keys = Vec::new();
+        let revoked_lease = self.active.remove(session_key).map(|active| {
+            let revoked_lease = active.lease.clone();
+            revoked_lease.cancel();
+            if let Some(key) = active.dedup_key {
+                released_dedup_keys.push(key);
+            }
+            if let Some(control) = active.control {
+                let _ = interrupt_control(
+                    control.as_ref(),
+                    "Session reset requested; cancel the active gateway turn.",
+                );
+            }
+            revoked_lease
+        });
         self.busy_ack_ts.remove(session_key);
-        self.pending
-            .remove(session_key)
-            .and_then(|mut queue| queue.pop_front())
+        let lease = self.next_lease(session_key);
+        self.active.insert(
+            session_key.to_string(),
+            ActiveSession {
+                lease: lease.clone(),
+                control: None,
+                dedup_key: None,
+                barrier: Some(SessionBarrier::Reset),
+                started_at: Instant::now(),
+            },
+        );
+        ResetAdmission::Started {
+            lease,
+            revoked_lease,
+            released_dedup_keys,
+        }
+    }
+
+    /// Install a boundary for idle expiry only when the lane is fully idle.
+    pub(crate) fn begin_idle_expiry(&mut self, session_key: &str) -> Option<TurnLease> {
+        if self.active.contains_key(session_key)
+            || self
+                .pending
+                .get(session_key)
+                .is_some_and(|pending| !pending.is_empty())
+        {
+            return None;
+        }
+        if !self.has_lane_capacity(session_key) {
+            return None;
+        }
+        let lease = self.next_lease(session_key);
+        self.active.insert(
+            session_key.to_string(),
+            ActiveSession {
+                lease: lease.clone(),
+                control: None,
+                dedup_key: None,
+                barrier: Some(SessionBarrier::IdleExpiry),
+                started_at: Instant::now(),
+            },
+        );
+        Some(lease)
     }
 
     pub fn is_active(&self, session_key: &str) -> bool {
         self.active.contains_key(session_key)
     }
 
-    pub fn attach_control(
+    pub(crate) fn is_current(&self, lease: &TurnLease) -> bool {
+        self.active
+            .get(lease.session_key())
+            .is_some_and(|active| active.lease == *lease)
+    }
+
+    pub(crate) fn attach_control(
         &mut self,
-        session_key: &str,
+        lease: &TurnLease,
         control: Arc<dyn ActiveSessionControl>,
     ) -> bool {
-        let Some(active) = self.active.get_mut(session_key) else {
+        let Some(active) = self.active.get_mut(lease.session_key()) else {
             return false;
         };
+        if active.lease != *lease {
+            return false;
+        }
         active.control = Some(control);
         true
     }
@@ -303,14 +884,29 @@ impl BusySessionCoordinator {
         let Some(control) = active.control.as_ref() else {
             return false;
         };
-        control.interrupt(message);
-        true
+        interrupt_control(control.as_ref(), message)
     }
 
-    pub fn pending(&self, session_key: &str) -> Option<&MessageEvent> {
-        self.pending
-            .get(session_key)
-            .and_then(|queue| queue.front())
+    pub(crate) fn interrupt_if_current(&mut self, lease: &TurnLease, message: &str) -> bool {
+        if !self.is_current(lease) {
+            return false;
+        }
+        self.interrupt_active(lease.session_key(), message)
+    }
+
+    pub(crate) fn enqueue_if_active(
+        &mut self,
+        session_key: &str,
+        entry: QueuedIncoming,
+    ) -> QueueAdmission {
+        if !self.active.contains_key(session_key) {
+            return QueueAdmission::Inactive;
+        }
+        if self.queue_entry(session_key, entry) {
+            QueueAdmission::Queued
+        } else {
+            QueueAdmission::Full
+        }
     }
 
     pub fn pending_len(&self, session_key: &str) -> usize {
@@ -320,17 +916,13 @@ impl BusySessionCoordinator {
             .unwrap_or(0)
     }
 
-    pub fn queue_message(&mut self, session_key: &str, event: MessageEvent) {
-        self.queue_event(session_key, event);
-    }
-
-    fn pop_pending(&mut self, session_key: &str) -> Option<MessageEvent> {
+    fn pop_pending(&mut self, session_key: &str) -> Option<QueuedIncoming> {
         let queue = self.pending.get_mut(session_key)?;
-        let event = queue.pop_front();
+        let entry = queue.pop_front();
         if queue.is_empty() {
             self.pending.remove(session_key);
         }
-        event
+        entry
     }
 
     fn should_ack_at(&mut self, session_key: &str, now: Instant) -> bool {
@@ -345,109 +937,39 @@ impl BusySessionCoordinator {
         should
     }
 
-    fn queue_event(&mut self, session_key: &str, event: MessageEvent) {
-        self.pending
-            .entry(session_key.to_string())
-            .or_default()
-            .push_back(event);
+    fn queue_entry(&mut self, session_key: &str, entry: QueuedIncoming) -> bool {
+        let queue = self.pending.entry(session_key.to_string()).or_default();
+        if self.resource_limits_enabled && queue.len() >= MAX_PENDING_PER_SESSION {
+            return false;
+        }
+        queue.push_back(entry);
+        true
+    }
+    /// Snapshot active controls before publishing the shutdown signal.
+    pub(crate) fn active_controls_for_shutdown(&self) -> Vec<Arc<dyn ActiveSessionControl>> {
+        self.active
+            .values()
+            .filter_map(|active| active.control.clone())
+            .collect()
     }
 
-    pub fn handle_busy_message_at(
-        &mut self,
-        session_key: &str,
-        event: MessageEvent,
-        mode: BusyInputMode,
-        now: Instant,
-    ) -> BusyMessageDecision {
-        let Some(active) = self.active.get(session_key).cloned() else {
-            return BusyMessageDecision::ignored();
-        };
-
-        if event_bypasses_active_session(&event) {
-            return BusyMessageDecision::ignored();
-        }
-
-        match mode {
-            BusyInputMode::Queue => {
-                self.queue_event(session_key, event);
-                BusyMessageDecision {
-                    handled: true,
-                    queued: true,
-                    interrupted: false,
-                    steered: false,
-                    ack: self.should_ack_at(session_key, now).then(|| {
-                        "Queued for the next turn. I will respond once the current task finishes."
-                            .to_string()
-                    }),
-                }
-            }
-            BusyInputMode::Interrupt => {
-                if let Some(control) = active.control.as_ref() {
-                    control.interrupt(&event.text);
-                    self.queue_event(session_key, event);
-                    BusyMessageDecision {
-                        handled: true,
-                        queued: true,
-                        interrupted: true,
-                        steered: false,
-                        ack: self.should_ack_at(session_key, now).then(|| {
-                            interrupt_ack(active.started_at, active.control.as_deref(), now)
-                        }),
-                    }
-                } else {
-                    self.queue_event(session_key, event);
-                    BusyMessageDecision {
-                        handled: true,
-                        queued: true,
-                        interrupted: false,
-                        steered: false,
-                        ack: self.should_ack_at(session_key, now).then(|| {
-                            "Queued for the next turn. I will respond once the current task finishes."
-                                .to_string()
-                        }),
-                    }
-                }
-            }
-            BusyInputMode::Steer => {
-                let steered = active
-                    .control
-                    .as_ref()
-                    .map(|control| control.steer(&event.text))
-                    .unwrap_or(false);
-                if steered {
-                    BusyMessageDecision {
-                        handled: true,
-                        queued: false,
-                        interrupted: false,
-                        steered: true,
-                        ack: self.should_ack_at(session_key, now).then(|| {
-                            "Steered the running task with your latest message.".to_string()
-                        }),
-                    }
-                } else {
-                    self.queue_event(session_key, event);
-                    BusyMessageDecision {
-                        handled: true,
-                        queued: true,
-                        interrupted: false,
-                        steered: false,
-                        ack: self.should_ack_at(session_key, now).then(|| {
-                            "Queued for the next turn. I will respond once the current task finishes."
-                                .to_string()
-                        }),
-                    }
-                }
+    /// Cancel every lane and discard queued ingress after runtime workers stop.
+    pub(crate) fn abort_all_for_shutdown(&mut self) -> Vec<String> {
+        let mut released_dedup_keys = Vec::new();
+        for (_, active) in self.active.drain() {
+            if let Some(key) = active.dedup_key {
+                released_dedup_keys.push(key);
             }
         }
-    }
-
-    pub fn handle_busy_message(
-        &mut self,
-        session_key: &str,
-        event: MessageEvent,
-        mode: BusyInputMode,
-    ) -> BusyMessageDecision {
-        self.handle_busy_message_at(session_key, event, mode, Instant::now())
+        for (_, pending) in self.pending.drain() {
+            released_dedup_keys.extend(
+                pending
+                    .into_iter()
+                    .filter_map(|entry| entry.dedup_key().map(str::to_string)),
+            );
+        }
+        self.busy_ack_ts.clear();
+        released_dedup_keys
     }
 }
 
@@ -461,7 +983,7 @@ fn interrupt_ack(
     if elapsed >= Duration::from_secs(60) {
         text.push_str(&format!(" Running for {} min.", elapsed.as_secs() / 60));
     }
-    if let Some(summary) = control.and_then(|control| control.activity_summary()) {
+    if let Some(summary) = control.and_then(control_activity_summary) {
         if let (Some(done), Some(max)) = (summary.api_call_count, summary.max_iterations) {
             text.push_str(&format!(" Progress: {done}/{max}."));
         }
@@ -475,7 +997,6 @@ fn interrupt_ack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     fn source(thread_id: &str) -> SessionSource {
         SessionSource::new("telegram", "-1001", "group").with_thread(thread_id)
@@ -483,15 +1004,6 @@ mod tests {
 
     fn event(text: &str, thread_id: &str) -> MessageEvent {
         MessageEvent::text(text, source(thread_id))
-    }
-
-    fn image_event(path: &str, thread_id: &str) -> MessageEvent {
-        let mut event = MessageEvent::text("see image", source(thread_id));
-        event.message_type = MessageType::Image;
-        event
-            .metadata
-            .insert("media_path".to_string(), Value::String(path.to_string()));
-        event
     }
 
     #[test]
@@ -547,13 +1059,14 @@ mod tests {
 
     #[derive(Default)]
     struct MockControl {
-        interrupts: Mutex<Vec<String>>,
+        interrupts: std::sync::atomic::AtomicUsize,
         steer_accepts: bool,
     }
 
     impl ActiveSessionControl for MockControl {
-        fn interrupt(&self, message: &str) {
-            self.interrupts.lock().unwrap().push(message.to_string());
+        fn interrupt(&self, _message: &str) {
+            self.interrupts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         fn steer(&self, _message: &str) -> bool {
@@ -571,233 +1084,492 @@ mod tests {
         }
     }
 
-    #[test]
-    fn queue_mode_queues_without_interrupt_and_debounces_ack() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
-        let now = Instant::now();
-        let control = Arc::new(MockControl::default());
-        coord.mark_active_at(&key, Some(control.clone()), now);
+    struct PanickingControl;
 
-        let first =
-            coord.handle_busy_message_at(&key, event("follow up", "10"), BusyInputMode::Queue, now);
-        assert!(first.handled);
-        assert!(first.queued);
-        assert!(!first.interrupted);
-        assert!(first.ack.unwrap().contains("Queued for the next turn"));
-        assert_eq!(coord.pending(&key).unwrap().text, "follow up");
-        assert!(control.interrupts.lock().unwrap().is_empty());
+    impl ActiveSessionControl for PanickingControl {
+        fn interrupt(&self, _message: &str) {
+            panic!("deterministic control interrupt panic");
+        }
 
-        let second = coord.handle_busy_message_at(
-            &key,
-            event("still there", "10"),
-            BusyInputMode::Queue,
-            now + Duration::from_secs(1),
-        );
-        assert!(second.ack.is_none());
-        assert_eq!(coord.pending(&key).unwrap().text, "follow up");
-        assert_eq!(coord.pending_len(&key), 2);
+        fn steer(&self, _message: &str) -> bool {
+            panic!("deterministic control steer panic");
+        }
+
+        fn activity_summary(&self) -> Option<AgentActivitySummary> {
+            panic!("deterministic control summary panic");
+        }
+    }
+
+    fn queued_entry(text: &str, sender: IncomingSender) -> QueuedIncoming {
+        QueuedIncoming::from_validated_ingress(
+            IncomingMessage {
+                platform: "telegram".to_string(),
+                chat_id: "-1001".to_string(),
+                user_id: "sender".to_string(),
+                text: text.to_string(),
+                message_id: None,
+                thread_id: None,
+                is_dm: false,
+            },
+            sender,
+        )
     }
 
     #[test]
-    fn interrupt_mode_calls_agent_and_includes_status_detail() {
-        let mut coord = BusySessionCoordinator::default();
+    fn claim_or_enqueue_is_atomic_and_preserves_fifo() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        let now = Instant::now();
+
+        let BusyAdmission::Claimed {
+            lease: first_lease, ..
+        } = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("first", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        )
+        else {
+            panic!("first ingress must claim the idle lane");
+        };
+        let BusyAdmission::Queued(first_queue) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("second", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("second ingress must queue behind the active turn");
+        };
+        let BusyAdmission::Queued(second_queue) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("third", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("third ingress must queue behind the active turn");
+        };
+
+        assert!(first_queue.queued);
+        assert!(second_queue.queued);
+        assert_eq!(coordinator.pending_len(&key), 2);
+
+        let (second_lease, second) = coordinator
+            .complete_turn(&first_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("first completion must atomically claim its successor");
+        assert_eq!(second.incoming().text, "second");
+        assert!(coordinator.is_current(&second_lease));
+        assert_eq!(coordinator.pending_len(&key), 1);
+
+        let (third_lease, third) = coordinator
+            .complete_turn(&second_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("second completion must atomically claim its successor");
+        assert_eq!(third.incoming().text, "third");
+        assert!(coordinator.is_current(&third_lease));
+        assert_eq!(coordinator.pending_len(&key), 0);
+
+        assert!(coordinator
+            .complete_turn(&third_lease, ProcessingOutcome::Success)
+            .into_next()
+            .is_none());
+        assert!(!coordinator.is_active(&key));
+    }
+
+    #[test]
+    fn fifo_drain_preserves_more_than_thirty_two_entries() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        let now = Instant::now();
+        let BusyAdmission::Claimed {
+            mut lease,
+            entry: first,
+        } = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("item-0", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        )
+        else {
+            panic!("first ingress must claim the idle lane");
+        };
+        let mut observed = vec![first.incoming().text.clone()];
+
+        for index in 1..40 {
+            let entry = queued_entry(&format!("item-{index}"), IncomingSender::human());
+            assert!(matches!(
+                coordinator.claim_idle_or_enqueue(&key, entry, BusyInputMode::Queue, now,),
+                BusyAdmission::Queued(_)
+            ));
+        }
+
+        while let Some((next_lease, entry)) = coordinator
+            .complete_turn(&lease, ProcessingOutcome::Success)
+            .into_next()
+        {
+            observed.push(entry.incoming().text.clone());
+            lease = next_lease;
+        }
+
+        let expected: Vec<String> = (0..40).map(|index| format!("item-{index}")).collect();
+        assert_eq!(observed, expected);
+        assert!(!coordinator.is_active(&key));
+        assert_eq!(coordinator.pending_len(&key), 0);
+    }
+
+    #[test]
+    fn queued_envelopes_retain_verified_sender_identity() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        let now = Instant::now();
+        let BusyAdmission::Claimed {
+            lease: first_lease, ..
+        } = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("first", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        )
+        else {
+            panic!("first ingress must claim the lane");
+        };
+        let BusyAdmission::Queued(_) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("bot", IncomingSender::bot()),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("bot ingress must queue");
+        };
+        let BusyAdmission::Queued(_) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("human", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("human ingress must queue");
+        };
+
+        let (bot_lease, bot) = coordinator
+            .complete_turn(&first_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("bot item must be first in FIFO order");
+        assert_eq!(bot.sender(), IncomingSender::bot());
+        let (_, human) = coordinator
+            .complete_turn(&bot_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("human item must remain after bot item");
+        assert_eq!(human.sender(), IncomingSender::human());
+    }
+
+    #[test]
+    fn interrupt_mode_keeps_the_entry_and_reports_progress() {
+        let mut coordinator = BusySessionCoordinator::default();
         let key = build_session_key(&source("10"));
         let now = Instant::now();
         let control = Arc::new(MockControl::default());
-        coord.mark_active_at(&key, Some(control.clone()), now - Duration::from_secs(600));
+        let _lease =
+            coordinator.mark_active_at(&key, Some(control.clone()), now - Duration::from_secs(600));
 
-        let decision = coord.handle_busy_message_at(
+        let BusyAdmission::Queued(decision) = coordinator.claim_idle_or_enqueue(
             &key,
-            event("Are you working?", "10"),
+            queued_entry("Are you working?", IncomingSender::human()),
             BusyInputMode::Interrupt,
             now,
-        );
-        assert!(decision.handled);
+        ) else {
+            panic!("interrupt must queue behind the active turn");
+        };
+
         assert!(decision.interrupted);
         assert!(decision.queued);
-        assert_eq!(coord.pending(&key).unwrap().text, "Are you working?");
         assert_eq!(
-            control.interrupts.lock().unwrap().as_slice(),
-            ["Are you working?"]
+            control
+                .interrupts
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
         );
-        let ack = decision.ack.unwrap();
-        assert!(ack.contains("Interrupting"));
+        let ack = decision
+            .ack
+            .expect("first busy message must be acknowledged");
         assert!(ack.contains("21/60"));
         assert!(ack.contains("terminal"));
         assert!(ack.contains("10 min"));
     }
 
     #[test]
-    fn interrupt_without_control_queues_instead_of_dropping_message() {
-        let mut coord = BusySessionCoordinator::default();
+    fn reset_revokes_leases_and_preserves_queued_work() {
+        let mut coordinator = BusySessionCoordinator::default();
         let key = build_session_key(&source("10"));
-        coord.mark_active(&key, None);
-
-        let decision = coord.handle_busy_message(
+        let now = Instant::now();
+        let BusyAdmission::Claimed {
+            lease: first_lease, ..
+        } = coordinator.claim_idle_or_enqueue(
             &key,
-            event("do not drop me", "10"),
-            BusyInputMode::Interrupt,
-        );
-
-        assert!(decision.handled);
-        assert!(decision.queued);
-        assert!(!decision.interrupted);
-        assert_eq!(coord.pending(&key).unwrap().text, "do not drop me");
-    }
-
-    #[test]
-    fn image_events_are_queued_by_resolved_session_key_not_source_fallback() {
-        let mut coord = BusySessionCoordinator::default();
-        let resolved_key = "canonical-session-key";
-        let source_key = build_session_key(&source("10"));
-        let sibling_key = build_session_key(&source("11"));
-        coord.mark_active(resolved_key, None);
-        coord.mark_active(&sibling_key, None);
-
-        let queued_image = coord.handle_busy_message(
-            resolved_key,
-            image_event("/tmp/a.png", "10"),
+            queued_entry("first", IncomingSender::human())
+                .with_dedup_key(Some("active-key".to_string())),
             BusyInputMode::Queue,
-        );
-        let queued_sibling = coord.handle_busy_message(
-            &sibling_key,
-            event("plain text", "11"),
-            BusyInputMode::Queue,
-        );
-
-        assert!(queued_image.queued);
-        assert!(queued_sibling.queued);
-        assert!(coord.pending(&source_key).is_none());
-        assert_eq!(
-            coord
-                .pending(resolved_key)
-                .unwrap()
-                .metadata
-                .get("media_path"),
-            Some(&Value::String("/tmp/a.png".to_string()))
-        );
-        assert_eq!(coord.pending(&sibling_key).unwrap().text, "plain text");
-    }
-
-    #[test]
-    fn attached_control_can_be_interrupted_directly() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
+            now,
+        )
+        else {
+            panic!("first ingress must claim the lane");
+        };
         let control = Arc::new(MockControl::default());
-        coord.mark_active(&key, None);
+        assert!(coordinator.attach_control(&first_lease, control.clone()));
+        let BusyAdmission::Queued(_) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("queued before reset", IncomingSender::human())
+                .with_dedup_key(Some("pending-key".to_string())),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("follow-up must queue");
+        };
 
-        assert!(coord.attach_control(&key, control.clone()));
-        assert!(coord.interrupt_active(&key, "stop now"));
-        assert_eq!(control.interrupts.lock().unwrap().as_slice(), ["stop now"]);
+        let ResetAdmission::Started {
+            lease: reset_lease,
+            revoked_lease,
+            released_dedup_keys,
+        } = coordinator.begin_reset_session(&key)
+        else {
+            panic!("first reset must install a barrier");
+        };
+        assert_eq!(revoked_lease.as_ref(), Some(&first_lease));
+        assert_eq!(released_dedup_keys, ["active-key".to_string()]);
+
+        assert!(!coordinator.is_current(&first_lease));
+        assert!(coordinator.is_current(&reset_lease));
+        assert_eq!(coordinator.pending_len(&key), 1);
+        assert_eq!(
+            control
+                .interrupts
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        assert!(coordinator
+            .complete_turn(&first_lease, ProcessingOutcome::Cancelled)
+            .is_stale());
+        assert!(matches!(
+            coordinator.begin_reset_session(&key),
+            ResetAdmission::AlreadyInProgress { .. }
+        ));
+
+        let BusyAdmission::Queued(decision) = coordinator.claim_idle_or_enqueue(
+            &key,
+            queued_entry("after reset", IncomingSender::human()),
+            BusyInputMode::Queue,
+            now,
+        ) else {
+            panic!("post-reset ingress must queue behind the barrier");
+        };
+        assert!(decision.queued);
+        let (post_reset_lease, post_reset_entry) = coordinator
+            .complete_turn(&reset_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("completing the reset barrier must promote queued ingress");
+        assert_eq!(post_reset_entry.incoming().text, "queued before reset");
+        assert_ne!(first_lease.turn_id, post_reset_lease.turn_id);
+        let post_reset_control = Arc::new(MockControl::default());
+        assert!(coordinator.attach_control(&post_reset_lease, post_reset_control.clone()));
+        assert!(!coordinator.interrupt_if_current(
+            &first_lease,
+            "stale timeout must not interrupt promoted work",
+        ));
+        assert_eq!(
+            post_reset_control
+                .interrupts
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert!(coordinator.interrupt_if_current(
+            &post_reset_lease,
+            "current timeout should interrupt promoted work",
+        ));
+        assert_eq!(
+            post_reset_control
+                .interrupts
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        let (_, after_reset_entry) = coordinator
+            .complete_turn(&post_reset_lease, ProcessingOutcome::Success)
+            .into_next()
+            .expect("preserved ingress must keep FIFO order ahead of new ingress");
+        assert_eq!(after_reset_entry.incoming().text, "after reset");
     }
 
     #[test]
-    fn steer_mode_skips_queue_when_accepted_and_falls_back_when_rejected() {
-        let key = build_session_key(&source("10"));
+    fn panicking_control_cannot_wedge_reset_or_busy_admission() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let key = "panic-control";
         let now = Instant::now();
-
-        let mut accepted = BusySessionCoordinator::default();
-        accepted.mark_active_at(
-            &key,
-            Some(Arc::new(MockControl {
-                steer_accepts: true,
-                ..Default::default()
-            })),
+        let BusyAdmission::Claimed { lease, .. } = coordinator.claim_idle_or_enqueue(
+            key,
+            queued_entry("first", IncomingSender::human())
+                .with_dedup_key(Some("active".to_string())),
+            BusyInputMode::Queue,
             now,
-        );
-        let steered = accepted.handle_busy_message_at(
-            &key,
-            event("also check tests", "10"),
+        ) else {
+            panic!("first turn must claim the lane");
+        };
+        assert!(coordinator.attach_control(&lease, Arc::new(PanickingControl)));
+        assert!(!coordinator.interrupt_active(key, "interrupt"));
+        let BusyAdmission::Queued(decision) = coordinator.claim_idle_or_enqueue(
+            key,
+            queued_entry("steer", IncomingSender::human())
+                .with_dedup_key(Some("pending".to_string())),
             BusyInputMode::Steer,
             now,
-        );
-        assert!(steered.steered);
-        assert!(!steered.queued);
-        assert!(accepted.pending(&key).is_none());
+        ) else {
+            panic!("failed steering must queue");
+        };
+        assert!(decision.queued);
+        assert!(!decision.steered);
+        assert!(interrupt_ack(now, Some(&PanickingControl), now).contains("Interrupting"));
 
-        let mut rejected = BusySessionCoordinator::default();
-        rejected.mark_active_at(&key, Some(Arc::new(MockControl::default())), now);
-        let queued = rejected.handle_busy_message_at(
-            &key,
-            event("cannot steer", "10"),
-            BusyInputMode::Steer,
-            now,
-        );
-        assert!(queued.queued);
-        assert!(!queued.steered);
-        assert_eq!(rejected.pending(&key).unwrap().text, "cannot steer");
+        let ResetAdmission::Started {
+            lease: reset_lease,
+            revoked_lease,
+            released_dedup_keys,
+        } = coordinator.begin_reset_session(key)
+        else {
+            panic!("reset must survive control panic");
+        };
+        assert_eq!(revoked_lease.as_ref(), Some(&lease));
+        assert_eq!(released_dedup_keys, ["active".to_string()]);
+        assert!(coordinator.is_current(&reset_lease));
+        assert_eq!(coordinator.pending_len(key), 1);
+    }
+
+    #[tokio::test]
+    async fn turn_lifecycle_remembers_cancel_and_finish_before_waiters_subscribe() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let lease = coordinator.mark_active("lifecycle", None);
+
+        lease.cancel();
+        tokio::time::timeout(Duration::from_millis(50), lease.cancelled())
+            .await
+            .expect("late cancellation waiter must observe the latched state");
+
+        drop(lease.execution_guard());
+        tokio::time::timeout(Duration::from_millis(50), lease.wait_finished())
+            .await
+            .expect("late completion waiter must observe the latched state");
     }
 
     #[test]
-    fn bypass_commands_are_not_consumed_by_busy_guard() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
-        coord.mark_active(&key, None);
-        let decision =
-            coord.handle_busy_message(&key, event("/status", "10"), BusyInputMode::Queue);
-        assert!(!decision.handled);
-        assert!(coord.pending(&key).is_none());
+    fn reset_during_idle_expiry_remains_retryable() {
+        let mut coordinator = BusySessionCoordinator::default();
+        let expiry_lease = coordinator
+            .begin_idle_expiry("transition")
+            .expect("idle expiry should install its barrier");
+        assert!(matches!(
+            coordinator.begin_reset_session("transition"),
+            ResetAdmission::TransitionInProgress
+        ));
+        assert!(matches!(
+            coordinator.complete_turn(&expiry_lease, ProcessingOutcome::Success),
+            TurnCompletion::Completed { next: None }
+        ));
+        assert!(matches!(
+            coordinator.begin_reset_session("transition"),
+            ResetAdmission::Started { .. }
+        ));
     }
 
     #[test]
-    fn finish_returns_pending_and_clears_active_state() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
-        coord.mark_active(&key, None);
-        coord.handle_busy_message(&key, event("queued", "10"), BusyInputMode::Queue);
-        coord.handle_busy_message(&key, event("next", "10"), BusyInputMode::Queue);
-        let pending = coord.finish(&key, ProcessingOutcome::Success).unwrap();
-        assert_eq!(pending.text, "queued");
-        assert!(!coord.is_active(&key));
-        assert_eq!(coord.pending(&key).unwrap().text, "next");
-    }
-
-    #[test]
-    fn reset_session_evicts_active_pending_and_busy_ack_state() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
+    fn active_lane_and_pending_queue_limits_are_opt_in() {
         let now = Instant::now();
-        coord.mark_active_at(&key, None, now);
-        let queued = coord.handle_busy_message_at(
-            &key,
-            event("queued before reset", "10"),
-            BusyInputMode::Queue,
-            now,
-        );
-        assert!(queued.handled);
-        assert!(queued.ack.is_some());
+        let mut unlimited = BusySessionCoordinator::default();
+        for index in 0..=MAX_ACTIVE_SESSION_LANES {
+            assert!(matches!(
+                unlimited.claim_idle_or_enqueue(
+                    &format!("unlimited-{index}"),
+                    queued_entry("first", IncomingSender::human()),
+                    BusyInputMode::Queue,
+                    now,
+                ),
+                BusyAdmission::Claimed { .. }
+            ));
+        }
+        for index in 0..=MAX_PENDING_PER_SESSION {
+            assert!(matches!(
+                unlimited.claim_idle_or_enqueue(
+                    "unlimited-0",
+                    queued_entry(&format!("queued-{index}"), IncomingSender::human()),
+                    BusyInputMode::Queue,
+                    now,
+                ),
+                BusyAdmission::Queued(_)
+            ));
+        }
 
-        let pending = coord.reset_session(&key).unwrap();
-        assert_eq!(pending.text, "queued before reset");
-        assert!(!coord.is_active(&key));
-        assert!(coord.pending(&key).is_none());
-
-        let after_reset = coord.handle_busy_message_at(
-            &key,
-            event("late follow-up", "10"),
-            BusyInputMode::Queue,
-            now + Duration::from_secs(1),
-        );
-        assert!(!after_reset.handled);
-        assert!(after_reset.ack.is_none());
-        assert!(coord.pending(&key).is_none());
+        let mut limited =
+            BusySessionCoordinator::with_resource_limits(Duration::from_secs(30), true);
+        for index in 0..MAX_ACTIVE_SESSION_LANES {
+            assert!(matches!(
+                limited.claim_idle_or_enqueue(
+                    &format!("limited-{index}"),
+                    queued_entry("first", IncomingSender::human()),
+                    BusyInputMode::Queue,
+                    now,
+                ),
+                BusyAdmission::Claimed { .. }
+            ));
+        }
+        assert!(matches!(
+            limited.claim_idle_or_enqueue(
+                "one-too-many",
+                queued_entry("first", IncomingSender::human()),
+                BusyInputMode::Queue,
+                now,
+            ),
+            BusyAdmission::AtCapacity
+        ));
+        for index in 0..MAX_PENDING_PER_SESSION {
+            assert!(matches!(
+                limited.claim_idle_or_enqueue(
+                    "limited-0",
+                    queued_entry(&format!("queued-{index}"), IncomingSender::human()),
+                    BusyInputMode::Queue,
+                    now,
+                ),
+                BusyAdmission::Queued(_)
+            ));
+        }
+        assert!(matches!(
+            limited.enqueue_if_active(
+                "limited-0",
+                queued_entry("queue overflow", IncomingSender::human()),
+            ),
+            QueueAdmission::Full
+        ));
     }
 
     #[test]
-    fn reset_session_makes_late_finish_a_noop() {
-        let mut coord = BusySessionCoordinator::default();
-        let key = build_session_key(&source("10"));
-        coord.mark_active(&key, None);
-        coord.handle_busy_message(
-            &key,
-            event("queued before reset", "10"),
-            BusyInputMode::Queue,
-        );
+    fn reset_and_expiry_barriers_respect_opted_in_lane_capacity() {
+        let now = Instant::now();
+        let mut coordinator =
+            BusySessionCoordinator::with_resource_limits(Duration::from_secs(30), true);
+        for index in 0..MAX_ACTIVE_SESSION_LANES {
+            assert!(matches!(
+                coordinator.claim_idle_or_enqueue(
+                    &format!("lane-{index}"),
+                    queued_entry("first", IncomingSender::human()),
+                    BusyInputMode::Queue,
+                    now,
+                ),
+                BusyAdmission::Claimed { .. }
+            ));
+        }
 
-        assert!(coord.reset_session(&key).is_some());
-        assert!(coord.finish(&key, ProcessingOutcome::Cancelled).is_none());
-        assert!(!coord.is_active(&key));
-        assert!(coord.pending(&key).is_none());
+        assert!(matches!(
+            coordinator.begin_reset_session("new-reset"),
+            ResetAdmission::AtCapacity
+        ));
+        assert!(coordinator.begin_idle_expiry("new-expiry").is_none());
+        assert!(matches!(
+            coordinator.begin_reset_session("lane-0"),
+            ResetAdmission::Started { .. }
+        ));
     }
 }

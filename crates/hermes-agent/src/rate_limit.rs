@@ -93,31 +93,35 @@ impl RateLimitTracker {
         }
 
         // Parse x-ratelimit-reset (Unix timestamp in seconds)
-        if let Some(reset_secs) = headers
+        if let Some(reset_at) = headers
             .get("x-ratelimit-reset")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| parse_reset_value(s))
+            .and_then(parse_reset_value)
+            .and_then(checked_positive_duration)
+            .and_then(|duration| now.checked_add(duration))
         {
-            state.reset_at = Some(now + Duration::from_secs_f64(reset_secs));
+            state.reset_at = Some(reset_at);
         }
 
         // Parse retry-after (seconds)
-        if let Some(retry_secs) = headers
+        if let Some(retry_at) = headers
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<f64>().ok())
+            .and_then(checked_positive_duration)
+            .and_then(|duration| now.checked_add(duration))
         {
-            state.retry_after = Some(now + Duration::from_secs_f64(retry_secs));
+            state.retry_after = Some(retry_at);
         }
 
         // Parse x-ratelimit-reset-requests (duration string like "1s" or "200ms")
-        if let Some(reset_dur) = headers
+        if let Some(new_reset) = headers
             .get("x-ratelimit-reset-requests")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| parse_duration_string(s))
+            .and_then(parse_duration_string)
+            .and_then(|duration| now.checked_add(duration))
         {
             // Use the shorter of existing reset_at and this value
-            let new_reset = now + reset_dur;
             state.reset_at = Some(match state.reset_at {
                 Some(existing) if existing < new_reset => existing,
                 _ => new_reset,
@@ -146,6 +150,13 @@ impl Default for RateLimitTracker {
     }
 }
 
+fn checked_positive_duration(seconds: f64) -> Option<Duration> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
 /// Parse a reset value that could be a Unix timestamp or a relative seconds value.
 fn parse_reset_value(s: &str) -> Option<f64> {
     let val = s.parse::<f64>().ok()?;
@@ -168,24 +179,49 @@ fn parse_duration_string(s: &str) -> Option<Duration> {
     let s = s.trim();
     if let Some(ms_str) = s.strip_suffix("ms") {
         let ms: f64 = ms_str.parse().ok()?;
-        return Some(Duration::from_secs_f64(ms / 1000.0));
+        return checked_positive_duration(ms / 1000.0);
     }
     if let Some(s_str) = s.strip_suffix('s') {
         let secs: f64 = s_str.parse().ok()?;
-        return Some(Duration::from_secs_f64(secs));
+        return checked_positive_duration(secs);
     }
     if let Some(m_str) = s.strip_suffix('m') {
         let mins: f64 = m_str.parse().ok()?;
-        return Some(Duration::from_secs_f64(mins * 60.0));
+        return checked_positive_duration(mins * 60.0);
     }
     // Try parsing as plain seconds
     let secs: f64 = s.parse().ok()?;
-    Some(Duration::from_secs_f64(secs))
+    checked_positive_duration(secs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::HeaderName;
+
+    fn state_for_test(tracker: &RateLimitTracker) -> std::sync::MutexGuard<'_, RateLimitState> {
+        match tracker.state.lock() {
+            Ok(state) => state,
+            Err(_) => panic!("rate limit tracker state lock should not be poisoned"),
+        }
+    }
+
+    fn assert_duration_header_is_ignored(header: &str, value: &str) {
+        let tracker = RateLimitTracker::new();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_bytes(header.as_bytes()).expect("valid test header name"),
+            value.parse().expect("valid test header value"),
+        );
+
+        tracker.update_from_headers(&headers);
+
+        let state = state_for_test(&tracker);
+        match header {
+            "retry-after" => assert!(state.retry_after.is_none(), "{value} should be ignored"),
+            _ => assert!(state.reset_at.is_none(), "{value} should be ignored"),
+        }
+    }
 
     #[test]
     fn test_new_tracker_no_wait() {
@@ -197,7 +233,7 @@ mod tests {
     fn test_remaining_zero_triggers_wait() {
         let tracker = RateLimitTracker::new();
         {
-            let mut state = tracker.state.lock().unwrap();
+            let mut state = state_for_test(&tracker);
             state.remaining = Some(0);
             state.reset_at = Some(Instant::now() + Duration::from_secs(5));
         }
@@ -210,7 +246,7 @@ mod tests {
     fn test_remaining_nonzero_no_wait() {
         let tracker = RateLimitTracker::new();
         {
-            let mut state = tracker.state.lock().unwrap();
+            let mut state = state_for_test(&tracker);
             state.remaining = Some(10);
         }
         assert!(tracker.should_wait().is_none());
@@ -220,7 +256,7 @@ mod tests {
     fn test_retry_after_triggers_wait() {
         let tracker = RateLimitTracker::new();
         {
-            let mut state = tracker.state.lock().unwrap();
+            let mut state = state_for_test(&tracker);
             state.retry_after = Some(Instant::now() + Duration::from_secs(3));
         }
         let wait = tracker.should_wait();
@@ -232,7 +268,7 @@ mod tests {
     fn test_expired_retry_after_no_wait() {
         let tracker = RateLimitTracker::new();
         {
-            let mut state = tracker.state.lock().unwrap();
+            let mut state = state_for_test(&tracker);
             // Set retry_after in the past
             state.retry_after = Some(Instant::now() - Duration::from_secs(1));
         }
@@ -252,10 +288,59 @@ mod tests {
     }
 
     #[test]
+    fn test_update_from_headers_parses_fractional_reset_and_retry_after() {
+        let tracker = RateLimitTracker::new();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-reset", "1.25".parse().unwrap());
+        headers.insert("retry-after", "1.5".parse().unwrap());
+
+        let before_update = Instant::now();
+        tracker.update_from_headers(&headers);
+
+        let state = state_for_test(&tracker);
+        let reset_wait = state
+            .reset_at
+            .and_then(|reset_at| reset_at.checked_duration_since(before_update))
+            .expect("fractional reset should be recorded");
+        let retry_wait = state
+            .retry_after
+            .and_then(|retry_at| retry_at.checked_duration_since(before_update))
+            .expect("fractional retry-after should be recorded");
+        assert!(reset_wait >= Duration::from_secs(1));
+        assert!(retry_wait >= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_update_from_headers_parses_suffixed_duration() {
+        let tracker = RateLimitTracker::new();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-reset-requests", "1.25s".parse().unwrap());
+
+        let before_update = Instant::now();
+        tracker.update_from_headers(&headers);
+
+        let state = state_for_test(&tracker);
+        let reset_wait = state
+            .reset_at
+            .and_then(|reset_at| reset_at.checked_duration_since(before_update))
+            .expect("suffixed reset should be recorded");
+        assert!(reset_wait >= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_update_from_headers_ignores_invalid_duration_values() {
+        for value in ["1e300", "1e308", "NaN", "inf", "-inf", "-1", "0"] {
+            assert_duration_header_is_ignored("x-ratelimit-reset", value);
+            assert_duration_header_is_ignored("retry-after", value);
+            assert_duration_header_is_ignored("x-ratelimit-reset-requests", &format!("{value}s"));
+        }
+    }
+
+    #[test]
     fn test_reset() {
         let tracker = RateLimitTracker::new();
         {
-            let mut state = tracker.state.lock().unwrap();
+            let mut state = state_for_test(&tracker);
             state.remaining = Some(0);
         }
         tracker.reset();
@@ -271,7 +356,7 @@ mod tests {
         );
         assert_eq!(
             parse_duration_string("1.5s"),
-            Some(Duration::from_secs_f64(1.5))
+            Some(Duration::from_millis(1_500))
         );
         assert_eq!(parse_duration_string("2m"), Some(Duration::from_secs(120)));
         assert_eq!(parse_duration_string("5"), Some(Duration::from_secs(5)));

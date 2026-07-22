@@ -233,8 +233,8 @@ fn slack_mention_patterns_parse_json_string_and_csv_newlines() {
         vec![r"^\s*chompy\b", "@hermes"]
     );
     assert_eq!(
-        parse_slack_mention_pattern_values("chompy\\b\n@hermes, sigma"),
-        vec!["chompy\\b", "@hermes", "sigma"]
+        parse_slack_mention_pattern_values("chompy\\b\n@hermes, sentinel"),
+        vec!["chompy\\b", "@hermes", "sentinel"]
     );
     assert_eq!(
         parse_slack_mention_pattern_values(r#""hey hermes""#),
@@ -246,10 +246,10 @@ fn slack_mention_patterns_parse_json_string_and_csv_newlines() {
 fn slack_mention_patterns_env_fallback_splits_mixed_csv_and_newlines() {
     let _env = env_lock();
     unsafe {
-        std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sigma");
+        std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sentinel");
     }
     assert!(slack_message_matches_mention_patterns(
-        "SIGMA status",
+        "SENTINEL status",
         &Vec::new()
     ));
     assert!(slack_message_matches_mention_patterns(

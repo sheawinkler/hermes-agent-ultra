@@ -4,10 +4,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
@@ -35,12 +36,61 @@ struct ProcessSession {
     status: Arc<Mutex<ProcessStatus>>,
     output: Arc<Mutex<String>>,
     stdin: Arc<AsyncMutex<Option<ChildStdin>>>,
+    tree: Arc<Mutex<BoundedProcessTree>>,
+    wait_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    reader_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 #[derive(Clone, Default)]
 struct ProcessStatus {
     exited: bool,
     exit_code: Option<i32>,
+}
+
+impl ProcessSession {
+    fn mark_killed(&self) {
+        let mut status = self.status.lock();
+        if !status.exited {
+            status.exited = true;
+            status.exit_code = Some(-15);
+        }
+    }
+
+    fn terminate_tree_sync(&self) {
+        self.tree.lock()
+            .terminate_and_join_sync();
+        self.mark_killed();
+    }
+
+    fn take_tasks(&self) -> Vec<JoinHandle<()>> {
+        let mut tasks = Vec::new();
+        if let Some(task) = self
+            .wait_task.lock()
+            .take()
+        {
+            tasks.push(task);
+        }
+        tasks.extend(
+            self.reader_tasks.lock()
+                .drain(..),
+        );
+        tasks
+    }
+
+    fn terminate_and_join_sync(&self) {
+        self.terminate_tree_sync();
+        for task in self.take_tasks() {
+            task.abort();
+        }
+    }
+
+    async fn terminate_and_join(&self) {
+        self.terminate_tree_sync();
+        for task in self.take_tasks() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
 }
 
 /// A [`TerminalBackend`] that runs commands on the local machine.
@@ -154,7 +204,7 @@ impl LocalBackend {
     }
 
     fn append_output(output: &Arc<Mutex<String>>, text: &str, max_chars: usize) {
-        let mut guard = output.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = output.lock();
         guard.push_str(text);
         if guard.len() > max_chars {
             let trimmed = Self::slice_to_tail_chars(&guard, max_chars);
@@ -164,17 +214,13 @@ impl LocalBackend {
 
     fn read_status_snapshot(session: &ProcessSession) -> ProcessStatus {
         session
-            .status
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .status.lock()
             .clone()
     }
 
     fn read_output_snapshot(session: &ProcessSession) -> String {
         session
-            .output
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .output.lock()
             .clone()
     }
 
@@ -198,9 +244,7 @@ impl LocalBackend {
     }
 
     fn get_session(&self, session_id: &str) -> Option<ProcessSession> {
-        self.background_processes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        self.background_processes.lock()
             .get(session_id)
             .cloned()
     }
@@ -230,7 +274,7 @@ impl LocalBackend {
     }
 
     fn append_bytes(output: &Arc<Mutex<Vec<u8>>>, bytes: &[u8], max_bytes: usize) {
-        let mut guard = output.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = output.lock();
         let remaining = max_bytes.saturating_sub(guard.len());
         if remaining > 0 {
             guard.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
@@ -259,7 +303,7 @@ impl LocalBackend {
     }
 
     fn decode_output(bytes: &Arc<Mutex<Vec<u8>>>) -> String {
-        let guard = bytes.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = bytes.lock();
         String::from_utf8_lossy(&guard).to_string()
     }
 
@@ -278,40 +322,36 @@ impl LocalBackend {
 
     async fn collect_foreground_child(
         &self,
-        mut cmd: TokioCommand,
+        cmd: TokioCommand,
         timeout_secs: u64,
         stdin_payload: Option<Vec<u8>>,
         spawn_label: &str,
         timeout_label: &str,
     ) -> Result<CommandOutput, AgentError> {
-        configure_foreground_process_group(&mut cmd);
-        let child = cmd
-            .spawn()
-            .map_err(|e| AgentError::Io(format!("Failed to spawn {spawn_label}: {e}")))?;
-        let mut child_guard = ForegroundChildGuard::new(child);
+        let mut tree = BoundedProcessTree::spawn(cmd, spawn_label)?;
         if let Some(payload) = stdin_payload {
-            if let Some(mut stdin) = child_guard.child_mut().stdin.take() {
+            if let Some(mut stdin) = tree.take_stdin() {
                 stdin
                     .write_all(&payload)
                     .await
-                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
+                    .map_err(|error| AgentError::Io(format!("Failed to write stdin: {error}")))?;
                 stdin
                     .flush()
                     .await
-                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
+                    .map_err(|error| AgentError::Io(format!("Failed to flush stdin: {error}")))?;
             }
         }
 
         let stdout = Arc::new(Mutex::new(Vec::new()));
         let stderr = Arc::new(Mutex::new(Vec::new()));
-        let mut stdout_task = child_guard.child_mut().stdout.take().map(|stream| {
+        let mut stdout_task = tree.take_stdout().map(|stream| {
             let stdout = stdout.clone();
             let max = self.max_output_size;
             tokio::spawn(async move {
                 Self::read_stream_to_bytes(stream, stdout, max).await;
             })
         });
-        let mut stderr_task = child_guard.child_mut().stderr.take().map(|stream| {
+        let mut stderr_task = tree.take_stderr().map(|stream| {
             let stderr = stderr.clone();
             let max = self.max_output_size;
             tokio::spawn(async move {
@@ -321,7 +361,7 @@ impl LocalBackend {
 
         let wait_result = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
-            child_guard.child_mut().wait(),
+            tree.wait_until_exit(),
         )
         .await;
 
@@ -335,19 +375,27 @@ impl LocalBackend {
                 if let Some(handle) = stderr_task.take() {
                     Self::finish_or_abort_reader(handle).await;
                 }
-                child_guard.disarm();
+                tree.disarm();
                 Ok(CommandOutput {
                     exit_code: status.code().unwrap_or(-1),
                     stdout: Self::decode_output(&stdout),
                     stderr: Self::decode_output(&stderr),
                 })
             }
-            Ok(Err(e)) => Err(AgentError::Io(format!(
-                "Failed to wait for {spawn_label}: {e}"
-            ))),
+            Ok(Err(error)) => {
+                tree.terminate_and_join().await;
+                if let Some(handle) = stdout_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                if let Some(handle) = stderr_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                Err(AgentError::Io(format!(
+                    "Failed to wait for {spawn_label}: {error}"
+                )))
+            }
             Err(_) => {
-                terminate_child_process(child_guard.child_mut()).await;
-                child_guard.disarm();
+                tree.terminate_and_join().await;
                 if let Some(handle) = stdout_task.take() {
                     Self::finish_or_abort_reader(handle).await;
                 }
@@ -361,40 +409,36 @@ impl LocalBackend {
         }
     }
 
-    fn terminate_pid(pid: u32) -> Result<(), AgentError> {
-        #[cfg(unix)]
-        {
-            let status = std::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .suppress_windows_console()
-                .status()
-                .map_err(|e| AgentError::Io(format!("Failed to invoke kill for pid {pid}: {e}")))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(AgentError::Io(format!(
-                    "Failed to terminate pid {pid} (exit status: {status})"
-                )))
-            }
+    fn background_sessions(&self) -> Vec<ProcessSession> {
+        self.background_processes.lock()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Terminate and join every background process owned by this backend.
+    pub async fn shutdown(&self) {
+        let sessions = self.background_sessions();
+        for session in &sessions {
+            session.terminate_and_join().await;
         }
-        #[cfg(not(unix))]
-        {
-            let status = std::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .suppress_windows_console()
-                .status()
-                .map_err(|e| {
-                    AgentError::Io(format!("Failed to invoke taskkill for pid {pid}: {e}"))
-                })?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(AgentError::Io(format!(
-                    "Failed to terminate pid {pid} (exit status: {status})"
-                )))
-            }
+        self.background_processes.lock()
+            .clear();
+    }
+
+    fn shutdown_sync(&self) {
+        let sessions = self.background_sessions();
+        for session in &sessions {
+            session.terminate_and_join_sync();
         }
+        self.background_processes.lock()
+            .clear();
+    }
+}
+
+impl Drop for LocalBackend {
+    fn drop(&mut self) {
+        self.shutdown_sync();
     }
 }
 
@@ -417,7 +461,7 @@ impl TerminalBackend for LocalBackend {
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
         let rewritten_command = rewrite_compound_background(command);
-        let subprocess_home = subprocess_home_for_mode(self.home_mode);
+        let subprocess_home = subprocess_home_for_mode(self.home_mode)?;
         let command_with_profiles = with_login_profile_sources(
             &rewritten_command,
             &self.shell_init_files,
@@ -514,84 +558,92 @@ impl TerminalBackend for LocalBackend {
                 .await;
         }
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
+        let mut tree = BoundedProcessTree::spawn(cmd, "command")?;
+        let session_id = Self::next_process_session_id();
+        let pid = tree.pid();
+        let output = Arc::new(Mutex::new(String::new()));
+        let status = Arc::new(Mutex::new(ProcessStatus::default()));
+        let stdin = Arc::new(AsyncMutex::new(tree.take_stdin()));
+        let max_output_chars = self.max_process_output_chars();
+        let tree = Arc::new(Mutex::new(tree));
+        let session = ProcessSession {
+            id: session_id.clone(),
+            command: rewritten_command.clone(),
+            pid,
+            started_at: Self::now_unix_ts(),
+            status: status.clone(),
+            output: output.clone(),
+            stdin,
+            tree: tree.clone(),
+            wait_task: Arc::new(Mutex::new(None)),
+            reader_tasks: Arc::new(Mutex::new(Vec::new())),
+        };
 
-            let session_id = Self::next_process_session_id();
-            let pid = child.id();
-            let output = Arc::new(Mutex::new(String::new()));
-            let status = Arc::new(Mutex::new(ProcessStatus::default()));
-            let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
-            let max_output_chars = self.max_process_output_chars();
-            let session = ProcessSession {
-                id: session_id.clone(),
-                command: rewritten_command.clone(),
-                pid,
-                started_at: Self::now_unix_ts(),
-                status: status.clone(),
-                output: output.clone(),
-                stdin,
-            };
-            self.background_processes
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_id.clone(), session);
-
-            if let Some(stdout) = child.stdout.take() {
-                let output = output.clone();
-                tokio::spawn(async move {
+        if let Some(stdout) = tree.lock()
+            .take_stdout()
+        {
+            let output = output.clone();
+            session
+                .reader_tasks.lock()
+                .push(tokio::spawn(async move {
                     Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
-                });
-            }
-            if let Some(stderr) = child.stderr.take() {
-                let output = output.clone();
-                tokio::spawn(async move {
+                }));
+        }
+        if let Some(stderr) = tree.lock()
+            .take_stderr()
+        {
+            let output = output.clone();
+            session
+                .reader_tasks.lock()
+                .push(tokio::spawn(async move {
                     Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
-                });
-            }
+                }));
+        }
 
-            tokio::spawn(async move {
-                match child.wait().await {
-                    Ok(exit) => {
-                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+        let wait_session = session.clone();
+        let wait_task = tokio::spawn(async move {
+            loop {
+                let result = wait_session
+                    .tree.lock()
+                    .poll_exit();
+                match result {
+                    Ok(Some(exit)) => {
+                        let mut guard = wait_session
+                            .status.lock();
                         guard.exited = true;
                         guard.exit_code = exit.code();
+                        break;
                     }
-                    Err(err) => {
-                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                    Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+                    Err(error) => {
+                        let mut guard = wait_session
+                            .status.lock();
                         guard.exited = true;
                         guard.exit_code = Some(-1);
-                        let note = format!("\n[wait error: {err}]");
-                        Self::append_output(&output, &note, max_output_chars);
+                        let note = format!("\n[wait error: {error}]");
+                        Self::append_output(&wait_session.output, &note, max_output_chars);
+                        break;
                     }
                 }
-            });
+            }
+        });
+        *session
+            .wait_task.lock() = Some(wait_task);
+        self.background_processes.lock()
+            .insert(session_id.clone(), session);
 
-            let started = json!({
-                "output": "Background process started",
-                "session_id": session_id,
-                "pid": pid,
-                "exit_code": 0,
-                "error": Value::Null
-            });
-            Ok(CommandOutput {
-                exit_code: 0,
-                stdout: started.to_string(),
-                stderr: String::new(),
-            })
+        let started = json!({
+            "output": "Background process started",
+            "session_id": session_id,
+            "pid": pid,
+            "exit_code": 0,
+            "error": Value::Null
+        });
+        Ok(CommandOutput {
+            exit_code: 0,
+            stdout: started.to_string(),
+            stderr: String::new(),
         })
-        .await;
-
-        match result {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AgentError::Timeout(format!(
-                "Command timed out after {} seconds",
-                timeout_secs
-            ))),
-        }
     }
 
     async fn execute_command_with_stdin(
@@ -609,7 +661,7 @@ impl TerminalBackend for LocalBackend {
                 .await;
         };
         let rewritten_command = rewrite_compound_background(command);
-        let subprocess_home = subprocess_home_for_mode(self.home_mode);
+        let subprocess_home = subprocess_home_for_mode(self.home_mode)?;
         let command_with_profiles = with_login_profile_sources(
             &rewritten_command,
             &self.shell_init_files,
@@ -764,9 +816,7 @@ impl TerminalBackend for LocalBackend {
 
     async fn list_processes(&self) -> Result<Value, AgentError> {
         let sessions = self
-            .background_processes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .background_processes.lock()
             .values()
             .cloned()
             .collect::<Vec<_>>();
@@ -906,18 +956,7 @@ impl TerminalBackend for LocalBackend {
                 "exit_code": status.exit_code
             }));
         }
-        let pid = session.pid.ok_or_else(|| {
-            AgentError::Io(format!(
-                "Cannot terminate process {session_id}: missing pid"
-            ))
-        })?;
-        Self::terminate_pid(pid)?;
-
-        {
-            let mut guard = session.status.lock().unwrap_or_else(|e| e.into_inner());
-            guard.exited = true;
-            guard.exit_code = Some(-15);
-        }
+        session.terminate_and_join().await;
         let _ = session.stdin.lock().await.take();
         Ok(json!({
             "status": "killed",

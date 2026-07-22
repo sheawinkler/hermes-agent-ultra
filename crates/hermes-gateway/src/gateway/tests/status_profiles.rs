@@ -200,7 +200,7 @@ async fn gateway_group_allowlist_denies_unauthorized_user() {
 }
 
 #[tokio::test]
-async fn gateway_discord_group_allowlist_honors_authorized_source_pairing() {
+async fn gateway_discord_group_allowlist_rejects_dm_approval() {
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let mut dm_manager = DmManager::with_ignore_behavior();
     dm_manager.authorize_user_for_platform("discord", "paired_user");
@@ -224,19 +224,28 @@ async fn gateway_discord_group_allowlist_honors_authorized_source_pairing() {
         is_dm: false,
     };
 
-    assert!(gw.route_message(&incoming).await.is_err());
+    assert!(gw.route_message(&incoming).await.is_ok());
     assert_eq!(
         gw.session_transcript_len("discord", "guild:42", "paired_user")
             .await,
-        1
+        0
     );
 }
 
 #[tokio::test]
 async fn gateway_group_allowlist_star_authorizes_any_sender() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let dm_manager = DmManager::with_ignore_behavior();
     let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("telegram", adapter).await;
+    gw.set_message_handler(Arc::new(|_messages| {
+        Box::pin(async { Ok("handled".to_string()) })
+    }))
+    .await;
     let mut policies = HashMap::new();
     let mut policy = PlatformAccessPolicy {
         group_mode: GroupAccessMode::Allowlist,
@@ -256,13 +265,13 @@ async fn gateway_group_allowlist_star_authorizes_any_sender() {
         is_dm: false,
     };
 
-    let result = gw.route_message(&incoming).await;
-    assert!(result.is_err());
+    assert!(gw.route_message(&incoming).await.is_ok());
     assert_eq!(
         gw.session_transcript_len("telegram", "-100123", "any_user")
             .await,
-        1
+        2
     );
+    assert_eq!(sent.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -294,9 +303,18 @@ fn discord_fail_closed_default_warning_is_precise() {
 
 #[tokio::test]
 async fn gateway_group_chat_authorization_allows_listed_chat_sender() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let dm_manager = DmManager::with_ignore_behavior();
     let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("telegram", adapter).await;
+    gw.set_message_handler(Arc::new(|_messages| {
+        Box::pin(async { Ok("handled".to_string()) })
+    }))
+    .await;
     let mut policies = HashMap::new();
     let mut policy = PlatformAccessPolicy {
         group_mode: GroupAccessMode::Allowlist,
@@ -318,11 +336,11 @@ async fn gateway_group_chat_authorization_allows_listed_chat_sender() {
         thread_id: None,
         is_dm: false,
     };
-    assert!(gw.route_message(&legacy_chat_source).await.is_err());
+    assert!(gw.route_message(&legacy_chat_source).await.is_ok());
     assert_eq!(
         gw.session_transcript_len("telegram", "-1001878443972", "123")
             .await,
-        1
+        2
     );
 
     let sender_source = IncomingMessage {
@@ -334,12 +352,13 @@ async fn gateway_group_chat_authorization_allows_listed_chat_sender() {
         thread_id: None,
         is_dm: false,
     };
-    assert!(gw.route_message(&sender_source).await.is_err());
+    assert!(gw.route_message(&sender_source).await.is_ok());
     assert_eq!(
         gw.session_transcript_len("telegram", "-1009999999999", "999")
             .await,
-        1
+        2
     );
+    assert_eq!(sent.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -358,11 +377,12 @@ async fn gateway_route_unauthorized_dm_pairs_with_code_message() {
         chat_id: "15551234567@s.whatsapp.net".into(),
         user_id: "15551234567@s.whatsapp.net".into(),
         text: "hello".into(),
-        message_id: None,
+        message_id: Some("pairing-redelivery".into()),
         thread_id: None,
         is_dm: true,
     };
 
+    assert!(gw.route_message(&incoming).await.is_ok());
     assert!(gw.route_message(&incoming).await.is_ok());
     let messages = sent.lock().unwrap();
     assert_eq!(messages.len(), 1);
@@ -610,16 +630,23 @@ async fn gateway_discord_slash_requires_allowlist() {
     };
     assert!(gw.route_message(&paired).await.is_ok());
     let sent_msgs = sent.lock().unwrap();
-    assert_eq!(sent_msgs.len(), 2);
-    assert_eq!(sent_msgs[1].0, "guild:1");
-    assert!(!sent_msgs[1].1.trim().is_empty());
+    assert_eq!(sent_msgs.len(), 1);
 }
 
 #[tokio::test]
 async fn gateway_discord_bot_sender_can_bypass_user_allowlist_when_enabled() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let dm_manager = DmManager::with_ignore_behavior();
     let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("discord", adapter).await;
+    gw.set_message_handler(Arc::new(|_messages| {
+        Box::pin(async { Ok("handled".to_string()) })
+    }))
+    .await;
     let mut policies = HashMap::new();
     let mut policy = PlatformAccessPolicy {
         group_mode: GroupAccessMode::Allowlist,
@@ -643,12 +670,13 @@ async fn gateway_discord_bot_sender_can_bypass_user_allowlist_when_enabled() {
     assert!(gw
         .route_message_from_sender(&incoming, IncomingSender::bot())
         .await
-        .is_err());
+        .is_ok());
     assert_eq!(
         gw.session_transcript_len("discord", "guild:1", "worker_bot")
             .await,
-        1
+        2
     );
+    assert_eq!(sent.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1000,30 +1028,55 @@ async fn gateway_background_task_lifecycle_commands_work() {
 }
 
 #[tokio::test]
-async fn gateway_admin_approve_and_deny_affects_dm_authorization() {
+async fn gateway_admin_approve_and_deny_resolve_pairing_code_for_exact_dm() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
     });
-
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
-    let mut dm_manager = DmManager::with_ignore_behavior();
-    dm_manager.add_admin("admin1");
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.add_admin_for_platform("test", "admin1");
+    let DmDecision::Pair {
+        message: Some(pairing_message),
+    } = dm_manager
+        .handle_dm_for_chat("user2", "test", "chat-u2", false)
+        .await
+    else {
+        panic!("target DM should create a pairing request");
+    };
+    let pairing_code = pairing_message
+        .strip_prefix("Your pairing code is ")
+        .and_then(|message| message.split('.').next())
+        .expect("pairing code");
     let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
     gw.register_adapter("test", adapter).await;
+    let handled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    gw.set_message_handler({
+        let handled = handled.clone();
+        Arc::new(move |_messages| {
+            let handled = handled.clone();
+            Box::pin(async move {
+                handled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok("handled".to_string())
+            })
+        })
+    })
+    .await;
 
     let approve = IncomingMessage {
         platform: "test".into(),
         chat_id: "admin-chat".into(),
         user_id: "admin1".into(),
-        text: "/approve user2".into(),
+        text: format!("/approve {pairing_code}"),
         message_id: None,
         thread_id: None,
         is_dm: true,
     };
     assert!(gw.route_message(&approve).await.is_ok());
+    assert!(sent.lock().unwrap().iter().any(|(_, message)| {
+        message.contains("User 'user2'") && message.contains("chat 'chat-u2'")
+    }));
 
-    // user2 should now pass DM authorization, then fail because no handler is configured.
     let authorized_dm = IncomingMessage {
         platform: "test".into(),
         chat_id: "chat-u2".into(),
@@ -1033,31 +1086,234 @@ async fn gateway_admin_approve_and_deny_affects_dm_authorization() {
         thread_id: None,
         is_dm: true,
     };
-    assert!(gw.route_message(&authorized_dm).await.is_err());
+    assert!(gw.route_message(&authorized_dm).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let wrong_chat = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "other-chat".into(),
+        user_id: "user2".into(),
+        text: "wrong chat".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&wrong_chat).await.is_ok());
+    let slash_reuse = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "chat-u2".into(),
+        user_id: "user2".into(),
+        text: "/status".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&slash_reuse).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     let deny = IncomingMessage {
         platform: "test".into(),
         chat_id: "admin-chat".into(),
         user_id: "admin1".into(),
-        text: "/deny user2".into(),
+        text: format!("/deny {pairing_code}"),
         message_id: None,
         thread_id: None,
         is_dm: true,
     };
     assert!(gw.route_message(&deny).await.is_ok());
+    assert!(gw.route_message(&authorized_dm).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
 
-    // user2 should be denied again, and route should return Ok (silently denied).
-    let denied_dm = IncomingMessage {
+#[tokio::test]
+async fn gateway_platform_admin_approval_does_not_cross_platform() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.add_admin_for_platform("telegram", "platform-admin");
+    let DmDecision::Pair {
+        message: Some(pairing_message),
+    } = dm_manager
+        .handle_dm_for_chat("same-id", "telegram", "target-dm", false)
+        .await
+    else {
+        panic!("target DM should create a pairing request");
+    };
+    let pairing_code = pairing_message
+        .strip_prefix("Your pairing code is ")
+        .and_then(|message| message.split('.').next())
+        .expect("pairing code");
+    let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("telegram", adapter.clone()).await;
+    gw.register_adapter("discord", adapter).await;
+    let handled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    gw.set_message_handler({
+        let handled = handled.clone();
+        Arc::new(move |_messages| {
+            let handled = handled.clone();
+            Box::pin(async move {
+                handled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok("handled".to_string())
+            })
+        })
+    })
+    .await;
+
+    let approve_on_telegram = IncomingMessage {
+        platform: "telegram".into(),
+        chat_id: "admin-dm".into(),
+        user_id: "platform-admin".into(),
+        text: format!("/approve {pairing_code}"),
+        message_id: Some("telegram-approve".into()),
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&approve_on_telegram).await.is_ok());
+
+    let telegram_dm = IncomingMessage {
+        platform: "telegram".into(),
+        chat_id: "target-dm".into(),
+        user_id: "same-id".into(),
+        text: "allowed here".into(),
+        message_id: Some("telegram-target".into()),
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&telegram_dm).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    let discord_dm = IncomingMessage {
+        platform: "discord".into(),
+        chat_id: "target-dm".into(),
+        user_id: "same-id".into(),
+        text: "must stay denied".into(),
+        message_id: Some("discord-target".into()),
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&discord_dm).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn gateway_persistence_failures_emit_no_approval_or_revocation_success() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut dm_manager = DmManager::with_pair_behavior_and_grant_store(Some(
+        temporary.path().join("dm-grants.json"),
+    ))
+    .expect("durable manager");
+    dm_manager.add_admin_for_platform("test", "admin1");
+    let DmDecision::Pair {
+        message: Some(existing_pairing_message),
+    } = dm_manager
+        .handle_dm_for_chat("user1", "test", "chat-u1", false)
+        .await
+    else {
+        panic!("existing target DM should create a pairing request");
+    };
+    let existing_code = existing_pairing_message
+        .strip_prefix("Your pairing code is ")
+        .and_then(|message| message.split('.').next())
+        .expect("existing pairing code");
+    dm_manager
+        .approve_pairing_code("test", "admin1", "admin-chat", true, existing_code)
+        .expect("initial durable approval");
+    let DmDecision::Pair {
+        message: Some(pairing_message),
+    } = dm_manager
+        .handle_dm_for_chat("user2", "test", "chat-u2", false)
+        .await
+    else {
+        panic!("target DM should create a pairing request");
+    };
+    let pairing_code = pairing_message
+        .strip_prefix("Your pairing code is ")
+        .and_then(|message| message.split('.').next())
+        .expect("pairing code");
+    dm_manager.set_store_write_override_for_tests(Arc::new(|_, _| {
+        Err(crate::dm::DmGrantError::Persistence(
+            "injected write failure".to_string(),
+        ))
+    }));
+    let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("test", adapter).await;
+    let handled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    gw.set_message_handler({
+        let handled = handled.clone();
+        Arc::new(move |_messages| {
+            let handled = handled.clone();
+            Box::pin(async move {
+                handled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok("handled".to_string())
+            })
+        })
+    })
+    .await;
+
+    let approve = IncomingMessage {
         platform: "test".into(),
-        chat_id: "chat-u2".into(),
-        user_id: "user2".into(),
-        text: "hello again".into(),
+        chat_id: "admin-chat".into(),
+        user_id: "admin1".into(),
+        text: format!("/approve {pairing_code}"),
         message_id: None,
         thread_id: None,
         is_dm: true,
     };
-    assert!(gw.route_message(&denied_dm).await.is_ok());
+    assert!(gw.route_message(&approve).await.is_err());
+    assert!(!sent
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, message)| message.contains("has been approved")));
+    let target = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "chat-u2".into(),
+        user_id: "user2".into(),
+        text: "still pending".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&target).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let deny = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "admin-chat".into(),
+        user_id: "admin1".into(),
+        text: format!("/deny {existing_code}"),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&deny).await.is_err());
+    assert!(!sent
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, message)| message.contains("has been removed from DM access")));
+
+    let existing_target = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "chat-u1".into(),
+        user_id: "user1".into(),
+        text: "still approved".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&existing_target).await.is_ok());
+    assert_eq!(handled.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
 
 #[tokio::test]
 async fn gateway_reload_mcp_and_status_reflect_runtime_state() {
@@ -1243,7 +1499,13 @@ async fn gateway_title_command_mirrors_discord_thread_title() {
 
     assert!(gw.route_message(&title).await.is_ok());
 
-    let session_key = session_mgr.compose_session_key("discord", "parent-channel", "user1");
+    let session_key = session_mgr.compose_session_key_for_scope(ConversationScope::new(
+        "discord",
+        "parent-channel",
+        Some("thread-42"),
+        "user1",
+        false,
+    ));
     assert_eq!(
         session_mgr.get_title(&session_key).await.as_deref(),
         Some("Release readiness")

@@ -217,6 +217,7 @@ mod tests {
 
     use hermes_core::{GatewayError, ParseMode, PlatformAdapter, SendMessageOptions};
     use hermes_cron::{CronRunner, FileJobPersistence, MinimalCronLlm};
+    use hermes_environments::ExecutionContainmentContext;
     use hermes_gateway::{gateway::GatewayConfig, DmManager, SessionManager};
     use tempfile::TempDir;
 
@@ -389,9 +390,29 @@ mod tests {
     async fn cron_scheduler_backend_handles_create_and_list() {
         let tmp = TempDir::new().expect("tempdir");
         let persistence = Arc::new(FileJobPersistence::with_dir(tmp.path().to_path_buf()));
+        let config = hermes_config::GatewayConfig::default();
 
+        let execution_mode = hermes_core::ResolvedExecutionMode::default();
+        let execution_containment = Arc::new(
+            ExecutionContainmentContext::manual(execution_mode)
+                .expect("default mode must admit manual containment"),
+        );
         let empty_tools = Arc::new(crate::app::bridge_tool_registry(&ToolRegistry::new()));
-        let runner = Arc::new(CronRunner::new(Arc::new(MinimalCronLlm), empty_tools));
+        empty_tools.set_execution_containment_context(Arc::clone(&execution_containment));
+        let runner = Arc::new(
+            CronRunner::new(
+                Arc::new(MinimalCronLlm),
+                empty_tools,
+                Arc::new(
+                    hermes_agent::RunRuntime::open_for_ephemeral_testing(tmp.path())
+                        .expect("ephemeral run runtime"),
+                ),
+                execution_mode,
+                execution_containment,
+                &config,
+            )
+            .expect("cron test runner"),
+        );
         let scheduler = Arc::new(CronScheduler::new(persistence, runner));
 
         let registry = Arc::new(ToolRegistry::new());

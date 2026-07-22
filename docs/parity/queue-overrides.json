@@ -1483,7 +1483,7 @@
     },
     "311900842e88": {
       "disposition": "superseded",
-      "notes": "Upstream Discord auto-disconnect behavior is Python adapter voice-state logic. Rust voice lifecycle is explicit join/leave state with VoiceManager tests and no Python reply-mode disconnect path."
+      "notes": "Intentional fail-closed divergence: the Rust Discord adapter does not ship a live voice-channel engine or auto-disconnect lifecycle. The former test-only VoiceManager was removed; text/media routing and /voice status are separate contracts."
     },
     "311e80809f50": {
       "disposition": "superseded",
@@ -2880,11 +2880,6 @@
       "notes": "Upstream Teams media attachment fix targets the Python Teams chat plugin. Hermes Agent Ultra Rust gateway has no Teams chat adapter module; its Rust Teams surface is the meeting-summary pipeline, while chat media delivery is handled generically through Gateway::send_message media markers and registered adapter send_file/send_image_url implementations.",
       "owner": "rust-runtime"
     },
-    "5f6be7f31bd7": {
-      "disposition": "ported",
-      "notes": "Ported/superseded by Rust-native Microsoft Teams pipeline in crates/hermes-tools/src/teams_pipeline.rs, including Graph auth/download, meeting jobs, Teams sink writer, and tests.",
-      "owner": "rust-runtime"
-    },
     "5f91b1a48b06": {
       "disposition": "ported",
       "notes": "OSINT investigation optional skill was adopted from upstream under optional-skills/research/osint-investigation with source references, scripts, and templates."
@@ -4140,8 +4135,8 @@
       "owner": "rust-runtime"
     },
     "8a9ded5b21b1": {
-      "disposition": "ported",
-      "notes": "Rust gateway now has a dependency-free 48 kHz stereo s16le continuous VoiceMixer with ambient loops, ducked speech overlays, clipping, stop/cleanup, and synthesized ambient PCM, plus VoiceManager voice_fx lifecycle integration for join/remove, active checks, ack phrase selection, speech enqueue/read/stop, and focused mixer/manager unit tests."
+      "disposition": "superseded",
+      "notes": "Intentional fail-closed divergence: the unconsumed VoiceMixer/VoiceManager facade was removed instead of counting unit-only audio mixing as a shipped voice engine. Reintroduction requires a production capture/platform consumer and end-to-end playback and lifecycle proof."
     },
     "8ad15ff7dde90dc7f05114133cc3b553947018e6": {
       "disposition": "superseded",
@@ -4966,7 +4961,7 @@
     },
     "a7683d04a964": {
       "disposition": "ported",
-      "notes": "Rust Telegram topic sessions do not mutate Python SessionStore/SQLite bindings; topic identity is the encoded chat_id:thread_id session key. /new resets only that current encoded key, and /topic <session-id> now reuses the persisted session switch path for restores without split-brain binding state."
+      "notes": "Rust Telegram topic sessions do not mutate Python SessionStore/SQLite bindings; topic identity uses explicit parent-chat and platform-topic scope. /new resets only the current topic lane, and /topic <session-id> reuses the persisted session switch path without split-brain binding state."
     },
     "a7780fe05f43": {
       "disposition": "ported",

@@ -634,263 +634,150 @@ fn extract_file_like_hints(text: &str, limit: usize) -> Vec<String> {
     out
 }
 
-fn stream_chunk_has_progress(chunk: &StreamChunk) -> bool {
-    if let Some(delta) = chunk.delta.as_ref() {
-        let has_content = delta
-            .content
-            .as_ref()
-            .is_some_and(|text| !text.trim().is_empty());
-        let has_tool_calls = delta
-            .tool_calls
-            .as_ref()
-            .is_some_and(|calls| !calls.is_empty());
-        let has_extra_event = delta.extra.as_ref().is_some_and(|extra| match extra {
-            serde_json::Value::Null => false,
-            serde_json::Value::Object(map) => !map.is_empty(),
-            _ => true,
-        });
-        if has_content || has_tool_calls || has_extra_event {
-            return true;
-        }
-    }
-    chunk
-        .finish_reason
-        .as_ref()
-        .is_some_and(|reason| !reason.trim().is_empty())
-        || chunk.usage.is_some()
-}
-
 fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) -> bool {
     match event {
-        Event::StreamDelta(delta) => {
-            if !delta.is_empty() {
-                state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
-                state.stream_char_count = state
-                    .stream_char_count
-                    .saturating_add(delta.chars().count());
-                if !state.saw_first_token {
-                    state.saw_first_token = true;
-                    let first_token_ms = state
-                        .processing_started_at
-                        .map(|t| t.elapsed().as_millis())
-                        .unwrap_or_default();
-                    state.push_activity(format!("↧ first token in {}ms", first_token_ms));
-                }
+        Event::StreamRender(delta) => {
+            state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
+            if let Some(enabled) = delta.mute_post_response {
+                state.stream_muted = enabled;
             }
-            state.stream_buffer.push_str(&delta);
-            true
-        }
-        Event::StreamChunk(chunk) => {
-            if stream_chunk_has_progress(&chunk) {
-                state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
-            }
-            if let Some(delta) = chunk.delta {
-                if let Some(content) = delta.content.as_ref().filter(|text| !text.is_empty()) {
+            if let Some(content) = delta.text.filter(|text| !text.is_empty()) {
+                if !state.stream_muted {
+                    if delta.break_before {
+                        state.stream_buffer.push_str("\n\n");
+                    }
                     state.stream_char_count = state
                         .stream_char_count
                         .saturating_add(content.chars().count());
-                }
-                if let Some(extra) = delta.extra.as_ref() {
-                    if let Some(control) = extra.get("control").and_then(|v| v.as_str()) {
-                        if control == "mute_post_response" {
-                            state.stream_muted = extra
-                                .get("enabled")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                        } else if control == "stream_break" {
-                            state.stream_needs_break = true;
-                        }
+                    state.stream_buffer.push_str(&content);
+                    if !state.saw_first_token {
+                        state.saw_first_token = true;
+                        let first_token_ms = state
+                            .processing_started_at
+                            .map(|started| started.elapsed().as_millis())
+                            .unwrap_or_default();
+                        state.push_activity(format!("↧ first token in {}ms", first_token_ms));
                     }
-                    if let Some(ui_event) = extra.get("ui_event").and_then(|v| v.as_str()) {
-                        match ui_event {
-                            "tool_start" => {
-                                let tool = extra
-                                    .get("tool")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("tool")
-                                    .trim()
-                                    .to_string();
-                                if !tool.is_empty()
-                                    && !state.active_tools.iter().any(|t| t == &tool)
-                                {
-                                    state.active_tools.push(tool.clone());
-                                }
-                                let args_preview = extra
-                                    .get("args_preview")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .trim();
-                                if args_preview.is_empty() {
-                                    state.push_activity(format!("▶ {}", tool));
-                                } else {
-                                    state.push_activity(format!("▶ {} {}", tool, args_preview));
-                                }
-                                state.push_activity(format!(
-                                    "Δtools active={}",
-                                    state.active_tools.len()
-                                ));
-                            }
-                            "tool_complete" => {
-                                let tool = extra
-                                    .get("tool")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("tool")
-                                    .trim()
-                                    .to_string();
-                                if let Some(idx) =
-                                    state.active_tools.iter().position(|t| t == &tool)
-                                {
-                                    state.active_tools.remove(idx);
-                                }
-                                let result_preview = extra
-                                    .get("result_preview")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .trim();
-                                if result_preview.is_empty() {
-                                    state.push_activity(format!("✓ {}", tool));
-                                } else {
-                                    state.push_activity(format!("✓ {} {}", tool, result_preview));
-                                    let file_hints = extract_file_like_hints(result_preview, 3);
-                                    if !file_hints.is_empty() {
-                                        state.push_activity(format!(
-                                            "Δfiles {}",
-                                            file_hints.join(", ")
-                                        ));
-                                    }
-                                }
-                            }
-                            "status" => {
-                                let event_type = extra
-                                    .get("event_type")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("status")
-                                    .trim();
-                                let message = extra
-                                    .get("message")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .trim();
-                                if !message.is_empty() {
-                                    state.push_activity(format!("[{}] {}", event_type, message));
-                                }
-                            }
-                            "phase" => {
-                                let phase = extra
-                                    .get("phase")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("phase");
-                                let label =
-                                    extra.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                                let progress_pct = extra
-                                    .get("progress_pct")
-                                    .and_then(|v| v.as_u64())
-                                    .and_then(|v| u8::try_from(v).ok());
-                                state.update_processing_phase(phase, label, progress_pct);
-                            }
-                            "lifecycle" => {
-                                let message = extra
-                                    .get("message")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .trim();
-                                if !message.is_empty() {
-                                    state.push_activity(format!("⟡ {}", message));
-                                    let lower = message.to_ascii_lowercase();
-                                    if lower.contains("mismatch")
-                                        || lower.contains("remediation")
-                                        || lower.contains("auto-refresh")
-                                        || lower.contains("retrying")
-                                        || lower.contains("fallback")
-                                    {
-                                        state.processing_degraded = true;
-                                        state.degraded_notes.push(truncate_chars(message, 120));
-                                        if state.degraded_notes.len() > 4 {
-                                            let drop_count = state.degraded_notes.len() - 4;
-                                            state.degraded_notes.drain(0..drop_count);
-                                        }
-                                    }
-                                }
-                            }
-                            "thinking" => {
-                                if let Some(text) = extra.get("text").and_then(|v| v.as_str()) {
-                                    state.append_live_thinking(text);
-                                }
-                            }
-                            "moa_reference" => {
-                                let label = extra
-                                    .get("label")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("reference")
-                                    .trim();
-                                let text = extra
-                                    .get("text")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .trim();
-                                let index = extra.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
-                                let count = extra.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-                                if !text.is_empty() {
-                                    let heading = if index > 0 && count > 0 {
-                                        format!("MoA reference {index}/{count} {label}")
-                                    } else {
-                                        format!("MoA reference {label}")
-                                    };
-                                    state.push_activity(heading.clone());
-                                    state.append_live_thinking(&format!("{heading}: {text}"));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
-                        state.append_live_thinking(thinking);
-                    }
-                }
-                if let Some(content) = delta.content {
-                    if !state.stream_muted {
-                        if state.stream_needs_break {
-                            state.stream_buffer.push_str("\n\n");
-                            state.stream_needs_break = false;
-                        }
-                        state.stream_buffer.push_str(&content);
-                        state.stream_char_count = state
-                            .stream_char_count
-                            .saturating_add(content.chars().count());
-                        if !state.saw_first_token {
-                            state.saw_first_token = true;
-                            let first_token_ms = state
-                                .processing_started_at
-                                .map(|t| t.elapsed().as_millis())
-                                .unwrap_or_default();
-                            state.push_activity(format!("↧ first token in {}ms", first_token_ms));
-                        }
-                        if state.auto_follow_transcript {
-                            state.scroll_offset = 0;
-                        }
+                    if state.auto_follow_transcript {
+                        state.scroll_offset = 0;
                     }
                 }
             }
-            if let Some(usage) = chunk.usage {
-                state.last_usage = Some((
+            true
+        }
+        Event::StreamUsage(usage) => {
+            state.last_usage = Some((
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens,
+            ));
+            let previous = state.last_usage_total_emitted.unwrap_or(0);
+            if usage.total_tokens >= previous.saturating_add(64)
+                || state.last_usage_total_emitted.is_none()
+            {
+                let delta_total = usage.total_tokens.saturating_sub(previous);
+                state.push_activity(format!(
+                    "Δtokens p={} c={} t={} (+{})",
                     usage.prompt_tokens,
                     usage.completion_tokens,
                     usage.total_tokens,
+                    delta_total
                 ));
-                let previous = state.last_usage_total_emitted.unwrap_or(0);
-                if usage.total_tokens >= previous.saturating_add(64)
-                    || state.last_usage_total_emitted.is_none()
-                {
-                    let delta_total = usage.total_tokens.saturating_sub(previous);
-                    state.push_activity(format!(
-                        "Δtokens p={} c={} t={} (+{})",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        usage.total_tokens,
-                        delta_total
-                    ));
-                    state.last_usage_total_emitted = Some(usage.total_tokens);
+                state.last_usage_total_emitted = Some(usage.total_tokens);
+            }
+            true
+        }
+        Event::StreamUi(ui_event) => {
+            match ui_event {
+                StreamUiEvent::Thinking(text) => {
+                    state.append_live_thinking(&text);
                 }
+                StreamUiEvent::ToolStarted { name, args_preview } => {
+                    if !name.is_empty() && !state.active_tools.iter().any(|tool| tool == &name) {
+                        state.active_tools.push(name.clone());
+                    }
+                    if args_preview.trim().is_empty() {
+                        state.push_activity(format!("▶ {}", name));
+                    } else {
+                        state.push_activity(format!("▶ {} {}", name, args_preview.trim()));
+                    }
+                    state.push_activity(format!("Δtools active={}", state.active_tools.len()));
+                }
+                StreamUiEvent::ToolCompleted {
+                    name,
+                    result_preview,
+                } => {
+                    if let Some(index) = state.active_tools.iter().position(|tool| tool == &name) {
+                        state.active_tools.remove(index);
+                    }
+                    if result_preview.trim().is_empty() {
+                        state.push_activity(format!("✓ {}", name));
+                    } else {
+                        state.push_activity(format!("✓ {} {}", name, result_preview.trim()));
+                        let file_hints = extract_file_like_hints(&result_preview, 3);
+                        if !file_hints.is_empty() {
+                            state.push_activity(format!("Δfiles {}", file_hints.join(", ")));
+                        }
+                    }
+                }
+                StreamUiEvent::Status { kind, message } => {
+                    if !message.trim().is_empty() {
+                        state.push_activity(format!("[{}] {}", kind.trim(), message.trim()));
+                    }
+                }
+                StreamUiEvent::Phase {
+                    phase,
+                    label,
+                    progress_pct,
+                } => {
+                    state.update_processing_phase(&phase, &label, Some(progress_pct));
+                }
+                StreamUiEvent::Lifecycle(message) => {
+                    if !message.trim().is_empty() {
+                        state.push_activity(format!("⟡ {}", message.trim()));
+                        let lower = message.to_ascii_lowercase();
+                        if lower.contains("mismatch")
+                            || lower.contains("remediation")
+                            || lower.contains("auto-refresh")
+                            || lower.contains("retrying")
+                            || lower.contains("fallback")
+                        {
+                            state.processing_degraded = true;
+                            state.degraded_notes.push(truncate_chars(&message, 120));
+                            if state.degraded_notes.len() > 4 {
+                                let drop_count = state.degraded_notes.len() - 4;
+                                state.degraded_notes.drain(0..drop_count);
+                            }
+                        }
+                    }
+                }
+                StreamUiEvent::MoaReference {
+                    index,
+                    count,
+                    label,
+                    text,
+                } => {
+                    if !text.trim().is_empty() {
+                        let heading = if index > 0 && count > 0 {
+                            format!("MoA reference {index}/{count} {}", label.trim())
+                        } else {
+                            format!("MoA reference {}", label.trim())
+                        };
+                        state.push_activity(heading.clone());
+                        state.append_live_thinking(&format!("{heading}: {}", text.trim()));
+                    }
+                }
+            }
+            true
+        }
+        Event::StreamOverflow(dropped) => {
+            state.processing_degraded = true;
+            let message = format!("stream backpressure dropped {dropped} observation(s)");
+            state.push_activity(format!("⚠ {message}"));
+            state.degraded_notes.push(message);
+            if state.degraded_notes.len() > 4 {
+                let drop_count = state.degraded_notes.len() - 4;
+                state.degraded_notes.drain(0..drop_count);
             }
             true
         }

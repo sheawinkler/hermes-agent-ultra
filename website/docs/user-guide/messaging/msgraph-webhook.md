@@ -1,26 +1,51 @@
 ---
 sidebar_position: 23
 title: "Microsoft Graph Webhook Listener"
-description: "Receive Microsoft Graph change notifications (meetings, calendar, chat, etc.) in Hermes"
+description: "Upstream/source-plugin reference for msgraph_webhook — not a shipped Rust gateway consumer"
 ---
 
 # Microsoft Graph Webhook Listener
 
-The `msgraph_webhook` gateway platform is an inbound event listener. It's how Hermes receives **change notifications** from Microsoft Graph — "a Teams meeting ended," "a new message landed in this chat," "this calendar event was updated." Different from the `teams` platform (which is a chat bot users type to) — this one is M365 telling Hermes something happened, not a person.
+:::warning Not in the Rust binary release
 
-Right now the primary consumer is the Teams meeting summary pipeline: Graph notifies when a meeting produces a transcript, the pipeline fetches it, and Hermes posts a summary back into Teams. Other Graph resources (`/chats/.../messages`, `/users/.../events`) use the same listener — the pipeline consumers land with their own PRs.
+Docker and release packages for this project ship the **Rust** runtime only. There is **no** packaged Python gateway manifest/CI that installs an `msgraph_webhook` listener into the Rust artifact.
 
-## Prerequisites
+This page documents an **upstream / optional source-tree plugin** shape for operators who intentionally run a separate Python gateway from source. It is **reference material**, not the primary product path.
 
-- Microsoft Graph application credentials — [Register a Microsoft Graph Application](/docs/guides/microsoft-graph-app-registration)
-- A **public HTTPS URL** that Microsoft Graph can reach (Graph does not call private endpoints). A dev tunnel works for testing; production needs a real domain with a valid certificate.
-- A strong shared secret to use as the `clientState` value. Generate with `openssl rand -hex 32` and put it in `~/.hermes/.env` as `MSGRAPH_WEBHOOK_CLIENT_STATE`.
+The verified **Rust** Teams meeting contract is manual CLI only — see [Teams Meetings](/docs/user-guide/messaging/teams-meetings). In Rust:
 
-## Quick Start
+- `hermes-gateway` does **not** host an `msgraph_webhook` adapter that accepts Graph POSTs
+- nothing invokes `TeamsMeetingPipeline::run_notification` from a webhook
+- `hermes gateway run` does **not** start a Graph notification consumer for meetings
 
-Minimum `~/.hermes/config.yaml`:
+:::
+
+## What this page is (and is not)
+
+| Statement | Status |
+|-----------|--------|
+| Rust release automatically receives Graph change notifications | **False** |
+| `hermes gateway run` is the primary shipped consumer of Graph webhooks | **False** (Rust) |
+| Optional Python/source `msgraph_webhook` platform (if you build that tree yourself) | **Upstream/reference** — not installed by the Rust package |
+| Rust `hermes teams-pipeline` CLI (fetch / run / replay / subscription admin) | **Shipped** — see [Teams Meetings](/docs/user-guide/messaging/teams-meetings) |
+
+Do **not** treat the sections below as “enable this and the Rust gateway becomes an automatic meeting bot.”
+
+## Upstream / optional source plugin (reference)
+
+If you are working from a full monorepo source tree that still contains a Python gateway plugin named `msgraph_webhook`, the **historical** design was:
+
+- bind an HTTP listener for Graph validation + change notifications
+- authenticate notifications with a shared `clientState`
+- hand accepted events to a pipeline consumer (when that consumer is wired)
+
+That design is **not** the Rust release packaging. Shared docs may still list these config keys and env names for the optional source plugin; they are **not** inspected by `hermes teams-pipeline validate` and enabling them does **not** create a Rust listener.
+
+### Historical config shape (source plugin only)
 
 ```yaml
+# Only meaningful if you separately run the upstream Python gateway plugin.
+# Not consumed as a live adapter by the Rust hermes-gateway binary.
 platforms:
   msgraph_webhook:
     enabled: true
@@ -31,107 +56,58 @@ platforms:
         - "communications/onlineMeetings"
 ```
 
-Or via env vars in `~/.hermes/.env` (auto-merged on startup):
-
 ```bash
+# Same caveat: env names apply only to the optional Python/source plugin.
+# They are ignored by Rust and are not read by hermes teams-pipeline validate.
 MSGRAPH_WEBHOOK_ENABLED=true
 MSGRAPH_WEBHOOK_PORT=8646
 MSGRAPH_WEBHOOK_CLIENT_STATE=<generate-with-openssl-rand-hex-32>
 MSGRAPH_WEBHOOK_ACCEPTED_RESOURCES=communications/onlineMeetings
 ```
 
-Start the gateway: `hermes gateway run`. The listener exposes:
+Historical HTTP surface of that plugin (not Rust):
 
-- `POST /msgraph/webhook` — change notifications from Graph
-- `GET /msgraph/webhook?validationToken=...` — Graph subscription validation handshake
-- `GET /health` — readiness probe with accepted/duplicate counters
+- `POST /msgraph/webhook` — change notifications
+- `GET /msgraph/webhook?validationToken=...` — subscription validation
+- `GET /health` — readiness
 
-Expose the listener publicly (reverse proxy, dev tunnel, ingress). Your notification URL for Graph subscriptions is your public HTTPS origin followed by `/msgraph/webhook`:
-
-```
-https://ops.example.com/msgraph/webhook
-```
-
-## Configuration
-
-All settings go under `platforms.msgraph_webhook.extra`:
+### Historical settings table (source plugin only)
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `host` | `0.0.0.0` | Bind address for the HTTP listener. |
-| `port` | `8646` | Bind port. |
-| `webhook_path` | `/msgraph/webhook` | URL path Graph POSTs to. |
-| `health_path` | `/health` | Readiness endpoint. |
-| `client_state` | — | Shared secret Graph echoes in every notification. Compared with `hmac.compare_digest` — generate with `openssl rand -hex 32`. |
-| `accepted_resources` | `[]` (accept all) | Allowlist of Graph resource paths/patterns. Trailing `*` acts as prefix match. Leading `/` is tolerated. Example: `["communications/onlineMeetings", "chats/*/messages"]`. |
-| `max_seen_receipts` | `5000` | Dedupe cache size for notification IDs. Oldest entries evicted when the cap is hit. |
-| `allowed_source_cidrs` | `[]` (allow all) | Optional source-IP allowlist. See below. |
+| `host` | `0.0.0.0` | Bind address for the HTTP listener (plugin). |
+| `port` | `8646` | Bind port (plugin). |
+| `webhook_path` | `/msgraph/webhook` | Path Graph would POST to (plugin). |
+| `health_path` | `/health` | Readiness path (plugin). |
+| `client_state` | — | Shared secret Graph echoes; treat as a strong secret if you run the plugin. |
+| `accepted_resources` | `[]` (accept all) | Resource allowlist patterns (plugin). |
+| `max_seen_receipts` | `5000` | Dedupe cache size (plugin). |
+| `allowed_source_cidrs` | `[]` (allow all) | Optional source-IP allowlist (plugin). |
 
-Each setting also has an equivalent env var (`MSGRAPH_WEBHOOK_*`) that merges into the config at gateway startup — see the [environment variables reference](/docs/reference/environment-variables#microsoft-graph-teams-meetings).
+Equivalent env vars historically used the `MSGRAPH_WEBHOOK_*` prefix — see [environment variables](/docs/reference/environment-variables#microsoft-graph-teams-meetings) for name inventory. Presence of those names is not proof the Rust binary implements the listener.
 
-## Security Hardening
+## What to use instead (Rust)
 
-### clientState is the primary auth check
+For the shipped Rust binary:
 
-Every Graph notification includes the `clientState` string your subscription registered with. The listener rejects any notification whose `clientState` doesn't match, using timing-safe comparison. This is Microsoft's documented mechanism — treat the value as a strong shared secret.
+1. [Teams Meetings](/docs/user-guide/messaging/teams-meetings) — CLI fetch, manual `run`/`replay`, Graph subscription **admin**, store inspect, media limits
+2. [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline) — operator commands under the same Rust contract
+3. Optional STT via `TranscriptionHandler` when the CLI pipeline falls back to recording audio
 
-If `client_state` is unset, the listener accepts every well-formed POST. **Don't run without it in production.**
+Graph app credentials (`MSGRAPH_TENANT_ID` / `MSGRAPH_CLIENT_ID` / `MSGRAPH_CLIENT_SECRET`) remain relevant for **CLI Graph client** calls (fetch, subscriptions, token-health). They do not imply a webhook server.
 
-### Source-IP allowlisting (production deployments)
+## Troubleshooting (Rust-first)
 
-For production, restrict the listener to Microsoft's published Graph webhook source IP ranges. Microsoft documents the egress ranges under the [Office 365 IP Address and URL Web service](https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges). Configure them as:
-
-```yaml
-platforms:
-  msgraph_webhook:
-    enabled: true
-    extra:
-      client_state: "..."
-      allowed_source_cidrs:
-        - "52.96.0.0/14"
-        - "52.104.0.0/14"
-        # ...add the current Microsoft 365 "Common" + "Teams" category egress ranges
-```
-
-Or as an env var:
-
-```bash
-MSGRAPH_WEBHOOK_ALLOWED_SOURCE_CIDRS="52.96.0.0/14,52.104.0.0/14"
-```
-
-Empty allowlist = accept from anywhere (default; preserves dev-tunnel workflows). Invalid CIDR strings log a warning and are ignored. **Review the Microsoft IP list quarterly** — it changes.
-
-### HTTPS termination
-
-The listener speaks plain HTTP. Terminate TLS at your reverse proxy (Caddy, Nginx, Cloudflare Tunnel, AWS ALB) and proxy to the listener over the local network. Graph refuses to deliver to non-HTTPS endpoints, so there's no path for unencrypted traffic to reach you from Graph itself.
-
-### Response hygiene
-
-On success the listener returns `202 Accepted` with an empty body — internal counters stay out of the wire response. Operators can observe counts via `/health`.
-
-Status code table:
-
-| Outcome | Status |
-|---------|--------|
-| Notification(s) accepted or deduped | 202 |
-| Validation handshake (GET with `validationToken`) | 200 (echoes the token) |
-| Every item in batch failed clientState | 403 |
-| Malformed JSON / missing `value` array / unknown resource | 400 |
-| Source IP not in allowlist | 403 |
-| Bare GET without `validationToken` | 400 |
-
-## Troubleshooting
-
-| Problem | What to check |
-|---------|---------------|
-| Graph subscription validation fails | Public URL is reachable, `/msgraph/webhook` path matches, GET with `validationToken` echoes the token verbatim as `text/plain` within 10 seconds. |
-| Notifications POST but nothing ingests | `client_state` matches what you registered the subscription with. Re-run `openssl rand -hex 32` and create a new subscription if the value drifted. Check `accepted_resources` includes the resource path Graph is sending. |
-| Every notification 403s | `clientState` mismatch (forged, or subscription registered with a different value). Re-create the subscription with `hermes teams-pipeline subscribe --client-state "$MSGRAPH_WEBHOOK_CLIENT_STATE" ...` (ships with the pipeline runtime PR). |
-| Listener starts but `curl http://localhost:8646/health` hangs | Port binding collision. Check `ss -tlnp \| grep 8646` and change `port:` if needed. |
-| Real Graph requests from Microsoft get 403'd | Source IP allowlist is too narrow. Remove `allowed_source_cidrs` temporarily, confirm traffic flows, then widen the list to include the current Microsoft egress ranges. |
+| Problem | Reality check |
+|---------|----------------|
+| Enabled `msgraph_webhook` but no POSTs arrive / nothing listens | Expected on Rust release — no gateway adapter |
+| `hermes gateway run` and expected meeting summaries | Gateway does not consume Graph meeting webhooks in Rust |
+| Expecting `hermes teams-pipeline validate` to report webhook enablement | It does not — validate checks Graph env credentials, `meeting_pipeline` parse, and store stats only |
+| Need automatic Graph → summary | Outside verified Rust packaging; requires a separate non-Rust orchestrator you supply from source — not the release artifact |
 
 ## Related Docs
 
-- [Register a Microsoft Graph Application](/docs/guides/microsoft-graph-app-registration) — Azure app registration prereq
-- [Environment Variables → Microsoft Graph](/docs/reference/environment-variables#microsoft-graph-teams-meetings) — full env var list
-- [Microsoft Teams bot setup](/docs/user-guide/messaging/teams) — the different platform that lets users chat with Hermes in Teams
+- [Teams Meetings (Rust contract)](/docs/user-guide/messaging/teams-meetings)
+- [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline)
+- [Register a Microsoft Graph Application](/docs/guides/microsoft-graph-app-registration)
+- [Microsoft Teams bot setup](/docs/user-guide/messaging/teams) — chat bot adapter (separate from Graph webhooks)

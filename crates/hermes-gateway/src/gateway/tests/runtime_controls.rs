@@ -451,16 +451,18 @@ async fn gateway_new_clears_yolo_only_for_target_session() {
 }
 
 #[tokio::test]
-async fn telegram_topic_chat_ids_are_independent_session_lanes() {
+async fn threaded_ingress_uses_parent_scope_and_isolates_sibling_threads() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
     });
 
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
-    let mut dm_manager = DmManager::with_pair_behavior();
-    dm_manager.authorize_user("user1");
-    let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+    let gw = Gateway::new(
+        session_mgr.clone(),
+        DmManager::with_pair_behavior(),
+        GatewayConfig::default(),
+    );
     gw.register_adapter("telegram", adapter).await;
     gw.set_message_handler(Arc::new(|messages| {
         Box::pin(async move {
@@ -473,26 +475,41 @@ async fn telegram_topic_chat_ids_are_independent_session_lanes() {
     }))
     .await;
 
-    for (chat_id, text) in [
-        ("208214988:111", "topic a first"),
-        ("208214988:222", "topic b first"),
-        ("208214988:111", "topic a second"),
+    for (thread_id, text) in [
+        ("111", "topic a first"),
+        ("222", "topic b first"),
+        ("111", "topic a second"),
     ] {
         gw.route_message(&IncomingMessage {
             platform: "telegram".into(),
-            chat_id: chat_id.into(),
+            chat_id: "208214988".into(),
             user_id: "user1".into(),
             text: text.into(),
             message_id: None,
-            thread_id: None,
-            is_dm: true,
+            thread_id: Some(thread_id.into()),
+            is_dm: false,
         })
         .await
-        .expect("route telegram topic message");
+        .expect("route threaded message");
     }
 
-    let topic_a_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
-    let topic_b_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
+    let topic_a_key =
+        session_mgr.compose_session_key_for_scope(crate::session::ConversationScope::new(
+            "telegram",
+            "208214988",
+            Some("111"),
+            "user1",
+            false,
+        ));
+    let topic_b_key =
+        session_mgr.compose_session_key_for_scope(crate::session::ConversationScope::new(
+            "telegram",
+            "208214988",
+            Some("222"),
+            "user1",
+            false,
+        ));
+    assert_ne!(topic_a_key, topic_b_key);
     let topic_a = session_mgr.get_messages(&topic_a_key).await;
     let topic_b = session_mgr.get_messages(&topic_b_key).await;
 
@@ -514,6 +531,12 @@ async fn telegram_topic_chat_ids_are_independent_session_lanes() {
             .collect::<Vec<_>>(),
         vec!["topic b first"]
     );
+    let session_a = session_mgr
+        .get_session(&topic_a_key)
+        .await
+        .expect("thread A session");
+    assert_eq!(session_a.chat_id, "208214988");
+    assert_eq!(session_a.thread_id.as_deref(), Some("111"));
 
     let sent = sent.lock().expect("sent lock");
     assert_eq!(
@@ -521,15 +544,15 @@ async fn telegram_topic_chat_ids_are_independent_session_lanes() {
             .map(|(chat_id, text)| (chat_id.as_str(), text.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("208214988:111", "topic-turns=1"),
-            ("208214988:222", "topic-turns=1"),
-            ("208214988:111", "topic-turns=2"),
+            ("208214988", "topic-turns=1"),
+            ("208214988", "topic-turns=1"),
+            ("208214988", "topic-turns=2"),
         ]
     );
 }
 
 #[tokio::test]
-async fn telegram_topic_new_resets_only_current_topic_lane() {
+async fn threaded_new_resets_only_current_sibling_thread_lane() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
@@ -553,21 +576,21 @@ async fn telegram_topic_new_resets_only_current_topic_lane() {
 
     let topic_a = IncomingMessage {
         platform: "telegram".into(),
-        chat_id: "208214988:111".into(),
+        chat_id: "208214988".into(),
         user_id: "user1".into(),
         text: "topic a before reset".into(),
         message_id: None,
-        thread_id: None,
-        is_dm: true,
+        thread_id: Some("111".into()),
+        is_dm: false,
     };
     let topic_b = IncomingMessage {
         platform: "telegram".into(),
-        chat_id: "208214988:222".into(),
+        chat_id: "208214988".into(),
         user_id: "user1".into(),
         text: "topic b remains".into(),
         message_id: None,
-        thread_id: None,
-        is_dm: true,
+        thread_id: Some("222".into()),
+        is_dm: false,
     };
     gw.route_message(&topic_a).await.expect("route topic a");
     gw.route_message(&topic_b).await.expect("route topic b");
@@ -579,8 +602,22 @@ async fn telegram_topic_new_resets_only_current_topic_lane() {
     .await
     .expect("reset topic a");
 
-    let topic_a_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
-    let topic_b_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
+    let topic_a_key =
+        session_mgr.compose_session_key_for_scope(crate::session::ConversationScope::new(
+            "telegram",
+            "208214988",
+            Some("111"),
+            "user1",
+            false,
+        ));
+    let topic_b_key =
+        session_mgr.compose_session_key_for_scope(crate::session::ConversationScope::new(
+            "telegram",
+            "208214988",
+            Some("222"),
+            "user1",
+            false,
+        ));
     assert!(session_mgr.get_messages(&topic_a_key).await.is_empty());
     assert_eq!(session_mgr.get_messages(&topic_b_key).await.len(), 2);
 
@@ -612,30 +649,53 @@ async fn telegram_topic_new_resets_only_current_topic_lane() {
 }
 
 #[tokio::test]
-async fn telegram_topic_restore_reuses_session_switch_path() {
+async fn threaded_restore_reuses_session_switch_path_without_touching_siblings() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
     });
 
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
-    let mut dm_manager = DmManager::with_pair_behavior();
-    dm_manager.authorize_user("user1");
-    let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+    let gw = Gateway::new(
+        session_mgr.clone(),
+        DmManager::with_pair_behavior(),
+        GatewayConfig::default(),
+    );
     gw.register_adapter("telegram", adapter).await;
 
-    let target_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
-    let current_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
-    let sibling_key = session_mgr.compose_session_key("telegram", "208214988:333", "user1");
+    let target_scope = crate::session::ConversationScope::new(
+        "telegram",
+        "208214988",
+        Some("111"),
+        "user1",
+        false,
+    );
+    let current_scope = crate::session::ConversationScope::new(
+        "telegram",
+        "208214988",
+        Some("222"),
+        "user1",
+        false,
+    );
+    let sibling_scope = crate::session::ConversationScope::new(
+        "telegram",
+        "208214988",
+        Some("333"),
+        "user1",
+        false,
+    );
+    let target_key = session_mgr.compose_session_key_for_scope(target_scope);
+    let current_key = session_mgr.compose_session_key_for_scope(current_scope);
+    let sibling_key = session_mgr.compose_session_key_for_scope(sibling_scope);
 
     let _ = session_mgr
-        .get_or_create_session("telegram", "208214988:111", "user1")
+        .get_or_create_session_for_scope(target_scope)
         .await;
     session_mgr
         .add_message(&target_key, Message::user("restored topic history"))
         .await;
     let _ = session_mgr
-        .get_or_create_session("telegram", "208214988:333", "user1")
+        .get_or_create_session_for_scope(sibling_scope)
         .await;
     session_mgr
         .add_message(&sibling_key, Message::user("sibling history"))
@@ -643,12 +703,12 @@ async fn telegram_topic_restore_reuses_session_switch_path() {
 
     gw.route_message(&IncomingMessage {
         platform: "telegram".into(),
-        chat_id: "208214988:222".into(),
+        chat_id: "208214988".into(),
         user_id: "user1".into(),
         text: format!("/topic {}", target_key),
         message_id: None,
-        thread_id: None,
-        is_dm: true,
+        thread_id: Some("222".into()),
+        is_dm: false,
     })
     .await
     .expect("restore topic session");

@@ -48,12 +48,37 @@ struct ApiTestState {
     _cron_dir: tempfile::TempDir,
 }
 
+fn test_cron_scheduler(
+    data_dir: std::path::PathBuf,
+    run_runtime: Arc<hermes_cron::RunRuntime>,
+) -> Arc<CronScheduler> {
+    let execution_mode = hermes_core::ResolvedExecutionMode::default();
+    let execution_containment = Arc::new(
+        hermes_cron::ExecutionContainmentContext::manual(execution_mode)
+            .expect("default mode must admit manual containment"),
+    );
+    let tool_registry = Arc::new(hermes_cron::AgentToolRegistry::new());
+    tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+    Arc::new(
+        hermes_cron::cron_scheduler_for_data_dir(
+            data_dir,
+            tool_registry,
+            run_runtime,
+            execution_mode,
+            execution_containment,
+        )
+        .expect("test cron scheduler"),
+    )
+}
+
 impl ApiTestState {
     fn new(tx: mpsc::Sender<ApiInboundRequest>) -> Self {
         let cron_dir = tempfile::tempdir().expect("cron tempdir");
-        let cron_scheduler = Arc::new(hermes_cron::cron_scheduler_for_data_dir(
-            cron_dir.path().join("cron"),
-        ));
+        let run_runtime = Arc::new(
+            hermes_cron::RunRuntime::open_for_ephemeral_testing(cron_dir.path())
+                .expect("ephemeral run runtime"),
+        );
+        let cron_scheduler = test_cron_scheduler(cron_dir.path().join("cron"), run_runtime);
         Self {
             mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
             response_store: Arc::new(RwLock::new(ResponseStore::default())),
@@ -115,9 +140,13 @@ fn empty_request_with_bearer(method: &str, path: &str, token: &str) -> String {
 }
 
 fn throwaway_cron_scheduler() -> Arc<CronScheduler> {
-    Arc::new(hermes_cron::cron_scheduler_for_data_dir(
-        std::env::temp_dir().join(format!("hermes-api-server-test-{}", uuid::Uuid::new_v4())),
-    ))
+    let root =
+        std::env::temp_dir().join(format!("hermes-api-server-test-{}", uuid::Uuid::new_v4()));
+    let run_runtime = Arc::new(
+        hermes_cron::RunRuntime::open_for_ephemeral_testing(&root)
+            .expect("ephemeral run runtime"),
+    );
+    test_cron_scheduler(root.join("cron"), run_runtime)
 }
 
 async fn wait_for_run_status(
@@ -549,7 +578,10 @@ async fn responses_endpoint_accepts_input_and_quoted_false_without_storing() {
 
 #[tokio::test]
 async fn status_updates_do_not_complete_pending_http_mailbox() {
-    let adapter = ApiServerAdapter::new(ApiServerConfig::default());
+    let adapter = ApiServerAdapter::new(
+        ApiServerConfig::default(),
+        throwaway_cron_scheduler(),
+    );
     let (reply_tx, mut reply_rx) = mpsc::channel(1);
     adapter
         .mailbox

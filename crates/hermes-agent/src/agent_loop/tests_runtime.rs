@@ -79,7 +79,11 @@
             skill_creation_nudge_interval: 10,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(registry),
+            Arc::new(DummyProvider),
+        ));
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let _ = rt
             .block_on(agent.run(vec![Message::user("hello")], None))
@@ -158,7 +162,11 @@
                 memory_nudge_interval: 2,
                 ..AgentConfig::default()
             };
-            let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+            let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+                config,
+                Arc::new(registry),
+                Arc::new(DummyProvider),
+            ));
             let rt = tokio::runtime::Runtime::new().expect("runtime");
             for _ in 0..case.runs {
                 let _ = rt
@@ -245,7 +253,11 @@
         let provider = TwoStepProvider {
             calls: Arc::new(AtomicU32::new(0)),
         };
-        let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(provider));
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(registry),
+            Arc::new(provider),
+        ));
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let _ = rt
             .block_on(agent.run(vec![Message::user("hello")], None))
@@ -342,7 +354,8 @@
         let provider = Arc::new(HiddenToolProvider {
             calls: Arc::new(AtomicU32::new(0)),
         });
-        let agent = AgentLoop::new(config, Arc::new(registry), provider);
+        let (agent, _run_state) =
+            attach_test_run_runtime(AgentLoop::new(config, Arc::new(registry), provider));
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let result = rt
             .block_on(agent.run(vec![Message::user("hello")], Some(vec![terminal_schema])))
@@ -361,133 +374,6 @@
         assert!(!transcript.contains("web ran"));
     }
 
-    #[test]
-    fn plugin_tool_middleware_runs_inside_agent_loop() {
-        use futures::stream::BoxStream;
-        use hermes_core::JsonSchema;
-        use std::sync::atomic::{AtomicU32, Ordering};
-
-        struct ToolThenDoneProvider {
-            calls: Arc<AtomicU32>,
-        }
-
-        #[async_trait::async_trait]
-        impl LlmProvider for ToolThenDoneProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                let n = self.calls.fetch_add(1, Ordering::SeqCst);
-                let message = if n == 0 {
-                    Message::assistant_with_tool_calls(
-                        None,
-                        vec![ToolCall {
-                            id: "tc_echo".to_string(),
-                            function: hermes_core::FunctionCall {
-                                name: "echo".to_string(),
-                                arguments: r#"{"value":"original"}"#.to_string(),
-                            },
-                            extra_content: None,
-                        }],
-                    )
-                } else {
-                    Message::assistant("done")
-                };
-                Ok(hermes_core::LlmResponse {
-                    message,
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
-
-        struct MiddlewarePlugin;
-
-        #[async_trait::async_trait]
-        impl crate::plugins::Plugin for MiddlewarePlugin {
-            fn meta(&self) -> crate::plugins::PluginMeta {
-                crate::plugins::PluginMeta {
-                    name: "middleware_test".to_string(),
-                    version: "0.1.0".to_string(),
-                    description: "Middleware test".to_string(),
-                    author: None,
-                }
-            }
-
-            async fn initialize(&self) -> Result<(), AgentError> {
-                Ok(())
-            }
-
-            async fn shutdown(&self) -> Result<(), AgentError> {
-                Ok(())
-            }
-
-            fn register(&self, ctx: &mut crate::plugins::PluginContext) {
-                ctx.on_tool_request(Arc::new(|request| {
-                    let mut args = request.args.clone();
-                    args["value"] = Value::String("rewritten".to_string());
-                    Some(crate::plugins::ToolRequestMiddlewareUpdate::new(args))
-                }));
-                ctx.on_tool_execution(Arc::new(|_request, next_call| {
-                    let mut result = next_call(None);
-                    result.content = format!("wrapped: {}", result.content);
-                    result
-                }));
-            }
-        }
-
-        let mut registry = ToolRegistry::new();
-        registry.register(
-            "echo",
-            ToolSchema::new("echo", "Echo tool", JsonSchema::new("object")),
-            Arc::new(|args| Ok(args["value"].as_str().unwrap_or_default().to_string())),
-        );
-        let mut plugin_manager = PluginManager::new();
-        plugin_manager.register(Arc::new(MiddlewarePlugin));
-        let agent = AgentLoop::new(
-            AgentConfig {
-                max_turns: 4,
-                ..AgentConfig::default()
-            },
-            Arc::new(registry),
-            Arc::new(ToolThenDoneProvider {
-                calls: Arc::new(AtomicU32::new(0)),
-            }),
-        )
-        .with_plugins(Arc::new(std::sync::Mutex::new(plugin_manager)));
-        let rt = tokio::runtime::Runtime::new().expect("runtime");
-
-        let result = rt
-            .block_on(agent.run(vec![Message::user("use echo")], None))
-            .expect("agent run should succeed");
-        let transcript = result
-            .messages
-            .iter()
-            .filter_map(|msg| msg.content.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(result.finished_naturally);
-        assert!(transcript.contains("wrapped: rewritten"), "{transcript}");
-    }
 
     #[test]
     fn test_smart_model_routing_copilot_acp_missing_cli_falls_back() {
@@ -1044,3 +930,7 @@
     include!("tests/runtime_provider_resolution.rs");
 
     include!("tests/governor_finalizer.rs");
+
+    include!("tests/run_lifecycle.rs");
+
+    include!("tests/prepared_run_input.rs");

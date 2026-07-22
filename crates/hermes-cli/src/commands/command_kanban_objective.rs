@@ -163,7 +163,7 @@ fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
     })
 }
 
-pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
+pub fn run_kanban_command(state_root: &std::path::Path, args: &[&str]) -> Result<String, AgentError> {
     let action = args
         .first()
         .copied()
@@ -574,7 +574,7 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
                     } else {
                         override_msg.clone()
                     };
-                    let job = queue_background_job(&task_message)?;
+                    let job = queue_background_job(state_root, &task_message)?;
                     task.background_job_id = Some(job.id.clone());
                     move_task(task, KanbanLane::Doing, None);
                     Some((task.id.clone(), job, task_message, board.clone()))
@@ -631,7 +631,7 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
 }
 
 fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    emit_command_output(app, run_kanban_command(args)?);
+    emit_command_output(app, run_kanban_command(&app.state_root, args)?);
     Ok(CommandResult::Handled)
 }
 
@@ -984,13 +984,18 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
         return Ok(CommandResult::Handled);
     }
     if sub == "status" || sub == "list" {
-        let (queued, running, completed, failed) = background_job_counts();
+        let counts = background_job_counts(&app.state_root);
         let mut out = String::new();
         let _ = writeln!(out, "Planner queue status");
         let _ = writeln!(
             out,
-            "  queued={} running={} completed={} failed={}",
-            queued, running, completed, failed
+            "  queued={} running={} completed={} failed={} canceled={} outcome_unknown={}",
+            counts.queued,
+            counts.running,
+            counts.completed,
+            counts.failed,
+            counts.canceled,
+            counts.outcome_unknown,
         );
         if let Some(steer) = current_session_steer(app) {
             let _ = writeln!(out, "  steering={}", truncate_chars(&steer, 160));

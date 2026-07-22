@@ -1318,6 +1318,7 @@ async fn cli_sessions_export_command_writes_html_file_with_session_id_alias() {
         yes: false,
         source: None,
         older_than: None,
+        limit: 20,
     })
     .await
     .expect("export");
@@ -1325,4 +1326,91 @@ async fn cli_sessions_export_command_writes_html_file_with_session_id_alias() {
     let html = std::fs::read_to_string(output).expect("html output");
     assert!(html.contains("HTML export"));
     assert!(html.contains("render this"));
+}
+
+#[test]
+fn sessions_list_limit_default_and_zero_normalize_to_nonzero() {
+    assert_eq!(sessions_list_row_limit(20), 20);
+    assert_eq!(sessions_list_row_limit(0), 1);
+    assert_eq!(sessions_list_row_limit(1), 1);
+    assert_eq!(sessions_list_visible_range(0, 20), (0, 0));
+    assert_eq!(sessions_list_visible_range(5, 0), (1, 4));
+    assert_eq!(sessions_list_visible_range(5, 20), (5, 0));
+}
+
+#[test]
+fn sessions_list_limit_truncates_after_sort_with_omission_count() {
+    let epoch = std::time::SystemTime::UNIX_EPOCH;
+    let later = epoch + std::time::Duration::from_secs(10);
+    // Tuple: (id, size, modified, canonical, valid, messages)
+    let mut entries = vec![
+        (
+            "artifact-old".to_string(),
+            1u64,
+            epoch,
+            false,
+            true,
+            1usize,
+        ),
+        (
+            "canonical-b".to_string(),
+            2u64,
+            later,
+            true,
+            true,
+            2usize,
+        ),
+        (
+            "canonical-a".to_string(),
+            3u64,
+            later,
+            true,
+            true,
+            5usize,
+        ),
+        (
+            "artifact-new".to_string(),
+            4u64,
+            later,
+            false,
+            true,
+            9usize,
+        ),
+        (
+            "invalid-x".to_string(),
+            5u64,
+            later,
+            false,
+            false,
+            0usize,
+        ),
+    ];
+
+    sort_sessions_list_entries(&mut entries);
+    // Canonical first (by message count desc, then mtime, then id), then non-canonical.
+    let ordered: Vec<&str> = entries.iter().map(|e| e.0.as_str()).collect();
+    assert_eq!(
+        ordered,
+        vec![
+            "canonical-a", // canonical, 5 msgs
+            "canonical-b", // canonical, 2 msgs
+            "artifact-new", // non-canonical valid, 9 msgs, later
+            "artifact-old", // non-canonical valid, 1 msg, older
+            "invalid-x", // invalid
+        ]
+    );
+
+    let total = entries.len();
+    let (shown, omitted) = sessions_list_visible_range(total, 2);
+    assert_eq!(shown, 2);
+    assert_eq!(omitted, 3);
+    let visible: Vec<&str> = entries.iter().take(shown).map(|e| e.0.as_str()).collect();
+    assert_eq!(visible, vec!["canonical-a", "canonical-b"]);
+
+    // Header counts remain full-set totals (not truncated).
+    let canonical_count = entries.iter().filter(|entry| entry.3).count();
+    let artifact_count = total.saturating_sub(canonical_count);
+    assert_eq!(total, 5);
+    assert_eq!(canonical_count, 2);
+    assert_eq!(artifact_count, 3);
 }

@@ -1,3 +1,35 @@
+fn gateway_status_callback_for_context(
+    gateway: Arc<Gateway>,
+    ctx: &GatewayRuntimeContext,
+) -> Arc<dyn Fn(&str, &str) + Send + Sync> {
+    let platform = ctx.platform.clone();
+    let chat_id = ctx.chat_id.clone();
+    let thread_id = ctx.thread_id.clone();
+    Arc::new(move |event_type: &str, message: &str| {
+        if message.trim().is_empty() {
+            return;
+        }
+        let gateway = Arc::clone(&gateway);
+        let platform = platform.clone();
+        let chat_id = chat_id.clone();
+        let thread_id = thread_id.clone();
+        let status_key = event_type.to_string();
+        let message = message.to_string();
+        tokio::spawn(async move {
+            let _ = gateway
+                .send_or_update_status_threaded(
+                    &platform,
+                    &chat_id,
+                    &status_key,
+                    &message,
+                    None,
+                    thread_id.as_deref(),
+                )
+                .await;
+        });
+    })
+}
+
 /// Handle `hermes gateway [action]`.
 #[allow(clippy::too_many_arguments)]
 async fn run_gateway(
@@ -30,17 +62,28 @@ async fn run_gateway(
             return Ok(());
         }
         Some("restart") => {
-            if try_restart_gateway_service()? {
-                println!("Gateway service restarted.");
-                return Ok(());
-            }
             let pid_path = gateway_pid_path_for_cli(&cli);
-            if let Some(pid) = read_gateway_pid(&pid_path) {
-                if gateway_pid_is_alive(pid) {
-                    let _ = gateway_pid_terminate(pid);
-                    cleanup_stale_gateway_metadata(&pid_path);
-                    println!("Stopped existing gateway process {}.", pid);
+            let (stopped, already_exited) = stop_gateway_metadata_pids(&pid_path).await?;
+            if stopped.is_empty() && already_exited.is_empty() {
+                if try_restart_gateway_service()? {
+                    println!("Gateway service restarted.");
+                    return Ok(());
                 }
+            } else if !stopped.is_empty() {
+                println!(
+                    "Stopped existing gateway process(es): {}.",
+                    stopped
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+
+            ensure_gateway_start_slot_available(&pid_path)?;
+            if try_start_gateway_service()? {
+                println!("Gateway service started.");
+                return Ok(());
             }
             return Box::pin(run_gateway(
                 cli,
@@ -61,10 +104,27 @@ async fn run_gateway(
             run_gateway_setup(&cli).await?;
         }
         None | Some("run") | Some("start") => {
-            if matches!(action.as_deref(), Some("start")) && try_start_gateway_service()? {
-                println!("Gateway service started.");
-                return Ok(());
+            // Register before initialization so a SIGTERM received during
+            // startup is retained and takes the same teardown path as Ctrl-C.
+            let shutdown_listener = install_gateway_shutdown_signal_listener()?;
+            if matches!(action.as_deref(), Some("start")) {
+                let pid_path = gateway_pid_path_for_cli(&cli);
+                ensure_gateway_start_slot_available(&pid_path)?;
+                if try_start_gateway_service()? {
+                    println!("Gateway service started.");
+                    return Ok(());
+                }
             }
+            let execution_mode = hermes_config::resolve_runtime_execution_mode(
+                &config,
+                cli.execution_mode.as_deref(),
+            )
+            .map_err(|error| AgentError::Config(error.to_string()))?;
+            let execution_backend =
+                hermes_cli::terminal_backend::build_execution_backend_binding(
+                    &config,
+                    execution_mode,
+                )?;
             println!("Starting Hermes Gateway...");
             run_sessions_db_auto_maintenance(&config);
 
@@ -101,17 +161,12 @@ async fn run_gateway(
             }
 
             let pid_path = gateway_pid_path_for_cli(&cli);
-            if let Some(pid) = read_gateway_pid(&pid_path) {
-                if gateway_pid_is_alive(pid) {
-                    println!(
-                        "Gateway already appears to be running (PID {}, file {}). Stop it first or remove a stale PID file.",
-                        pid,
-                        pid_path.display()
-                    );
-                    return Ok(());
-                }
-                cleanup_stale_gateway_metadata(&pid_path);
-            }
+            ensure_gateway_start_slot_available(&pid_path)?;
+            let run_runtime = Arc::new(
+                RunRuntime::open(hermes_state_root(&cli)).map_err(|error| {
+                    AgentError::Io(format!("run-record startup failed: {error}"))
+                })?,
+            );
 
             if !enabled.is_empty() {
                 println!(
@@ -138,11 +193,18 @@ async fn run_gateway(
                 display: config.display.clone(),
                 service_tier: config.agent.normalized_service_tier(),
                 quick_commands: config.quick_commands.clone(),
+                resource_limits_enabled: config.resource_limits_enabled,
                 kanban_dispatch_in_gateway: config.kanban.dispatch_in_gateway,
                 ..RuntimeGatewayConfig::default()
             };
-            let session_manager = Arc::new(SessionManager::new(config.session.clone()));
-            let dm_manager = build_gateway_dm_manager(&config);
+            let session_manager = Arc::new(SessionManager::with_resource_limits(
+                config.session.clone(),
+                config.resource_limits_enabled,
+            ));
+            let dm_manager = build_gateway_dm_manager_with_grant_store(
+                &config,
+                gateway_dm_grant_store_path(&cli),
+            )?;
             let gateway = Arc::new(Gateway::new(
                 session_manager,
                 dm_manager,
@@ -165,7 +227,7 @@ async fn run_gateway(
                 .await;
 
             let tool_registry = Arc::new(ToolRegistry::new());
-            let terminal_backend = build_terminal_backend(&config);
+            let terminal_backend = Arc::clone(&execution_backend.terminal_backend);
             let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
@@ -174,16 +236,119 @@ async fn run_gateway(
             let tool_registry_for_msg = tool_registry.clone();
             let tool_registry_for_stream = tool_registry.clone();
             let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
+            agent_tools_for_cron.set_execution_containment_context(Arc::clone(
+                &execution_backend.containment_context,
+            ));
             let clarify_for_msg = clarify_dispatcher.clone();
             let clarify_for_stream = clarify_dispatcher.clone();
             let config_arc = Arc::new(config.clone());
             let config_arc_stream = config_arc.clone();
+            let run_runtime_for_msg = run_runtime.clone();
+            let run_runtime_for_stream = run_runtime.clone();
             let gateway_for_review = gateway.clone();
             let gateway_for_review_stream = gateway.clone();
+            let execution_mode_for_message_handler = execution_mode;
+            let execution_mode_for_stream_handler = execution_mode;
+            let config_arc_memory_forget = config_arc.clone();
+            let tool_registry_for_memory_forget = tool_registry.clone();
+            let run_runtime_for_memory_forget = run_runtime.clone();
+            let execution_mode_for_memory_forget = execution_mode;
+            let config_arc_memory_export = config_arc.clone();
+            let tool_registry_for_memory_export = tool_registry.clone();
+            let run_runtime_for_memory_export = run_runtime.clone();
+            let execution_mode_for_memory_export = execution_mode;
+            let config_arc_memory_export_open = config_arc.clone();
+            let tool_registry_for_memory_export_open = tool_registry.clone();
+            let run_runtime_for_memory_export_open = run_runtime.clone();
+            let execution_mode_for_memory_export_open = execution_mode;
+            gateway
+                .set_memory_forget_handler(Arc::new(move |ctx| {
+                    let config = config_arc_memory_forget.clone();
+                    let runtime_tools = tool_registry_for_memory_forget.clone();
+                    let run_runtime = run_runtime_for_memory_forget.clone();
+                    Box::pin(async move {
+                        let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
+                        let response = match build_agent_for_gateway_context(
+                            config.as_ref(),
+                            &ctx,
+                            agent_tools,
+                            run_runtime,
+                            execution_mode_for_memory_forget,
+                        ) {
+                            Ok(agent) => gateway_memory_forget_response(agent.forget_bound_memory()),
+                            Err(_) => GatewayMemoryForgetResponse {
+                                erased: false,
+                                providers: Vec::new(),
+                                remediation: Some(GatewayMemoryForgetRemediation::Reconfigure),
+                            },
+                        };
+                        Ok(response)
+                    })
+                }))
+                .await;
+            gateway
+                .set_memory_export_handler(Arc::new(move |ctx| {
+                    let config = config_arc_memory_export.clone();
+                    let runtime_tools = tool_registry_for_memory_export.clone();
+                    let run_runtime = run_runtime_for_memory_export.clone();
+                    Box::pin(async move {
+                        let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
+                        let response = match build_agent_for_gateway_context(
+                            config.as_ref(),
+                            &ctx,
+                            agent_tools,
+                            run_runtime,
+                            execution_mode_for_memory_export,
+                        ) {
+                            Ok(agent) => gateway_memory_export_response(agent.export_bound_memory()),
+                            Err(_) => GatewayMemoryExportResponse {
+                                artifact: None,
+                                remediation: Some(GatewayMemoryExportRemediation::Reconfigure),
+                            },
+                        };
+                        Ok(response)
+                    })
+                }))
+                .await;
+            gateway
+                .set_memory_export_open_handler(Arc::new(move |ctx, artifact| {
+                    let config = config_arc_memory_export_open.clone();
+                    let runtime_tools = tool_registry_for_memory_export_open.clone();
+                    let run_runtime = run_runtime_for_memory_export_open.clone();
+                    Box::pin(async move {
+                        let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
+                        let agent = build_agent_for_gateway_context(
+                            config.as_ref(),
+                            &ctx,
+                            agent_tools,
+                            run_runtime,
+                            execution_mode_for_memory_export_open,
+                        )
+                        .map_err(|_| {
+                            hermes_gateway::GatewayError::Auth(
+                                "memory export download is unavailable".to_string(),
+                            )
+                        })?;
+                        let artifact = hermes_core::MemoryExportArtifact::new(
+                            artifact.artifact_ref,
+                            artifact.manifest_digest,
+                            artifact.record_count,
+                            artifact.page_count,
+                            artifact.provider_count,
+                        );
+                        agent.open_bound_memory_export(&artifact).map_err(|_| {
+                            hermes_gateway::GatewayError::Auth(
+                                "memory export download is unavailable".to_string(),
+                            )
+                        })
+                    })
+                }))
+                .await;
             gateway
                 .set_message_handler_with_context(Arc::new(move |messages, ctx| {
                     let config = config_arc.clone();
                     let runtime_tools = tool_registry_for_msg.clone();
+                    let run_runtime = run_runtime_for_msg.clone();
                     let gateway_for_review = gateway_for_review.clone();
                     let clarify = clarify_for_msg.clone();
                     Box::pin(async move {
@@ -212,227 +377,18 @@ async fn run_gateway(
                             &ctx.platform,
                             &runtime_tools,
                         );
-                        let tool_defs = tool_definition_summary(&tool_schemas);
-                        gateway_for_review
-                            .emit_hook_event(
-                                "agent:tool_definitions",
-                                serde_json::json!({
-                                    "platform": ctx.platform,
-                                    "chat_id": ctx.chat_id,
-                                    "user_id": ctx.user_id,
-                                    "session_id": ctx.session_key,
-                                    "streaming": false,
-                                    "tools": tool_defs
-                                }),
-                            )
-                            .await;
-                        let platform_for_review = ctx.platform.clone();
-                        let chat_for_review = ctx.chat_id.clone();
-                        let thread_for_review = ctx.thread_id.clone();
-                        let deferred_queue = ctx.deferred_post_delivery_messages.clone();
-                        let deferred_released = ctx.deferred_post_delivery_released.clone();
-                        let gateway_for_review_cb = gateway_for_review.clone();
-                        let review_cb: Arc<dyn Fn(&str) + Send + Sync> =
-                            Arc::new(move |text: &str| {
-                                if let (Some(queue), Some(released)) =
-                                    (deferred_queue.as_ref(), deferred_released.as_ref())
-                                {
-                                    if !released.load(Ordering::Acquire) {
-                                        if let Ok(mut guard) = queue.lock() {
-                                            guard.push(text.to_string());
-                                            return;
-                                        }
-                                    }
-                                }
-                                let gw = gateway_for_review_cb.clone();
-                                let platform = platform_for_review.clone();
-                                let chat_id = chat_for_review.clone();
-                                let thread_id = thread_for_review.clone();
-                                let msg = text.to_string();
-                                tokio::spawn(async move {
-                                    let _ = gw
-                                        .send_notify_message_threaded(
-                                            &platform,
-                                            &chat_id,
-                                            &msg,
-                                            None,
-                                            thread_id.as_deref(),
-                                        )
-                                        .await;
-                                });
-                            });
-                        let background_review_callback =
-                            gateway_memory_notifications_enabled(config.as_ref())
-                                .then_some(review_cb);
-                        let gateway_for_status = gateway_for_review.clone();
-                        let gateway_for_status_hook = gateway_for_review.clone();
-                        let platform_for_status = ctx.platform.clone();
-                        let chat_for_status = ctx.chat_id.clone();
-                        let platform_for_status_hook = ctx.platform.clone();
-                        let user_for_status_hook = ctx.user_id.clone();
-                        let session_for_status_hook = ctx.session_key.clone();
-                        let status_cb = Arc::new(move |event_type: &str, message: &str| {
-                            if message.trim().is_empty() {
-                                return;
-                            }
-                            let gw = gateway_for_status.clone();
-                            let platform = platform_for_status.clone();
-                            let chat_id = chat_for_status.clone();
-                            let status_key = event_type.to_string();
-                            let msg = message.to_string();
-                            tokio::spawn(async move {
-                                let _ = gw
-                                    .send_or_update_status(
-                                        &platform,
-                                        &chat_id,
-                                        &status_key,
-                                        &msg,
-                                        None,
-                                    )
-                                    .await;
-                            });
-                            let gw_hook = gateway_for_status_hook.clone();
-                            let platform = platform_for_status_hook.clone();
-                            let user_id = user_for_status_hook.clone();
-                            let session_id = session_for_status_hook.clone();
-                            let event_type = event_type.to_string();
-                            let message = message.to_string();
-                            tokio::spawn(async move {
-                                gw_hook
-                                    .emit_hook_event(
-                                        "agent:status",
-                                        serde_json::json!({
-                                            "platform": platform,
-                                            "user_id": user_id,
-                                            "session_id": session_id,
-                                            "event_type": event_type,
-                                            "message": message
-                                        }),
-                                    )
-                                    .await;
-                            });
-                        });
-                        let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
-                        let tool_events_for_start = tool_events.clone();
-                        let tool_progress_mode = resolve_gateway_tool_progress_mode(
+                        // Gateway progress is emitted only through the request/response
+                        // stream. Out-of-band status, hook, and background notifications
+                        // require a durable outbox route and are disabled here.
+                        let callbacks = AgentCallbacks::default();
+                        let agent = build_agent_for_gateway_context(
                             config.as_ref(),
-                            &ctx.platform,
-                            ctx.tool_progress.as_deref(),
-                        );
-                        let friendly_tool_labels =
-                            config.display.friendly_tool_labels_enabled();
-                        let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
-                        let gateway_for_tool_progress = gateway_for_review.clone();
-                        let platform_for_tool_progress = ctx.platform.clone();
-                        let chat_for_tool_progress = ctx.chat_id.clone();
-                        let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
-                            Box::new(move |name: &str, args: &serde_json::Value| {
-                                let preview =
-                                    build_tool_label_from_value(name, args, 60, friendly_tool_labels)
-                                        .unwrap_or_default();
-                                let mut event = serde_json::json!({
-                                    "phase": "start",
-                                    "name": name,
-                                    "emoji": tool_emoji(name)
-                                });
-                                if !preview.is_empty() {
-                                    event["preview"] = serde_json::json!(preview);
-                                }
-                                if let Ok(mut guard) = tool_events_for_start.lock() {
-                                    guard.push(event);
-                                }
-                                if should_emit_gateway_tool_progress(
-                                    &tool_progress_mode,
-                                    name,
-                                    &tool_progress_seen,
-                                ) {
-                                    if let Some(message) =
-                                        build_gateway_tool_progress_message_with_labels(
-                                        &platform_for_tool_progress,
-                                        name,
-                                        args,
-                                        &tool_progress_mode,
-                                        60,
-                                        friendly_tool_labels,
-                                    ) {
-                                        let gw = gateway_for_tool_progress.clone();
-                                        let platform = platform_for_tool_progress.clone();
-                                        let chat_id = chat_for_tool_progress.clone();
-                                        let parse_mode =
-                                            gateway_tool_progress_parse_mode(&platform, &message);
-                                        tokio::spawn(async move {
-                                            let _ = gw
-                                                .send_message(
-                                                    &platform, &chat_id, &message, parse_mode,
-                                                )
-                                                .await;
-                                        });
-                                    }
-                                }
-                            });
-                        let tool_events_for_complete = tool_events.clone();
-                        let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
-                            Box::new(move |name: &str, result: &str| {
-                                if let Ok(mut guard) = tool_events_for_complete.lock() {
-                                    guard.push(serde_json::json!({
-                                        "phase": "complete",
-                                        "name": name,
-                                        "emoji": tool_emoji(name),
-                                        "result": truncate_hook_tool_result(result)
-                                    }));
-                                }
-                            });
-                        let tool_events_for_step = tool_events.clone();
-                        let gateway_for_step_hook = gateway_for_review.clone();
-                        let platform_for_step_hook = ctx.platform.clone();
-                        let user_for_step_hook = ctx.user_id.clone();
-                        let session_for_step_hook = ctx.session_key.clone();
-                        let on_step_complete: Box<dyn Fn(u32) + Send + Sync> =
-                            Box::new(move |iteration: u32| {
-                                let tools = if let Ok(mut guard) = tool_events_for_step.lock() {
-                                    std::mem::take(&mut *guard)
-                                } else {
-                                    Vec::new()
-                                };
-                                let tool_names: Vec<String> = tools
-                                    .iter()
-                                    .filter_map(|v| {
-                                        v.get("name")
-                                            .and_then(|n| n.as_str())
-                                            .map(|s| s.to_string())
-                                    })
-                                    .collect();
-                                let gw_hook = gateway_for_step_hook.clone();
-                                let platform = platform_for_step_hook.clone();
-                                let user_id = user_for_step_hook.clone();
-                                let session_id = session_for_step_hook.clone();
-                                tokio::spawn(async move {
-                                    gw_hook
-                                        .emit_hook_event(
-                                            "agent:step",
-                                            serde_json::json!({
-                                                "platform": platform,
-                                                "user_id": user_id,
-                                                "session_id": session_id,
-                                                "iteration": iteration,
-                                                "tool_names": tool_names,
-                                                "tools": tools
-                                            }),
-                                        )
-                                        .await;
-                                });
-                            });
-                        let callbacks = AgentCallbacks {
-                            background_review_callback,
-                            status_callback: Some(status_cb),
-                            on_tool_start: Some(on_tool_start),
-                            on_tool_complete: Some(on_tool_complete),
-                            on_step_complete: Some(on_step_complete),
-                            ..Default::default()
-                        };
-                        let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
-                                .with_callbacks(callbacks);
+                            &ctx,
+                            agent_tools,
+                            run_runtime,
+                            execution_mode_for_message_handler,
+                        )?
+                        .with_callbacks(callbacks);
                         if let Some(registration) = ctx.busy_control.clone() {
                             let _ = registration
                                 .attach(Arc::new(GatewayAgentBusyControl::new(
@@ -472,6 +428,7 @@ async fn run_gateway(
                 .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
                     let config = config_arc_stream.clone();
                     let runtime_tools = tool_registry_for_stream.clone();
+                    let run_runtime = run_runtime_for_stream.clone();
                     let gateway_for_review = gateway_for_review_stream.clone();
                     let clarify = clarify_for_stream.clone();
                     Box::pin(async move {
@@ -500,227 +457,16 @@ async fn run_gateway(
                             &ctx.platform,
                             &runtime_tools,
                         );
-                        let tool_defs = tool_definition_summary(&tool_schemas);
-                        gateway_for_review
-                            .emit_hook_event(
-                                "agent:tool_definitions",
-                                serde_json::json!({
-                                    "platform": ctx.platform,
-                                    "chat_id": ctx.chat_id,
-                                    "user_id": ctx.user_id,
-                                    "session_id": ctx.session_key,
-                                    "streaming": true,
-                                    "tools": tool_defs
-                                }),
-                            )
-                            .await;
-                        let platform_for_review = ctx.platform.clone();
-                        let chat_for_review = ctx.chat_id.clone();
-                        let thread_for_review = ctx.thread_id.clone();
-                        let deferred_queue = ctx.deferred_post_delivery_messages.clone();
-                        let deferred_released = ctx.deferred_post_delivery_released.clone();
-                        let gateway_for_review_cb = gateway_for_review.clone();
-                        let review_cb: Arc<dyn Fn(&str) + Send + Sync> =
-                            Arc::new(move |text: &str| {
-                                if let (Some(queue), Some(released)) =
-                                    (deferred_queue.as_ref(), deferred_released.as_ref())
-                                {
-                                    if !released.load(Ordering::Acquire) {
-                                        if let Ok(mut guard) = queue.lock() {
-                                            guard.push(text.to_string());
-                                            return;
-                                        }
-                                    }
-                                }
-                                let gw = gateway_for_review_cb.clone();
-                                let platform = platform_for_review.clone();
-                                let chat_id = chat_for_review.clone();
-                                let thread_id = thread_for_review.clone();
-                                let msg = text.to_string();
-                                tokio::spawn(async move {
-                                    let _ = gw
-                                        .send_notify_message_threaded(
-                                            &platform,
-                                            &chat_id,
-                                            &msg,
-                                            None,
-                                            thread_id.as_deref(),
-                                        )
-                                        .await;
-                                });
-                            });
-                        let background_review_callback =
-                            gateway_memory_notifications_enabled(config.as_ref())
-                                .then_some(review_cb);
-                        let gateway_for_status = gateway_for_review.clone();
-                        let gateway_for_status_hook = gateway_for_review.clone();
-                        let platform_for_status = ctx.platform.clone();
-                        let chat_for_status = ctx.chat_id.clone();
-                        let platform_for_status_hook = ctx.platform.clone();
-                        let user_for_status_hook = ctx.user_id.clone();
-                        let session_for_status_hook = ctx.session_key.clone();
-                        let status_cb = Arc::new(move |event_type: &str, message: &str| {
-                            if message.trim().is_empty() {
-                                return;
-                            }
-                            let gw = gateway_for_status.clone();
-                            let platform = platform_for_status.clone();
-                            let chat_id = chat_for_status.clone();
-                            let status_key = event_type.to_string();
-                            let msg = message.to_string();
-                            tokio::spawn(async move {
-                                let _ = gw
-                                    .send_or_update_status(
-                                        &platform,
-                                        &chat_id,
-                                        &status_key,
-                                        &msg,
-                                        None,
-                                    )
-                                    .await;
-                            });
-                            let gw_hook = gateway_for_status_hook.clone();
-                            let platform = platform_for_status_hook.clone();
-                            let user_id = user_for_status_hook.clone();
-                            let session_id = session_for_status_hook.clone();
-                            let event_type = event_type.to_string();
-                            let message = message.to_string();
-                            tokio::spawn(async move {
-                                gw_hook
-                                    .emit_hook_event(
-                                        "agent:status",
-                                        serde_json::json!({
-                                            "platform": platform,
-                                            "user_id": user_id,
-                                            "session_id": session_id,
-                                            "event_type": event_type,
-                                            "message": message
-                                        }),
-                                    )
-                                    .await;
-                            });
-                        });
-                        let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
-                        let tool_events_for_start = tool_events.clone();
-                        let tool_progress_mode = resolve_gateway_tool_progress_mode(
+                        // Out-of-band progress requires a durable gateway outbox route.
+                        let callbacks = AgentCallbacks::default();
+                        let agent = build_agent_for_gateway_context(
                             config.as_ref(),
-                            &ctx.platform,
-                            ctx.tool_progress.as_deref(),
-                        );
-                        let friendly_tool_labels =
-                            config.display.friendly_tool_labels_enabled();
-                        let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
-                        let gateway_for_tool_progress = gateway_for_review.clone();
-                        let platform_for_tool_progress = ctx.platform.clone();
-                        let chat_for_tool_progress = ctx.chat_id.clone();
-                        let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
-                            Box::new(move |name: &str, args: &serde_json::Value| {
-                                let preview =
-                                    build_tool_label_from_value(name, args, 60, friendly_tool_labels)
-                                        .unwrap_or_default();
-                                let mut event = serde_json::json!({
-                                    "phase": "start",
-                                    "name": name,
-                                    "emoji": tool_emoji(name)
-                                });
-                                if !preview.is_empty() {
-                                    event["preview"] = serde_json::json!(preview);
-                                }
-                                if let Ok(mut guard) = tool_events_for_start.lock() {
-                                    guard.push(event);
-                                }
-                                if should_emit_gateway_tool_progress(
-                                    &tool_progress_mode,
-                                    name,
-                                    &tool_progress_seen,
-                                ) {
-                                    if let Some(message) =
-                                        build_gateway_tool_progress_message_with_labels(
-                                        &platform_for_tool_progress,
-                                        name,
-                                        args,
-                                        &tool_progress_mode,
-                                        60,
-                                        friendly_tool_labels,
-                                    ) {
-                                        let gw = gateway_for_tool_progress.clone();
-                                        let platform = platform_for_tool_progress.clone();
-                                        let chat_id = chat_for_tool_progress.clone();
-                                        let parse_mode =
-                                            gateway_tool_progress_parse_mode(&platform, &message);
-                                        tokio::spawn(async move {
-                                            let _ = gw
-                                                .send_message(
-                                                    &platform, &chat_id, &message, parse_mode,
-                                                )
-                                                .await;
-                                        });
-                                    }
-                                }
-                            });
-                        let tool_events_for_complete = tool_events.clone();
-                        let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
-                            Box::new(move |name: &str, result: &str| {
-                                if let Ok(mut guard) = tool_events_for_complete.lock() {
-                                    guard.push(serde_json::json!({
-                                        "phase": "complete",
-                                        "name": name,
-                                        "emoji": tool_emoji(name),
-                                        "result": truncate_hook_tool_result(result)
-                                    }));
-                                }
-                            });
-                        let tool_events_for_step = tool_events.clone();
-                        let gateway_for_step_hook = gateway_for_review.clone();
-                        let platform_for_step_hook = ctx.platform.clone();
-                        let user_for_step_hook = ctx.user_id.clone();
-                        let session_for_step_hook = ctx.session_key.clone();
-                        let on_step_complete: Box<dyn Fn(u32) + Send + Sync> =
-                            Box::new(move |iteration: u32| {
-                                let tools = if let Ok(mut guard) = tool_events_for_step.lock() {
-                                    std::mem::take(&mut *guard)
-                                } else {
-                                    Vec::new()
-                                };
-                                let tool_names: Vec<String> = tools
-                                    .iter()
-                                    .filter_map(|v| {
-                                        v.get("name")
-                                            .and_then(|n| n.as_str())
-                                            .map(|s| s.to_string())
-                                    })
-                                    .collect();
-                                let gw_hook = gateway_for_step_hook.clone();
-                                let platform = platform_for_step_hook.clone();
-                                let user_id = user_for_step_hook.clone();
-                                let session_id = session_for_step_hook.clone();
-                                tokio::spawn(async move {
-                                    gw_hook
-                                        .emit_hook_event(
-                                            "agent:step",
-                                            serde_json::json!({
-                                                "platform": platform,
-                                                "user_id": user_id,
-                                                "session_id": session_id,
-                                                "iteration": iteration,
-                                                "tool_names": tool_names,
-                                                "tools": tools
-                                            }),
-                                        )
-                                        .await;
-                                });
-                            });
-                        let callbacks = AgentCallbacks {
-                            background_review_callback,
-                            status_callback: Some(status_cb),
-                            on_tool_start: Some(on_tool_start),
-                            on_tool_complete: Some(on_tool_complete),
-                            on_step_complete: Some(on_step_complete),
-                            ..Default::default()
-                        };
-                        let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
-                                .with_callbacks(callbacks);
+                            &ctx,
+                            agent_tools,
+                            run_runtime,
+                            execution_mode_for_stream_handler,
+                        )?
+                        .with_callbacks(callbacks);
                         if let Some(registration) = ctx.busy_control.clone() {
                             let _ = registration
                                 .attach(Arc::new(GatewayAgentBusyControl::new(
@@ -729,49 +475,54 @@ async fn run_gateway(
                                 .await;
                         }
                         let emit = on_chunk.clone();
-                        let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
-                        let ui_state_cb = ui_state.clone();
-                        let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
-                            Box::new(move |chunk: StreamChunk| {
-                                if let Some(delta) = chunk.delta {
-                                    if let Some(extra) = delta.extra.as_ref() {
-                                        if let Some(control) =
-                                            extra.get("control").and_then(|v| v.as_str())
-                                        {
-                                            if control == "mute_post_response" {
-                                                let enabled = extra
-                                                    .get("enabled")
-                                                    .and_then(|v| v.as_bool())
-                                                    .unwrap_or(false);
-                                                if let Ok(mut st) = ui_state_cb.lock() {
-                                                    st.0 = enabled;
-                                                }
-                                            } else if control == "stream_break" {
-                                                if let Ok(mut st) = ui_state_cb.lock() {
-                                                    st.1 = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if let Some(text) = delta.content {
-                                        if let Ok(mut st) = ui_state_cb.lock() {
-                                            if st.0 {
-                                                return;
-                                            }
-                                            if st.1 {
-                                                emit("\n\n".to_string());
-                                                st.1 = false;
-                                            }
-                                        }
-                                        emit(text);
+                        let muted = Arc::new(Mutex::new(false));
+                        let muted_cb = muted.clone();
+                        let (observer_sink, mut observer_rx) =
+                            hermes_agent::AgentObserverSink::channel(256);
+                        let mut observer_task = tokio::spawn(async move {
+                            while let Some(event) = observer_rx.recv().await {
+                                let hermes_agent::AgentObserverEvent::RenderDelta(delta) = event
+                                else {
+                                    continue;
+                                };
+                                if let Some(enabled) = delta.mute_post_response {
+                                    if let Ok(mut state) = muted_cb.lock() {
+                                        *state = enabled;
                                     }
                                 }
-                            });
+                                let is_muted =
+                                    muted_cb.lock().map(|state| *state).unwrap_or(false);
+                                if is_muted {
+                                    continue;
+                                }
+                                if let Some(text) = delta.text {
+                                    if delta.break_before {
+                                        emit("\n\n".to_string());
+                                    }
+                                    emit(text);
+                                }
+                            }
+                        });
 
                         let result = agent
-                            .run_stream(messages, Some(tool_schemas), Some(stream_cb))
+                            .run_stream(messages, Some(tool_schemas), observer_sink.clone())
                             .await
-                            .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
+                            .map_err(|e| {
+                                hermes_gateway::GatewayError::Platform(e.to_string())
+                            });
+                        let flushed = observer_sink.flush().await;
+                        drop(observer_sink);
+                        if !flushed
+                            || tokio::time::timeout(
+                                Duration::from_millis(100),
+                                &mut observer_task,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            observer_task.abort();
+                        }
+                        let result = result?;
                         let home = ctx
                             .home
                             .as_deref()
@@ -807,7 +558,17 @@ async fn run_gateway(
                 .unwrap_or_else(|| "gpt-5.5".to_string());
             let cron_persistence = Arc::new(FileJobPersistence::with_dir(cron_dir.clone()));
             let cron_llm = build_provider(&config, &default_model);
-            let cron_runner = Arc::new(CronRunner::new(cron_llm, agent_tools_for_cron));
+            let cron_runner = Arc::new(
+                CronRunner::new(
+                    cron_llm,
+                    agent_tools_for_cron,
+                    run_runtime.clone(),
+                    execution_mode,
+                    Arc::clone(&execution_backend.containment_context),
+                    &config,
+                )
+                .map_err(|error| AgentError::Config(error.to_string()))?,
+            );
             let mut cron_scheduler = CronScheduler::new(cron_persistence, cron_runner);
             let (cron_tx, cron_rx) = broadcast::channel::<CronCompletionEvent>(64);
             let cron_platform_rx = cron_tx.subscribe();
@@ -822,6 +583,7 @@ async fn run_gateway(
             wire_gateway_messaging_backend(&tool_registry, gateway.clone());
             wire_gateway_clarify_backend(&tool_registry, clarify_dispatcher);
             let webhooks_path = hermes_state_root(&cli).join("webhooks.json");
+            let discord_route_spool_path = discord_route_spool_path_for_gateway(&cli, &config)?;
             tracing::info!(
                 cron_dir = %cron_dir.display(),
                 webhooks = %webhooks_path.display(),
@@ -839,7 +601,15 @@ async fn run_gateway(
                 run_cron_webhook_delivery_loop(cron_rx, webhooks_path_clone).await;
             }));
 
-            register_gateway_adapters(&config, gateway.clone(), &mut sidecar_tasks).await?;
+            let discord_ingress_shutdown = register_gateway_adapters(
+                &config,
+                gateway.clone(),
+                &mut sidecar_tasks,
+                &discord_route_spool_path,
+                cron_scheduler.clone(),
+                execution_mode,
+            )
+            .await?;
 
             if gateway.adapter_names().await.is_empty() {
                 if enabled.is_empty() {
@@ -852,42 +622,76 @@ async fn run_gateway(
                 }
             }
 
-            gateway.start_all().await?;
+            if let Err(start_error) = gateway.start_all().await {
+                cron_scheduler.stop().await;
+                let terminal_error = cleanup_gateway_after_start_failure(
+                    gateway.as_ref(),
+                    discord_ingress_shutdown,
+                    start_error.into(),
+                )
+                .await;
+                for task in sidecar_tasks {
+                    task.abort();
+                }
+                return Err(terminal_error);
+            }
+            let own_pid = std::process::id();
+            if let Err(error) = std::fs::write(&pid_path, format!("{}\n", own_pid)) {
+                cron_scheduler.stop().await;
+                let terminal_error = cleanup_gateway_after_start_failure(
+                    gateway.as_ref(),
+                    discord_ingress_shutdown,
+                    AgentError::Io(format!("failed to write {}: {}", pid_path.display(), error)),
+                )
+                .await;
+                for task in sidecar_tasks {
+                    task.abort();
+                }
+                return Err(terminal_error);
+            }
             {
                 let gw_cron_delivery = gateway.clone();
                 sidecar_tasks.push(tokio::spawn(async move {
                     run_cron_gateway_delivery_loop(cron_platform_rx, gw_cron_delivery).await;
                 }));
             }
-            {
+            let reconnect_task = {
                 let gw_reconnect = gateway.clone();
-                sidecar_tasks.push(tokio::spawn(async move {
+                tokio::spawn(async move {
                     gw_reconnect.platform_reconnect_watcher(20).await;
-                }));
+                })
+            };
+            {
                 let gw_expiry = gateway.clone();
                 sidecar_tasks.push(tokio::spawn(async move {
                     gw_expiry.session_expiry_watcher(300).await;
                 }));
             }
-            let own_pid = std::process::id();
-            std::fs::write(&pid_path, format!("{}\n", own_pid)).map_err(|e| {
-                AgentError::Io(format!("failed to write {}: {}", pid_path.display(), e))
-            })?;
             println!("Gateway runtime initialized with context-aware model/provider routing.");
-            println!("Gateway is ready. Press Ctrl+C to stop.");
-            // Keep gateway alive for future adapter/event wiring.
-            // Wait for Ctrl+C
-            tokio::signal::ctrl_c()
-                .await
-                .map_err(|e| AgentError::Io(format!("Failed to listen for Ctrl+C: {}", e)))?;
+            println!("Gateway is ready. Press Ctrl+C or send SIGTERM to stop.");
+            let shutdown_signal = shutdown_listener.wait().await?;
 
-            println!("\nShutting down gateway...");
+            println!(
+                "\nShutting down gateway after {}...",
+                shutdown_signal.as_str()
+            );
             cron_scheduler.stop().await;
-            gateway.stop_all().await?;
-            let _ = std::fs::remove_file(&pid_path);
+            reconnect_task.abort();
+            let _ = reconnect_task.await;
+            let discord_drain_error =
+                if let Some(discord_ingress_shutdown) = discord_ingress_shutdown {
+                    discord_ingress_shutdown.drain().await.err()
+                } else {
+                    None
+                };
+            let gateway_stop_result = gateway.stop_all().await;
+            if gateway_stop_result.is_ok() {
+                cleanup_gateway_metadata_for_pid(&pid_path, own_pid);
+            }
             for task in sidecar_tasks {
                 task.abort();
             }
+            gateway_shutdown_result(discord_drain_error, gateway_stop_result)?;
             println!("Gateway stopped.");
         }
         Some("status") => {
@@ -895,60 +699,80 @@ async fn run_gateway(
                 println!("{service_state}");
             }
             let pid_path = gateway_pid_path_for_cli(&cli);
-            if !pid_path.exists() {
+            if !pid_path.exists() && !gateway_lock_path_for_pid_path(&pid_path).exists() {
                 println!(
-                    "Gateway status: not running (no PID file; start with `hermes gateway start`)"
+                    "Gateway status: not running (no PID/lock metadata; start with `hermes gateway start`)"
                 );
                 return Ok(());
             }
-            match read_gateway_pid(&pid_path) {
-                Some(pid) if gateway_pid_is_alive(pid) => {
-                    println!(
-                        "Gateway status: running (PID {}, file {})",
-                        pid,
-                        pid_path.display()
-                    );
-                }
-                Some(pid) => {
-                    cleanup_stale_gateway_metadata(&pid_path);
-                    println!(
-                        "Gateway status: not running (stale metadata for PID {} in {})",
-                        pid,
-                        pid_path.display()
-                    );
-                }
+            match read_gateway_pid_or_lock(&pid_path) {
+                Some(pid) => match gateway_pid_state(pid) {
+                    GatewayPidState::Gateway => {
+                        println!(
+                            "Gateway status: running (PID {}, file {})",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                    GatewayPidState::Dead => {
+                        cleanup_gateway_metadata_for_pid(&pid_path, pid);
+                        println!(
+                            "Gateway status: not running (stale metadata for PID {} in {})",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                    GatewayPidState::LiveUnowned => {
+                        println!(
+                            "Gateway status: PID {} is alive but does not identify as a Hermes gateway; retained PID/lock metadata at {}",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                    GatewayPidState::Unverifiable => {
+                        println!(
+                            "Gateway status: cannot verify live PID {}; retained PID/lock metadata at {}",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                },
                 None => {
-                    cleanup_stale_gateway_metadata(&pid_path);
-                    println!("Gateway status: invalid PID file at {}", pid_path.display());
+                    println!(
+                        "Gateway status: invalid or unreadable PID/lock metadata retained at {}",
+                        pid_path.display()
+                    );
                 }
             }
         }
         Some("stop") => {
-            if try_stop_gateway_service()? {
-                println!("Gateway service stopped.");
-                return Ok(());
-            }
             let pid_path = gateway_pid_path_for_cli(&cli);
-            let Some(pid) = read_gateway_pid(&pid_path) else {
-                println!("Gateway stop: no PID file (nothing to stop).");
-                return Ok(());
-            };
-            if !gateway_pid_is_alive(pid) {
-                cleanup_stale_gateway_metadata(&pid_path);
-                println!(
-                    "Gateway stop: process {} not running; removed stale PID/lock metadata for {}.",
-                    pid,
-                    pid_path.display()
-                );
-                return Ok(());
+            let (stopped, already_exited) = stop_gateway_metadata_pids(&pid_path).await?;
+            if stopped.is_empty() && already_exited.is_empty() {
+                return Err(AgentError::Gateway(
+                    "refusing to stop an unverified gateway service: no PID/lock metadata was available to prove process identity. Inspect the service, restore verified metadata, or stop it through its owning supervisor."
+                        .to_string(),
+                ));
             }
-            match gateway_pid_terminate(pid) {
-                Ok(()) => {
-                    println!("Sent SIGTERM to gateway PID {}.", pid);
-                    cleanup_stale_gateway_metadata(&pid_path);
-                    println!("Removed {}.", pid_path.display());
-                }
-                Err(e) => println!("Gateway stop: failed to signal PID {}: {}", pid, e),
+
+            if stopped.is_empty() {
+                println!(
+                    "Gateway stop: process(es) {} not running; removed only their stale PID/lock metadata.",
+                    already_exited
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            } else {
+                println!(
+                    "Gateway stopped after process(es) {} exited.",
+                    stopped
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
         }
         Some(other) => {
@@ -959,6 +783,225 @@ async fn run_gateway(
         }
     }
     Ok(())
+}
+async fn stop_gateway_metadata_pids(pid_path: &Path) -> Result<(Vec<u32>, Vec<u32>), AgentError> {
+    let mut stopped = Vec::new();
+    let mut already_exited = Vec::new();
+    let mut service_stop_requested = false;
+    for pid in read_gateway_metadata_pids(pid_path)? {
+        match validate_gateway_pid_for_stop(pid)? {
+            GatewayStopOutcome::AlreadyExited => {
+                cleanup_gateway_metadata_for_pid(pid_path, pid);
+                already_exited.push(pid);
+            }
+            GatewayStopOutcome::Stopped => {
+                if !service_stop_requested && try_stop_gateway_service()? {
+                    service_stop_requested = true;
+                    wait_for_gateway_pid_exit(pid, GATEWAY_STOP_WAIT_TIMEOUT).await?;
+                    cleanup_gateway_metadata_for_pid(pid_path, pid);
+                } else {
+                    stop_gateway_pid_gracefully(pid_path, pid).await?;
+                }
+                stopped.push(pid);
+            }
+        }
+    }
+    Ok((stopped, already_exited))
+}
+
+/// Resolves the Discord ingress spool under the same non-secret identity
+/// namespace as Discord adapter state. A legacy unscoped spool cannot be
+/// attributed safely after token/application rotation, so it is quarantined
+/// rather than replayed by whichever bot starts next.
+fn discord_route_spool_path_for_gateway(
+    cli: &Cli,
+    config: &GatewayConfig,
+) -> Result<PathBuf, AgentError> {
+    let gateway_root = hermes_state_root(cli).join("gateway");
+    let legacy_path = gateway_root.join("discord-route-spool.json");
+
+    #[cfg(feature = "gateway-discord")]
+    if let Some(platform_cfg) = config
+        .platforms
+        .get("discord")
+        .filter(|platform_cfg| platform_cfg.enabled)
+    {
+        if let Some(token) = platform_token_or_extra(platform_cfg) {
+            let discord_config = build_discord_config(platform_cfg, config.proxy.as_ref(), token);
+            let scope = DiscordAdapter::state_scope_for_config(&discord_config);
+            quarantine_legacy_discord_route_spool(&legacy_path)?;
+            return Ok(gateway_root
+                .join("discord")
+                .join(scope)
+                .join("route-spool.json"));
+        }
+    }
+
+    // No configured Discord identity can consume this fallback path. It
+    // preserves the adapter registration contract for disabled/misconfigured
+    // Discord without ever adopting an ambiguous legacy spool.
+    Ok(legacy_path)
+}
+
+fn quarantine_legacy_discord_route_spool(legacy_path: &Path) -> Result<(), AgentError> {
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    let parent = legacy_path.parent().ok_or_else(|| {
+        AgentError::Io(format!(
+            "legacy Discord spool has no parent directory: {}",
+            legacy_path.display()
+        ))
+    })?;
+    let quarantine_dir = parent.join("discord-route-spool-quarantine");
+    std::fs::create_dir_all(&quarantine_dir).map_err(|error| {
+        AgentError::Io(format!(
+            "failed to create Discord spool quarantine {}: {error}",
+            quarantine_dir.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&quarantine_dir, std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| {
+                AgentError::Io(format!(
+                    "failed to make Discord spool quarantine directory {} private: {error}",
+                    quarantine_dir.display()
+                ))
+            },
+        )?;
+    }
+    let unique = format!(
+        "legacy-unscoped-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let quarantine_path = quarantine_dir.join(unique);
+    std::fs::rename(legacy_path, &quarantine_path).map_err(|error| {
+        AgentError::Io(format!(
+            "failed to quarantine ambiguous legacy Discord spool {}: {error}",
+            legacy_path.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&quarantine_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| {
+                AgentError::Io(format!(
+                    "failed to make quarantined Discord spool {} private: {error}",
+                    quarantine_path.display()
+                ))
+            })?;
+    }
+    tracing::warn!(
+        legacy = %legacy_path.display(),
+        quarantine = %quarantine_path.display(),
+        "quarantined unscoped legacy Discord ingress spool; it will not be replayed by the current bot"
+    );
+    Ok(())
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatewayShutdownSignal {
+    CtrlC,
+    Sigterm,
+}
+
+impl GatewayShutdownSignal {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::CtrlC => "Ctrl+C",
+            Self::Sigterm => "SIGTERM",
+        }
+    }
+}
+
+struct GatewayShutdownSignalListener {
+    #[cfg(unix)]
+    sigint: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    sigterm: tokio::signal::unix::Signal,
+}
+
+fn install_gateway_shutdown_signal_listener() -> Result<GatewayShutdownSignalListener, AgentError> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        Ok(GatewayShutdownSignalListener {
+            sigint: signal(SignalKind::interrupt())
+                .map_err(|error| AgentError::Io(format!("failed to listen for Ctrl+C: {error}")))?,
+            sigterm: signal(SignalKind::terminate()).map_err(|error| {
+                AgentError::Io(format!("failed to listen for SIGTERM: {error}"))
+            })?,
+        })
+    }
+
+    #[cfg(not(unix))]
+    {
+        Ok(GatewayShutdownSignalListener {})
+    }
+}
+
+impl GatewayShutdownSignalListener {
+    async fn wait(mut self) -> Result<GatewayShutdownSignal, AgentError> {
+        #[cfg(unix)]
+        {
+            tokio::select! {
+                _ = self.sigint.recv() => Ok(GatewayShutdownSignal::CtrlC),
+                _ = self.sigterm.recv() => Ok(GatewayShutdownSignal::Sigterm),
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self;
+            tokio::signal::ctrl_c()
+                .await
+                .map_err(|error| AgentError::Io(format!("failed to listen for Ctrl+C: {error}")))?;
+            Ok(GatewayShutdownSignal::CtrlC)
+        }
+    }
+}
+
+fn gateway_shutdown_result(
+    discord_drain_error: Option<hermes_core::errors::GatewayError>,
+    gateway_stop_result: Result<(), hermes_core::errors::GatewayError>,
+) -> Result<(), AgentError> {
+    match (discord_drain_error, gateway_stop_result) {
+        (None, Ok(())) => Ok(()),
+        (Some(discord_error), Ok(())) => Err(AgentError::Gateway(format!(
+            "Discord ingress drain failed after gateway cleanup: {discord_error}"
+        ))),
+        (None, Err(gateway_error)) => Err(gateway_error.into()),
+        (Some(discord_error), Err(gateway_error)) => Err(AgentError::Gateway(format!(
+            "Discord ingress drain failed: {discord_error}; gateway stop also failed: {gateway_error}"
+        ))),
+    }
+}
+
+async fn cleanup_gateway_after_start_failure(
+    gateway: &Gateway,
+    discord_ingress_shutdown: Option<DiscordIngressShutdown>,
+    start_error: AgentError,
+) -> AgentError {
+    let discord_drain_error = if let Some(discord_ingress_shutdown) = discord_ingress_shutdown {
+        discord_ingress_shutdown.drain().await.err()
+    } else {
+        None
+    };
+    let gateway_stop_result = gateway.stop_all().await;
+    match gateway_shutdown_result(discord_drain_error, gateway_stop_result) {
+        Ok(()) => start_error,
+        Err(cleanup_error) => AgentError::Gateway(format!(
+            "gateway adapter startup failed: {start_error}; startup cleanup also failed: {cleanup_error}"
+        )),
+    }
 }
 
 fn run_sessions_db_auto_maintenance(config: &GatewayConfig) {
@@ -1002,9 +1045,13 @@ async fn run_up(force: bool, dry_run: bool) -> Result<(), AgentError> {
         if let Some(service_state) = gateway_service_status()? {
             println!("{service_state}");
         } else {
-            println!("Gateway service: service install/start is not implemented for this platform.");
+            println!(
+                "Gateway service: service install/start is not implemented for this platform."
+            );
         }
-        println!("Dry-run: would ensure the gateway service is installed, start it, then print status.");
+        println!(
+            "Dry-run: would ensure the gateway service is installed, start it, then print status."
+        );
         return Ok(());
     }
 

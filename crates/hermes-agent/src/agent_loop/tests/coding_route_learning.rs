@@ -78,7 +78,9 @@ fn coding_context_prunes_non_coding_skill_categories_in_prompt_only() {
         ToolSchema::new("skills_list", "List skills", JsonSchema::new("object")),
         ToolSchema::new("skill_view", "View skill", JsonSchema::new("object")),
     ];
-    let prompt = agent.build_system_prompt("", &tools, "anthropic/claude-sonnet-4");
+    let prompt = agent
+        .build_system_prompt("", &tools, "anthropic/claude-sonnet-4")
+        .content;
     assert!(prompt.contains("pr-review"));
     assert!(!prompt.contains("tweet-stuff"));
     assert!(prompt.contains("skills_prompt_pruned"));
@@ -156,23 +158,23 @@ async fn mid_turn_steer_interrupt_is_appended_to_last_tool_result() {
     let interrupt = InterruptController::new();
     let interrupt_for_tool = interrupt.clone();
     let mut registry = ToolRegistry::new();
-    registry.register(
+    registry.register_test_observation(
         "steer_test",
         ToolSchema::new("steer_test", "Steer test", JsonSchema::new("object")),
         Arc::new(move |_args| {
-            interrupt_for_tool.interrupt(Some(crate::steer::format_steer_marker(
+            interrupt_for_tool.steer(crate::steer::format_steer_marker(
                 "prefer the simpler fix",
-            )));
+            ));
             Ok("tool output".to_string())
         }),
     );
     let provider = Arc::new(RecordingProvider::default());
-    let agent = AgentLoop::with_interrupt(
+    let (agent, _run_state) = attach_test_run_runtime(AgentLoop::with_interrupt(
         AgentConfig::default(),
         Arc::new(registry),
         provider.clone(),
         interrupt,
-    );
+    ));
 
     let result = agent
         .run(vec![Message::user("use the tool")], None)
@@ -289,7 +291,7 @@ fn test_smart_model_routing_cheap_route_for_simple_turn() {
 }
 
 #[test]
-fn test_smart_model_routing_online_learning_prefers_primary_when_cheap_unstable() {
+fn test_smart_model_routing_process_local_stats_prefers_primary_when_cheap_unstable() {
     use futures::stream::BoxStream;
 
     struct DummyProvider;
@@ -384,11 +386,13 @@ fn test_smart_model_routing_online_learning_prefers_primary_when_cheap_unstable(
             },
         );
     }
-    let selected =
-        agent.resolve_smart_runtime_route(&[Message::user("summarize today's work")]);
+    let messages = [Message::user("summarize today's work")];
+    let first = agent.resolve_smart_runtime_route(&messages);
+    let second = agent.resolve_smart_runtime_route(&messages);
+    assert_eq!(first.is_some(), second.is_some());
     assert!(
-        selected.is_none(),
-        "online learning should keep primary when cheap route is unstable"
+        first.is_none(),
+        "process-local route statistics should keep primary when cheap route is unstable"
     );
 }
 
@@ -443,13 +447,13 @@ fn test_route_learning_updates_after_outcomes() {
     assert!(snapshot["stats"]["avg_latency_ms"].as_f64().unwrap_or(0.0) > 0.0);
 }
 
-#[test]
-fn test_route_learning_persists_across_agent_restarts() {
+#[tokio::test]
+async fn governed_runs_keep_route_statistics_in_memory_without_side_files() {
     use futures::stream::BoxStream;
 
-    struct DummyProvider;
+    struct ObjectiveProvider;
     #[async_trait::async_trait]
-    impl LlmProvider for DummyProvider {
+    impl LlmProvider for ObjectiveProvider {
         async fn chat_completion(
             &self,
             _messages: &[Message],
@@ -460,7 +464,7 @@ fn test_route_learning_persists_across_agent_restarts() {
             _extra_body: Option<&serde_json::Value>,
         ) -> Result<hermes_core::LlmResponse, AgentError> {
             Ok(hermes_core::LlmResponse {
-                message: Message::assistant("dummy"),
+                message: Message::assistant("objective_state=advancing"),
                 usage: None,
                 model: "dummy".into(),
                 finish_reason: Some("stop".into()),
@@ -480,86 +484,65 @@ fn test_route_learning_persists_across_agent_restarts() {
         }
     }
 
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let mut cfg = AgentConfig::default();
-    cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
-
-    let agent = AgentLoop::new(
-        cfg.clone(),
+    let home = tempfile::tempdir().expect("tempdir");
+    let config = AgentConfig {
+        hermes_home: Some(home.path().to_string_lossy().to_string()),
+        skip_memory: true,
+        skip_context_files: true,
+        background_review_metrics_enabled: false,
+        code_index_enabled: false,
+        lsp_context_enabled: false,
+        ..AgentConfig::default()
+    };
+    let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+        config.clone(),
         Arc::new(ToolRegistry::new()),
-        Arc::new(DummyProvider),
-    );
+        Arc::new(ObjectiveProvider),
+    ));
+
     agent.update_route_learning(None, Some("openai:gpt-4o"), 1200, true);
-    let persisted_path = route_learning_state_path(&cfg);
-    assert!(
-        persisted_path.exists(),
-        "route-learning state file must exist"
-    );
+    let learned = agent.route_learning_snapshot(None, Some("openai:gpt-4o"));
+    assert_eq!(learned["stats"]["samples"], 1);
 
-    let reloaded = AgentLoop::new(
-        cfg.clone(),
+    let result = agent
+        .run(
+            vec![
+                Message::system("[SESSION_OBJECTIVE] demonstrate governed result recording"),
+                Message::user("respond once"),
+            ],
+            Some(Vec::new()),
+        )
+        .await
+        .expect("governed agent run");
+    assert!(result.finished_naturally);
+
+    let fresh = AgentLoop::new(
+        config,
         Arc::new(ToolRegistry::new()),
-        Arc::new(DummyProvider),
+        Arc::new(ObjectiveProvider),
     );
-    let snapshot = reloaded.route_learning_snapshot(None, Some("openai:gpt-4o"));
-    assert_eq!(snapshot["key"], "openai:gpt-4o");
-    assert!(snapshot["stats"]["samples"].as_u64().unwrap_or(0) >= 1);
-}
-
-#[test]
-fn test_route_learning_malformed_file_is_safe_fallback() {
-    use futures::stream::BoxStream;
-
-    struct DummyProvider;
-    #[async_trait::async_trait]
-    impl LlmProvider for DummyProvider {
-        async fn chat_completion(
-            &self,
-            _messages: &[Message],
-            _tools: &[ToolSchema],
-            _max_tokens: Option<u32>,
-            _temperature: Option<f64>,
-            _model: Option<&str>,
-            _extra_body: Option<&serde_json::Value>,
-        ) -> Result<hermes_core::LlmResponse, AgentError> {
-            Ok(hermes_core::LlmResponse {
-                message: Message::assistant("dummy"),
-                usage: None,
-                model: "dummy".into(),
-                finish_reason: Some("stop".into()),
-            })
-        }
-
-        fn chat_completion_stream(
-            &self,
-            _messages: &[Message],
-            _tools: &[ToolSchema],
-            _max_tokens: Option<u32>,
-            _temperature: Option<f64>,
-            _model: Option<&str>,
-            _extra_body: Option<&serde_json::Value>,
-        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-            futures::stream::empty().boxed()
-        }
-    }
-
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let mut cfg = AgentConfig::default();
-    cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
-    let state_path = route_learning_state_path(&cfg);
-    std::fs::create_dir_all(
-        state_path
-            .parent()
-            .expect("route-learning path should have a parent"),
-    )
-    .expect("create route-learning dir");
-    std::fs::write(&state_path, "{ this-is-invalid-json")
-        .expect("write malformed route-learning file");
-
-    let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
-    let snapshot = agent.route_learning_snapshot(None, Some("openai:gpt-4o"));
+    let fresh_stats = fresh.route_learning_snapshot(None, Some("openai:gpt-4o"));
     assert!(
-        snapshot["stats"].is_null(),
-        "malformed state must fall back cleanly"
+        fresh_stats["stats"].is_null(),
+        "route statistics must not survive a new AgentLoop"
+    );
+    assert!(
+        !home.path().join("logs").join("route-learning.json").exists(),
+        "governed runs must not write route-learning state"
+    );
+
+    let alpha = home.path().join("alpha");
+    let has_objective_side_file = alpha.is_dir()
+        && std::fs::read_dir(&alpha)
+            .expect("read alpha directory")
+            .filter_map(Result::ok)
+            .any(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("objective") && name.contains(".json")
+            });
+    assert!(
+        !has_objective_side_file,
+        "governed runs must not write alpha/objective*.json* side files"
     );
 }

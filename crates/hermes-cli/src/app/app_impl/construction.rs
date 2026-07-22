@@ -8,10 +8,19 @@ impl App {
         let state_root = state_dir(cli.config_dir.as_deref().map(std::path::Path::new));
         let config = load_config(cli.config_dir.as_deref())
             .map_err(|e| AgentError::Config(e.to_string()))?;
+        let execution_mode =
+            hermes_config::resolve_runtime_execution_mode(&config, cli.execution_mode.as_deref())
+                .map_err(|error| AgentError::Config(error.to_string()))?;
+        let run_runtime = Arc::new(
+            RunRuntime::open(&state_root)
+                .map_err(|error| AgentError::Io(format!("run-record startup failed: {error}")))?,
+        );
 
         let mut config = config;
         apply_cli_runtime_overrides(&mut config, &cli);
         Self::apply_explore_first_runtime_defaults(&config);
+        let execution_backend =
+            crate::terminal_backend::build_execution_backend_binding(&config, execution_mode)?;
 
         if config.sessions.auto_prune {
             let resolved_home = config
@@ -70,7 +79,7 @@ impl App {
         }
         let stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>> =
             Arc::new(StdMutex::new(None));
-        let terminal_backend = build_terminal_backend(&config);
+        let terminal_backend = Arc::clone(&execution_backend.terminal_backend);
         let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
@@ -79,40 +88,59 @@ impl App {
         let cron_data_dir = state_root.join("cron");
         std::fs::create_dir_all(&cron_data_dir)
             .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_data_dir.display(), e)))?;
-        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
-            &config,
-            &current_model,
-            cron_data_dir,
-            &tool_registry,
-        ));
+        let cron_scheduler = Arc::new(
+            build_runtime_cron_scheduler(
+                &config,
+                &current_model,
+                cron_data_dir,
+                &tool_registry,
+                run_runtime.clone(),
+                execution_mode,
+                Arc::clone(&execution_backend.containment_context),
+            )
+            .map_err(|error| AgentError::Config(error.to_string()))?,
+        );
         cron_scheduler
             .load_persisted_jobs()
             .await
             .map_err(|e| AgentError::Config(format!("cron load: {e}")))?;
         cron_scheduler.start().await;
         wire_cron_scheduler_backend(&tool_registry, cron_scheduler.clone());
-        let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
+        let agent_tool_registry = Arc::new(bridge_tool_registry_with_execution_context(
+            &tool_registry,
+            Arc::clone(&execution_backend.containment_context),
+        ));
         let tool_schemas =
             hermes_tool_planning::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
 
         let session_id = Uuid::new_v4().to_string();
-        let mut agent_config = build_agent_config(&config, &current_model);
+        let mut agent_config = build_agent_config(&config, &current_model, execution_mode);
         agent_config.session_id = Some(session_id.clone());
+        let memory_subject = hermes_agent::MemorySubject::local_owner(
+            hermes_agent::MemorySurface::Cli,
+            session_id.clone(),
+        )
+        .map_err(|_| AgentError::Config("invalid local memory subject".to_string()))?;
         let provider = build_provider(&config, &current_model);
 
-        let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ))
+        let agent_inner = hermes_agent::attach_discovered_memory(
+            AgentLoop::new(agent_config, agent_tool_registry, provider)
+                .with_run_runtime(run_runtime.clone())
+                .with_execution_containment_context(Arc::clone(
+                    &execution_backend.containment_context,
+                ))?,
+            memory_subject,
+        )
+        .map_err(|_| AgentError::Config("memory initialization failed".to_string()))?
         .with_callbacks(Self::stream_callbacks(stream_handle_shared.clone()));
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
             &agent_inner,
             state_root.clone(),
-        ));
+        )?);
         let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
-        let recovered_background_jobs = recover_queued_background_jobs(8);
+        let recovered_background_jobs =
+            recover_queued_background_jobs(&state_root, run_runtime.as_ref(), 8);
         if recovered_background_jobs > 0 {
             tracing::info!(
                 "Recovered {} queued background job(s) from durable status queue",
@@ -124,6 +152,7 @@ impl App {
             state_root,
             config: Arc::new(config),
             agent,
+            run_runtime,
             tool_registry,
             cron_scheduler,
             tool_schemas,
@@ -156,5 +185,4 @@ impl App {
         app.ensure_session_stub_snapshot();
         Ok(app)
     }
-
 }

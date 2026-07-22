@@ -330,7 +330,7 @@ When using xAI as a provider (any base URL containing `x.ai`), Hermes automatica
 
 No configuration is needed — caching activates automatically when an xAI endpoint is detected and a session ID is available. This reduces latency and cost for multi-turn conversations.
 
-xAI also ships a dedicated TTS endpoint (`/v1/tts`). Select **xAI TTS** in `hermes tools` → Voice & TTS, or see the [Voice & TTS](../user-guide/features/tts.md#text-to-speech) page for config.
+xAI chat/reasoning is first-class; **xAI TTS is upstream-only** in the Rust runtime and fails closed if selected. Use OpenAI, ElevenLabs, MiniMax, Piper, or a custom command provider — see [Voice & TTS](../user-guide/features/tts.md#text-to-speech).
 
 ### Ollama Cloud — Managed Ollama Models, OAuth + API Key
 
@@ -1327,8 +1327,11 @@ You can switch between providers at any time with `hermes model` — no restart 
 | Browser automation | [Browserbase](https://browserbase.com/) | `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID` |
 | Image generation | [FAL](https://fal.ai/) | `FAL_KEY` |
 | Premium TTS voices | [ElevenLabs](https://elevenlabs.io/) | `ELEVENLABS_API_KEY` |
-| OpenAI TTS + voice transcription | [OpenAI](https://platform.openai.com/api-keys) | `VOICE_TOOLS_OPENAI_KEY` |
-| Mistral TTS + voice transcription | [Mistral](https://console.mistral.ai/) | `MISTRAL_API_KEY` |
+| OpenAI TTS + callable `transcription` tool | [OpenAI](https://platform.openai.com/api-keys) | `VOICE_TOOLS_OPENAI_KEY` (or `HERMES_OPENAI_API_KEY` / `OPENAI_API_KEY`) |
+| Groq `transcription` tool | [Groq](https://groq.com/) | `GROQ_API_KEY` |
+| Mistral `transcription` tool | [Mistral](https://mistral.ai/) | `MISTRAL_API_KEY` |
+| MiniMax TTS | [MiniMax](https://www.minimax.io/) | `MINIMAX_API_KEY` |
+| Local Piper TTS | Piper CLI + model | `PIPER_MODEL` (optional `PIPER_BINARY`) |
 | RL Training | [Tinker](https://tinker-console.thinkingmachines.ai/) + [WandB](https://wandb.ai/) | `TINKER_API_KEY`, `WANDB_API_KEY` |
 | Cross-session user modeling | [Honcho](https://honcho.dev/) | `HONCHO_API_KEY` |
 | Semantic long-term memory | [Supermemory](https://supermemory.ai) | `SUPERMEMORY_API_KEY` |

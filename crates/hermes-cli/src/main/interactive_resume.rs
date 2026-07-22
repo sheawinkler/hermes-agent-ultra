@@ -255,7 +255,10 @@ async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
 
 fn run_kanban(args: Vec<String>) -> Result<(), AgentError> {
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    println!("{}", hermes_cli::commands::run_kanban_command(&arg_refs)?);
+    println!(
+        "{}",
+        hermes_cli::commands::run_kanban_command(&hermes_config::hermes_home(), &arg_refs)?
+    );
     Ok(())
 }
 

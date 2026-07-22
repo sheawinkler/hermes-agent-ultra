@@ -58,12 +58,12 @@ Generated: `2026-07-08T09:23:41.617774+00:00`
 - `nonzero_tree_drift`: max_upstream_patch_missing remains nonzero in parity matrix
 - `nonzero_tree_drift`: max_files_only_upstream remains nonzero in parity matrix
 
-## Completed Sigma Harness Moves
+## Completed Harness Moves
 
 - **Coverage trend ledger**: `docs/parity/harness-trend-ledger.json`, `docs/parity/harness-trend-ledger.md`
 - **ContextLattice replay evidence index**: `docs/parity/contextlattice-replay-evidence-index.json`, `docs/parity/contextlattice-replay-evidence-index.md`
-- **Cross-version harness budget**: `docs/parity/harness-budget.json`, `docs/parity/harness-budget.md`
+- **Cross-version fixture-reference hygiene budget**: `docs/parity/harness-budget.json`, `docs/parity/harness-budget.md`
 
-## Next Sigma Harness Moves
+## Next Harness Moves
 
 - none

@@ -398,7 +398,7 @@ pub struct ApiServerAdapter {
 }
 
 impl ApiServerAdapter {
-    pub fn new(config: ApiServerConfig) -> Self {
+    pub fn new(config: ApiServerConfig, cron_scheduler: Arc<CronScheduler>) -> Self {
         let token = config.auth_token.clone().unwrap_or_default();
         let base = BasePlatformAdapter::new(if token.is_empty() {
             "api-server"
@@ -414,9 +414,7 @@ impl ApiServerAdapter {
             response_store: Arc::new(RwLock::new(ResponseStore::default())),
             run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
             run_store: Arc::new(RwLock::new(RunStore::default())),
-            cron_scheduler: Arc::new(hermes_cron::cron_scheduler_for_data_dir(
-                hermes_config::paths::cron_dir(),
-            )),
+            cron_scheduler,
             inbound_tx: Arc::new(RwLock::new(None)),
         }
     }

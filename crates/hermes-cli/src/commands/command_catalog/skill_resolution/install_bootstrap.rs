@@ -1,525 +1,745 @@
-async fn fetch_bundle_for_lock_entry(
-    client: &reqwest::Client,
-    entry: &SkillHubInstalledEntry,
-    taps: &[String],
-) -> Result<Vec<(String, Bytes)>, AgentError> {
-    match entry.source.as_str() {
-        "official" => {
-            let resolved = resolve_official_skill_source(client, &entry.identifier).await?;
-            fetch_skill_files_from_github(client, &resolved).await
-        }
-        "skills.sh" | "skills-sh" => {
-            let id = canonicalize_skills_sh_identifier(&entry.identifier);
-            let resolved = resolve_skills_sh_source(client, &id).await?;
-            fetch_skill_files_from_github(client, &resolved).await
-        }
-        "lobehub" => fetch_lobehub_skill_files(client, &entry.identifier).await,
-        "clawhub" => fetch_clawhub_skill_files(client, &entry.identifier, None).await,
-        "claude-marketplace" => {
-            let resolved = resolve_claude_marketplace_skill(client, &entry.identifier).await?;
-            fetch_skill_files_from_github(client, &resolved).await
-        }
-        "tap" => {
-            if let Some((repo, skill_dir)) = parse_repo_skill_identifier(&entry.identifier) {
-                let branch = github_default_branch(client, &repo).await?;
-                return fetch_skill_files_from_github(
-                    client,
-                    &ResolvedSkillSource {
-                        repo,
-                        branch,
-                        skill_dir,
-                    },
-                )
-                .await;
-            }
-            let resolved = resolve_skill_via_taps(client, taps, &entry.name).await?;
-            fetch_skill_files_from_github(client, &resolved).await
-        }
-        "github" => {
-            if let Some((repo, maybe_branch, skill_dir)) =
-                parse_explicit_github_skill(&entry.identifier)
-            {
-                let branch = if let Some(branch) = maybe_branch {
-                    branch
-                } else {
-                    github_default_branch(client, &repo).await?
-                };
-                return fetch_skill_files_from_github(
-                    client,
-                    &ResolvedSkillSource {
-                        repo,
-                        branch,
-                        skill_dir,
-                    },
-                )
-                .await;
-            }
-            if let Some((repo, skill_dir)) = parse_repo_skill_identifier(&entry.identifier) {
-                let branch = github_default_branch(client, &repo).await?;
-                return fetch_skill_files_from_github(
-                    client,
-                    &ResolvedSkillSource {
-                        repo,
-                        branch,
-                        skill_dir,
-                    },
-                )
-                .await;
-            }
-            let resolved =
-                resolve_skill_in_repo(client, &entry.identifier, &entry.name, None).await?;
-            fetch_skill_files_from_github(client, &resolved).await
-        }
-        other => {
-            if let Ok(hit) =
-                resolve_skill_via_registry_index(client, &entry.identifier, Some(other)).await
-            {
-                return match hit.install_source {
-                    RegistryInstallSource::GitRepo(source) => {
-                        let branch = github_default_branch(client, &source.repo).await?;
-                        fetch_skill_files_from_github(
-                            client,
-                            &ResolvedSkillSource { branch, ..source },
-                        )
-                        .await
-                    }
-                    RegistryInstallSource::LobeRegistry { slug } => {
-                        fetch_lobehub_skill_files(client, &slug).await
-                    }
-                    RegistryInstallSource::ClawRegistry { slug, version } => {
-                        fetch_clawhub_skill_files(client, &slug, version.as_deref()).await
-                    }
-                };
-            }
-            Err(AgentError::Config(format!(
-                "Unknown hub source '{}' for installed skill '{}'",
-                entry.source, entry.name
-            )))
-        }
-    }
+#[derive(Debug, Clone)]
+struct SkillInstallMaterial {
+    install_name: String,
+    manifest: hermes_skills::SkillPackageManifestV2,
+    files: Vec<(String, Bytes)>,
 }
 
-fn install_skill_files(
-    skills_dir: &std::path::Path,
-    install_name: &str,
-    files: &[(String, Bytes)],
-) -> Result<std::path::PathBuf, AgentError> {
-    skill_guard_scan_bundle(files)?;
-
-    std::fs::create_dir_all(skills_dir)
-        .map_err(|e| AgentError::Io(format!("Failed to create skills dir: {}", e)))?;
-
-    let target = skills_dir.join(install_name);
-    if target.exists() {
-        std::fs::remove_dir_all(&target)
-            .map_err(|e| AgentError::Io(format!("Failed to remove existing skill dir: {}", e)))?;
-    }
-    std::fs::create_dir_all(&target)
-        .map_err(|e| AgentError::Io(format!("Failed to create skill dir: {}", e)))?;
-
-    for (rel_path, bytes) in files {
-        ensure_safe_relative_path(rel_path)?;
-        let output = target.join(rel_path);
-        if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| AgentError::Io(format!("Failed to create parent dirs: {}", e)))?;
-        }
-        std::fs::write(&output, bytes)
-            .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", output.display(), e)))?;
-    }
-
-    let skill_md = target.join("SKILL.md");
-    if !skill_md.exists() {
-        return Err(AgentError::Config(format!(
-            "Installed skill is missing SKILL.md at {}",
-            skill_md.display()
-        )));
-    }
-
-    Ok(target)
+#[derive(Debug)]
+struct SkillUninstallResult {
+    removed: Option<hermes_skills::SkillLockEntryV2>,
+    cleanup_error: Option<String>,
 }
 
-fn skill_auto_bootstrap_enabled() -> bool {
-    !std::env::var("HERMES_SKILL_AUTO_BOOTSTRAP")
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "no" | "off"
-            )
-        })
+fn trust_error(context: &str, error: impl std::fmt::Display) -> AgentError {
+    AgentError::Config(format!("{context}: {error}"))
 }
 
-fn skill_bootstrap_force_confirmed() -> bool {
-    std::env::var("HERMES_SKILL_BOOTSTRAP_ASSUME_YES")
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        || std::env::var("HERMES_SKILL_BOOTSTRAP_FORCE")
-            .ok()
-            .is_some_and(|value| {
-                matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-}
-
-fn prompt_bootstrap_yes_no(prompt: &str, default_yes: bool) -> bool {
-    use std::io::Write as _;
-    print!("{}", prompt);
-    let _ = std::io::stdout().flush();
-    let mut buf = String::new();
-    if std::io::stdin().read_line(&mut buf).is_err() {
-        return default_yes;
-    }
-    let answer = buf.trim().to_ascii_lowercase();
-    if answer.is_empty() {
-        return default_yes;
-    }
-    matches!(answer.as_str(), "y" | "yes")
-}
-
-fn push_bootstrap_command_if_present(commands: &mut Vec<String>, raw: Option<&str>) {
-    if let Some(raw) = raw {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            commands.push(trimmed.to_string());
-        }
-    }
-}
-
-fn collect_bootstrap_commands_from_value(value: &serde_json::Value, out: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(s) => push_bootstrap_command_if_present(out, Some(s)),
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    push_bootstrap_command_if_present(out, Some(s));
-                }
-            }
-        }
-        serde_json::Value::Object(map) => {
-            push_bootstrap_command_if_present(out, map.get("command").and_then(|v| v.as_str()));
-            if let Some(commands) = map.get("commands") {
-                collect_bootstrap_commands_from_value(commands, out);
-            }
-            if let Some(script) = map.get("script").and_then(|v| v.as_str()) {
-                let script = script.trim();
-                if !script.is_empty() {
-                    if script.ends_with(".py") {
-                        out.push(format!("python3 {}", script));
-                    } else {
-                        out.push(format!("bash {}", script));
-                    }
-                }
-            }
-            if let Some(scripts) = map.get("scripts").and_then(|v| v.as_array()) {
-                for script in scripts {
-                    if let Some(script) = script.as_str() {
-                        let script = script.trim();
-                        if script.is_empty() {
-                            continue;
-                        }
-                        if script.ends_with(".py") {
-                            out.push(format!("python3 {}", script));
-                        } else {
-                            out.push(format!("bash {}", script));
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn parse_skill_bootstrap_plan(
-    files: &[(String, Bytes)],
-) -> Result<Option<SkillBootstrapPlan>, AgentError> {
-    let skill_md = files
-        .iter()
-        .find_map(|(path, bytes)| {
-            if path == "SKILL.md" {
-                Some(bytes)
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| AgentError::Config("Installed skill payload is missing SKILL.md".into()))?;
-
-    let content = std::str::from_utf8(skill_md)
-        .map_err(|e| AgentError::Config(format!("Installed SKILL.md is not valid UTF-8: {}", e)))?;
-    let (frontmatter, _body) = hermes_tools::tools::skill_utils::parse_frontmatter(content);
-
-    let mut commands = Vec::new();
-    for key in [
-        "bootstrap",
-        "setup",
-        "install",
-        "bootstrap_command",
-        "setup_command",
-        "install_command",
-        "bootstrap_commands",
-        "setup_commands",
-        "install_commands",
-    ] {
-        if let Some(value) = frontmatter.get(key) {
-            collect_bootstrap_commands_from_value(value, &mut commands);
-        }
-    }
-
-    let mut dedup = HashSet::new();
-    let normalized: Vec<String> = commands
-        .into_iter()
-        .filter_map(|cmd| {
-            let trimmed = cmd.trim().to_string();
-            if trimmed.is_empty() || !dedup.insert(trimmed.clone()) {
-                None
-            } else {
-                Some(trimmed)
-            }
-        })
-        .collect();
-
-    if normalized.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(SkillBootstrapPlan {
-            commands: normalized,
-        }))
-    }
-}
-
-fn is_allowed_bootstrap_executable(executable: &str) -> bool {
-    let normalized = executable
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(executable)
-        .trim()
-        .to_ascii_lowercase();
-    SKILL_BOOTSTRAP_ALLOWED_EXECUTABLES
-        .iter()
-        .any(|allowed| *allowed == normalized)
-}
-
-fn parse_bootstrap_command(raw: &str) -> Result<ParsedBootstrapCommand, AgentError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(AgentError::Config(
-            "Bootstrap command cannot be empty".to_string(),
-        ));
-    }
-    if trimmed.len() > 2048 {
-        return Err(AgentError::Config(
-            "Bootstrap command is too long (>2048 bytes)".to_string(),
-        ));
-    }
-
-    // Deliberately block shell control operators and substitutions.
-    let forbidden = Regex::new(r"[`\n\r;]|&&|\|\||\||>>?|<<?|\$\(").expect("valid regex");
-    if forbidden.is_match(trimmed) {
-        return Err(AgentError::Config(format!(
-            "Blocked bootstrap command (contains forbidden shell operators): {}",
-            trimmed
-        )));
-    }
-
-    let mut tokens = shlex::split(trimmed).ok_or_else(|| {
-        AgentError::Config(format!(
-            "Unable to parse bootstrap command safely: {}",
-            trimmed
+fn ensure_private_skill_root(path: &Path) -> Result<(), AgentError> {
+    std::fs::create_dir_all(path).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to create skill root '{}': {error}",
+            path.display()
         ))
     })?;
-    if tokens.is_empty() {
-        return Err(AgentError::Config(
-            "Bootstrap command parsed to no executable".to_string(),
-        ));
-    }
-
-    let executable = tokens.remove(0);
-    if executable.contains('/') || executable.contains('\\') {
-        let path = Path::new(&executable);
-        if path.is_absolute() {
-            return Err(AgentError::Config(format!(
-                "Bootstrap executable must be relative (got absolute path): {}",
-                executable
-            )));
-        }
-        ensure_safe_relative_path(&executable)?;
-        if executable.ends_with(".sh") {
-            let mut args = vec![executable];
-            args.extend(tokens);
-            return Ok(ParsedBootstrapCommand {
-                display: trimmed.to_string(),
-                executable: "bash".to_string(),
-                args,
-            });
-        }
-        if executable.ends_with(".py") {
-            let mut args = vec![executable];
-            args.extend(tokens);
-            return Ok(ParsedBootstrapCommand {
-                display: trimmed.to_string(),
-                executable: "python3".to_string(),
-                args,
-            });
-        }
-    } else if !is_allowed_bootstrap_executable(&executable) {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to inspect skill root '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(AgentError::Config(format!(
-            "Bootstrap executable '{}' is not in the allowlist",
-            executable
+            "Skill root '{}' must be a regular non-symlink directory",
+            path.display()
         )));
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| {
+                AgentError::Io(format!(
+                    "Failed to restrict skill root '{}': {error}",
+                    path.display()
+                ))
+            },
+        )?;
+    }
+    Ok(())
+}
+const REMOTE_TRUST_ROOT_FILE_NAME: &str = "remote-trust-root.json";
+const REMOTE_TRUST_AUDIT_FILE_NAME: &str = "remote-keyring-audit.json";
+const LOCAL_OWNER_KEYRING_FILE_NAME: &str = "local-owner-keyring.json";
 
-    Ok(ParsedBootstrapCommand {
-        display: trimmed.to_string(),
-        executable,
-        args: tokens,
+#[derive(Debug, Clone)]
+struct CliSkillTrustAuthorityFiles {
+    directory: PathBuf,
+    remote_root_file: PathBuf,
+    remote_audit_file: PathBuf,
+    local_owner_keyring_file: PathBuf,
+}
+
+fn cli_skill_trust_authority_files(
+    skills_root: &Path,
+    authority_dir: Option<&Path>,
+) -> Result<CliSkillTrustAuthorityFiles, AgentError> {
+    let authority_dir = authority_dir.ok_or_else(|| {
+        AgentError::Config(
+            "Verified skill operations require --authority-dir <absolute-owner-only-directory>"
+                .to_string(),
+        )
+    })?;
+    if !authority_dir.is_absolute() {
+        return Err(AgentError::Config(
+            "Skill authority directory must be an absolute path".to_string(),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(authority_dir).map_err(|error| {
+        AgentError::Config(format!(
+            "Skill authority directory '{}' is unavailable: {error}",
+            authority_dir.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(AgentError::Config(format!(
+            "Skill authority directory '{}' must be a regular non-symlink directory",
+            authority_dir.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(AgentError::Config(format!(
+                "Skill authority directory '{}' must be owner-only",
+                authority_dir.display()
+            )));
+        }
+    }
+    let directory = std::fs::canonicalize(authority_dir).map_err(|error| {
+        AgentError::Config(format!(
+            "Failed to canonicalize skill authority directory '{}': {error}",
+            authority_dir.display()
+        ))
+    })?;
+    let canonical_skills_root = std::fs::canonicalize(skills_root).map_err(|error| {
+        AgentError::Config(format!(
+            "Skills root '{}' must exist before loading authority paths: {error}",
+            skills_root.display()
+        ))
+    })?;
+    if directory.starts_with(&canonical_skills_root) {
+        return Err(AgentError::Config(
+            "Skill authority directory must live outside the mutable skills root".to_string(),
+        ));
+    }
+    Ok(CliSkillTrustAuthorityFiles {
+        remote_root_file: directory.join(REMOTE_TRUST_ROOT_FILE_NAME),
+        remote_audit_file: directory.join(REMOTE_TRUST_AUDIT_FILE_NAME),
+        local_owner_keyring_file: directory.join(LOCAL_OWNER_KEYRING_FILE_NAME),
+        directory,
     })
 }
 
-async fn execute_bootstrap_command(
-    skill_dir: &Path,
-    command: &ParsedBootstrapCommand,
-) -> Result<(), AgentError> {
-    let exec_path = if command.executable.contains('/') || command.executable.contains('\\') {
-        skill_dir.join(&command.executable)
-    } else {
-        PathBuf::from(&command.executable)
-    };
-
-    let mut process = tokio::process::Command::new(&exec_path);
-    process
-        .args(&command.args)
-        .current_dir(skill_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    process.suppress_windows_console();
-    let output = process.output().await.map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to execute bootstrap command '{}': {}",
-            command.display, e
-        ))
+fn ensure_cli_skill_authority_directory(
+    skills_root: &Path,
+    authority_dir: Option<&Path>,
+) -> Result<CliSkillTrustAuthorityFiles, AgentError> {
+    ensure_private_skill_root(skills_root)?;
+    let authority_dir = authority_dir.ok_or_else(|| {
+        AgentError::Config(
+            "Trust provisioning requires --authority-dir <absolute-owner-only-directory>"
+                .to_string(),
+        )
     })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if output.status.success() {
-        if !stdout.is_empty() {
-            println!(
-                "    stdout: {}",
-                stdout.lines().take(3).collect::<Vec<_>>().join(" | ")
-            );
-        }
-        Ok(())
-    } else {
-        Err(AgentError::Config(format!(
-            "Bootstrap command failed (exit={}): {}\n{}\n{}",
-            output.status,
-            command.display,
-            if stdout.is_empty() { "" } else { "stdout:" },
-            if stdout.is_empty() {
-                stderr
-            } else if stderr.is_empty() {
-                stdout
-            } else {
-                format!("{}\nstderr:\n{}", stdout, stderr)
+    if !authority_dir.is_absolute() {
+        return Err(AgentError::Config(
+            "Skill authority directory must be an absolute path".to_string(),
+        ));
+    }
+    match std::fs::symlink_metadata(authority_dir) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(AgentError::Config(format!(
+                    "Skill authority directory '{}' must be a regular non-symlink directory",
+                    authority_dir.display()
+                )));
             }
-        )))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = authority_dir.parent().ok_or_else(|| {
+                AgentError::Config("Skill authority directory has no parent".to_string())
+            })?;
+            let parent_metadata = std::fs::symlink_metadata(parent).map_err(|error| {
+                AgentError::Config(format!(
+                    "Skill authority parent '{}' is unavailable: {error}",
+                    parent.display()
+                ))
+            })?;
+            if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+                return Err(AgentError::Config(format!(
+                    "Skill authority parent '{}' must be a regular directory",
+                    parent.display()
+                )));
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt as _;
+                let mut builder = std::fs::DirBuilder::new();
+                builder.mode(0o700);
+                builder.create(authority_dir).map_err(|error| {
+                    AgentError::Io(format!(
+                        "Failed to create owner-only skill authority directory '{}': {error}",
+                        authority_dir.display()
+                    ))
+                })?;
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::create_dir(authority_dir).map_err(|error| {
+                    AgentError::Io(format!(
+                        "Failed to create skill authority directory '{}': {error}",
+                        authority_dir.display()
+                    ))
+                })?;
+            }
+        }
+        Err(error) => {
+            return Err(AgentError::Io(format!(
+                "Failed to inspect skill authority directory '{}': {error}",
+                authority_dir.display()
+            )));
+        }
+    }
+    cli_skill_trust_authority_files(skills_root, Some(authority_dir))
+}
+
+fn initialize_empty_local_owner_keyring(
+    skills_root: &Path,
+    authority: &CliSkillTrustAuthorityFiles,
+) -> Result<(), AgentError> {
+    match std::fs::symlink_metadata(&authority.local_owner_keyring_file) {
+        Ok(_) => {
+            let existing = hermes_skills::load_local_owner_keyring_file(
+                skills_root,
+                &authority.local_owner_keyring_file,
+            )
+            .map_err(|error| trust_error("Invalid existing local owner keyring", error))?;
+            if !existing.keys.is_empty() {
+                return Err(AgentError::Config(
+                    "Refusing to overwrite a non-empty local owner keyring".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let empty = hermes_skills::LocalOwnerKeyring::new(Vec::new())
+                .map_err(|error| trust_error("Failed to initialize local owner keyring", error))?;
+            hermes_skills::store_local_owner_keyring_file(
+                skills_root,
+                &authority.local_owner_keyring_file,
+                &empty,
+            )
+            .map_err(|error| trust_error("Failed to store local owner keyring", error))
+        }
+        Err(error) => Err(AgentError::Io(format!(
+            "Failed to inspect local owner keyring '{}': {error}",
+            authority.local_owner_keyring_file.display()
+        ))),
     }
 }
 
-async fn maybe_run_skill_bootstrap(
-    install_name: &str,
-    skill_dir: &Path,
-    files: &[(String, Bytes)],
+fn ensure_local_owner_keyring_exists(
+    skills_root: &Path,
+    authority: &CliSkillTrustAuthorityFiles,
 ) -> Result<(), AgentError> {
-    if !skill_auto_bootstrap_enabled() {
-        println!("Skill bootstrap skipped: HERMES_SKILL_AUTO_BOOTSTRAP=0.");
-        return Ok(());
-    }
-
-    let Some(plan) = parse_skill_bootstrap_plan(files)? else {
-        return Ok(());
-    };
-
-    let mut runnable: Vec<(ParsedBootstrapCommand, hermes_tools::ApprovalDecision)> = Vec::new();
-    let mut blocked: Vec<(String, String)> = Vec::new();
-    for raw in plan.commands {
-        match parse_bootstrap_command(&raw) {
-            Ok(parsed) => {
-                let decision = hermes_tools::check_approval(&parsed.display);
-                if matches!(decision, hermes_tools::ApprovalDecision::Denied) {
-                    blocked.push((
-                        parsed.display,
-                        "blocked by command approval policy".to_string(),
-                    ));
-                } else {
-                    runnable.push((parsed, decision));
-                }
-            }
-            Err(err) => blocked.push((raw, err.to_string())),
-        }
-    }
-
-    if runnable.is_empty() && blocked.is_empty() {
-        return Ok(());
-    }
-
-    println!(
-        "Detected bootstrap plan for '{}': {} runnable command(s), {} blocked.",
-        install_name,
-        runnable.len(),
-        blocked.len()
-    );
-    for (cmd, reason) in &blocked {
-        println!("  - blocked: `{}` ({})", cmd, reason);
-    }
-    if runnable.is_empty() {
-        return Ok(());
-    }
-
-    let has_confirm = runnable.iter().any(|(_, decision)| {
-        matches!(
-            decision,
-            hermes_tools::ApprovalDecision::RequiresConfirmation
+    match std::fs::symlink_metadata(&authority.local_owner_keyring_file) {
+        Ok(_) => hermes_skills::load_local_owner_keyring_file(
+            skills_root,
+            &authority.local_owner_keyring_file,
         )
-    });
-    let force_yes = skill_bootstrap_force_confirmed();
-    if has_confirm && !force_yes {
-        let proceed = prompt_bootstrap_yes_no(
-            "Run bootstrap commands that require installer confirmation now? [Y/n]: ",
-            true,
-        );
-        if !proceed {
-            println!("Skipped bootstrap execution.");
-            return Ok(());
+        .map(|_| ())
+        .map_err(|error| trust_error("Invalid existing local owner keyring", error)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let empty = hermes_skills::LocalOwnerKeyring::new(Vec::new())
+                .map_err(|error| trust_error("Failed to initialize local owner keyring", error))?;
+            hermes_skills::store_local_owner_keyring_file(
+                skills_root,
+                &authority.local_owner_keyring_file,
+                &empty,
+            )
+            .map_err(|error| trust_error("Failed to store local owner keyring", error))
         }
+        Err(error) => Err(AgentError::Io(format!(
+            "Failed to inspect local owner keyring '{}': {error}",
+            authority.local_owner_keyring_file.display()
+        ))),
     }
+}
 
-    for (command, decision) in runnable {
-        if matches!(
-            decision,
-            hermes_tools::ApprovalDecision::RequiresConfirmation
-        ) && !force_yes
-        {
-            println!("  • running (confirmed): {}", command.display);
-        } else if matches!(decision, hermes_tools::ApprovalDecision::Approved) {
-            println!("  • running: {}", command.display);
-        } else if !force_yes {
-            println!("  • skipped: {} (confirmation required)", command.display);
-            continue;
-        } else {
-            println!("  • running (forced): {}", command.display);
-        }
-        execute_bootstrap_command(skill_dir, &command).await?;
+fn load_cli_skill_trust_authority_paths(
+    skills_root: &Path,
+    authority_dir: Option<&Path>,
+) -> Result<hermes_skills::SkillTrustAuthorityPaths, AgentError> {
+    let authority = cli_skill_trust_authority_files(skills_root, authority_dir)?;
+    hermes_skills::SkillTrustAuthorityPaths::new(
+        skills_root.to_path_buf(),
+        authority.remote_root_file,
+        authority.remote_audit_file,
+        authority.local_owner_keyring_file,
+    )
+    .map_err(|error| trust_error("Invalid external skill trust authority", error))
+}
+
+fn load_cli_skill_trust_verifier(
+    skills_root: &Path,
+    authority_dir: Option<&Path>,
+    requires_remote_trust: bool,
+) -> Result<hermes_skills::SkillTrustVerifier, AgentError> {
+    let authority = cli_skill_trust_authority_files(skills_root, authority_dir)?;
+    let local_owner_keys =
+        hermes_skills::load_local_owner_keyring_file(skills_root, &authority.local_owner_keyring_file)
+            .map_err(|error| trust_error("Invalid protected local owner keyring", error))?
+            .keys;
+    if requires_remote_trust {
+        hermes_skills::SkillTrustAuthorityPaths::new(
+            skills_root.to_path_buf(),
+            authority.remote_root_file,
+            authority.remote_audit_file,
+            authority.local_owner_keyring_file,
+        )
+        .map_err(|error| trust_error("Invalid external skill trust authority", error))?
+        .build_verifier(
+            hermes_skills::SkillTrustPolicy::default(),
+            std::collections::BTreeMap::new(),
+        )
+        .map_err(|error| trust_error("Invalid anchored remote skill trust configuration", error))
+    } else {
+        hermes_skills::SkillTrustVerifier::for_skill_root_with_local_owner_keys(
+            skills_root,
+            hermes_skills::SkillTrustPolicy::default(),
+            std::collections::BTreeMap::new(),
+            local_owner_keys,
+        )
+        .map_err(|error| trust_error("Invalid local skill trust configuration", error))
     }
+}
 
+
+fn ensure_safe_install_name(install_name: &str) -> Result<(), AgentError> {
+    let normalized = hermes_skills::normalize_relative_package_path(Path::new(install_name))
+        .map_err(|error| trust_error("Invalid skill install path", error))?;
+    if normalized != install_name || install_name.contains('/') {
+        return Err(AgentError::Config(format!(
+            "Skill install path must be one safe directory name: {install_name}"
+        )));
+    }
     Ok(())
+}
+
+fn load_v2_skill_lock(skills_root: &Path) -> Result<hermes_skills::SkillLockV2, AgentError> {
+    hermes_skills::load_lock(skills_root)
+        .map_err(|error| trust_error("Skill lock is not a valid v2 lock", error))
+}
+
+fn bootstrap_requested(extra: Option<&str>) -> bool {
+    skills_extra_has_flag(extra, "--bootstrap")
+}
+
+fn refuse_unsafe_bootstrap(requested: bool) -> Result<(), AgentError> {
+    if requested {
+        return Err(AgentError::Config(
+            "Bootstrap was refused: no policy/sandbox handoff is available to the CLI; no command was executed"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn install_verified_skill_material(
+    skills_root: &Path,
+    material: SkillInstallMaterial,
+    authority_paths: &hermes_skills::SkillTrustAuthorityPaths,
+    bootstrap: bool,
+) -> Result<hermes_skills::SkillAdmission, AgentError> {
+    if material.install_name != material.manifest.identity.name {
+        return Err(AgentError::Config(format!(
+            "Resolved skill name '{}' does not match signed package identity '{}'",
+            material.install_name, material.manifest.identity.name
+        )));
+    }
+    refuse_unsafe_bootstrap(bootstrap)?;
+    let files = material
+        .files
+        .into_iter()
+        .map(|(relative_path, bytes)| {
+            hermes_skills::LocalPackageFile::new(relative_path, bytes.to_vec())
+        })
+        .collect::<Vec<_>>();
+    hermes_skills::FileSkillStore::new(skills_root.to_path_buf())
+        .with_authority_paths(authority_paths.clone())
+        .install_signed_remote_package(material.manifest, &files, false)
+        .map_err(|error| trust_error("Verified remote skill install was rejected", error))
+}
+
+fn uninstall_verified_skill(
+    skills_root: &Path,
+    install_name: &str,
+) -> Result<SkillUninstallResult, AgentError> {
+    ensure_safe_install_name(install_name)?;
+    let mut lock = load_v2_skill_lock(skills_root)?;
+    let mut removed = None;
+    lock.packages.retain(|entry| {
+        if entry.manifest.identity.name == install_name || entry.install_path == install_name {
+            removed = Some(entry.clone());
+            false
+        } else {
+            true
+        }
+    });
+    if removed.is_none() {
+        return Ok(SkillUninstallResult {
+            removed: None,
+            cleanup_error: None,
+        });
+    }
+    hermes_skills::store_lock(skills_root, &lock)
+        .map_err(|error| trust_error("Failed to remove skill from v2 lock", error))?;
+
+    let target = hermes_skills::normalize_relative_package_path(Path::new(&removed
+        .as_ref()
+        .expect("removed entry checked above")
+        .install_path))
+    .map(|relative| skills_root.join(relative))
+    .map_err(|error| trust_error("Invalid v2 skill install path", error))?;
+    let cleanup_error = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(&target)
+            .err()
+            .map(|error| error.to_string()),
+        Ok(_) => std::fs::remove_dir_all(&target)
+            .err()
+            .map(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(error.to_string()),
+    };
+    Ok(SkillUninstallResult {
+        removed,
+        cleanup_error,
+    })
+}
+
+fn skill_package_trust_label(manifest: &hermes_skills::SkillPackageManifestV2) -> String {
+    match &manifest.proof {
+        hermes_skills::SkillPackageProof::RemoteSignature(signature) => {
+            format!("remote-signed:key={}", signature.key_id)
+        }
+        hermes_skills::SkillPackageProof::EmbeddedManifest { .. } => {
+            "embedded-manifest".to_string()
+        }
+        hermes_skills::SkillPackageProof::LocalOwnerAttestation(attestation) => {
+            format!(
+                "local-attested:owner={}:key={}",
+                attestation.owner_id, attestation.key_id
+            )
+        }
+        hermes_skills::SkillPackageProof::PendingOwnerAttestation(_) => {
+            "local-attestation-pending".to_string()
+        }
+    }
+}
+
+fn skill_extra_value(extra: Option<&str>, flag: &str) -> Result<Option<String>, AgentError> {
+    let Some(extra) = extra else {
+        return Ok(None);
+    };
+    let tokens = shlex::split(extra).ok_or_else(|| {
+        AgentError::Config("Unable to parse skill command --extra arguments".to_string())
+    })?;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if let Some(value) = token.strip_prefix(&format!("{flag}=")) {
+            if value.trim().is_empty() {
+                return Err(AgentError::Config(format!("{flag} requires a value")));
+            }
+            return Ok(Some(value.to_string()));
+        }
+        if token == flag {
+            let value = tokens.get(index + 1).ok_or_else(|| {
+                AgentError::Config(format!("{flag} requires a value"))
+            })?;
+            if value.trim().is_empty() || value.starts_with("--") {
+                return Err(AgentError::Config(format!("{flag} requires a value")));
+            }
+            return Ok(Some(value.to_string()));
+        }
+        index += 1;
+    }
+    Ok(None)
+}
+
+fn load_remote_skill_manifest(
+    extra: Option<&str>,
+) -> Result<hermes_skills::SkillPackageManifestV2, AgentError> {
+    let manifest_path = skill_extra_value(extra, "--manifest")?.ok_or_else(|| {
+        AgentError::Config(
+            "Remote installs require --extra '--manifest <signed-manifest.json>'".to_string(),
+        )
+    })?;
+    let path = PathBuf::from(manifest_path);
+    let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to inspect signed remote manifest '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(AgentError::Config(format!(
+            "Signed remote manifest '{}' must be a regular file",
+            path.display()
+        )));
+    }
+    let bytes = std::fs::read(&path).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to read signed remote manifest '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let manifest = hermes_skills::parse_package_manifest(&bytes).map_err(|error| {
+        AgentError::Config(format!(
+            "Invalid signed remote manifest '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if manifest.source != hermes_skills::SkillPackageSource::Remote
+        || !matches!(
+            &manifest.proof,
+            hermes_skills::SkillPackageProof::RemoteSignature(_)
+        )
+    {
+        return Err(AgentError::Config(
+            "Remote installs require a manifest with a detached remote signature".to_string(),
+        ));
+    }
+    Ok(manifest)
+}
+
+fn validate_remote_manifest_source(
+    manifest: &hermes_skills::SkillPackageManifestV2,
+    origin: &str,
+    immutable_revision: &str,
+) -> Result<(), AgentError> {
+    if manifest.source != hermes_skills::SkillPackageSource::Remote {
+        return Err(AgentError::Config(
+            "A remote source cannot be relabeled as local-authored or embedded".to_string(),
+        ));
+    }
+    if manifest.identity.origin != origin {
+        return Err(AgentError::Config(format!(
+            "Signed manifest origin mismatch: expected '{origin}', got '{}'",
+            manifest.identity.origin
+        )));
+    }
+    if manifest.identity.immutable_source_revision != immutable_revision {
+        return Err(AgentError::Config(format!(
+            "Signed manifest immutable revision mismatch: expected '{immutable_revision}', got '{}'",
+            manifest.identity.immutable_source_revision
+        )));
+    }
+    Ok(())
+}
+
+
+fn load_cli_skill_revocations(
+    skills_root: &Path,
+) -> Result<hermes_skills::SignedSkillRevocationList, AgentError> {
+    hermes_skills::load_revocations(skills_root)
+        .map_err(|error| trust_error("Invalid signed skill revocation list", error))
+}
+
+fn parse_local_skill_source(spec: &str) -> Result<Option<(PathBuf, String)>, AgentError> {
+    let Some(path_and_query) = spec.strip_prefix("file://") else {
+        return Ok(None);
+    };
+    let (path, query) = path_and_query.split_once('?').ok_or_else(|| {
+        AgentError::Config(
+            "Local skill sources require ?revision=sha256:<content-digest>".to_string(),
+        )
+    })?;
+    let revision = query
+        .strip_prefix("revision=")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            AgentError::Config(
+                "Local skill sources require exactly ?revision=sha256:<content-digest>"
+                    .to_string(),
+            )
+        })?
+        .to_string();
+    if !revision.starts_with("sha256:")
+        || revision.len() != "sha256:".len() + 64
+        || !revision["sha256:".len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(AgentError::Config(
+            "Local skill source revision must be a full sha256 content digest".to_string(),
+        ));
+    }
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(AgentError::Config(
+            "Local skill source must use an absolute file:// path".to_string(),
+        ));
+    }
+    Ok(Some((path, revision.to_ascii_lowercase())))
+}
+
+fn collect_local_skill_files(
+    root: &Path,
+) -> Result<Vec<(String, Bytes)>, AgentError> {
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to inspect local skill source '{}': {error}",
+            root.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(AgentError::Config(format!(
+            "Local skill source '{}' must be a regular directory",
+            root.display()
+        )));
+    }
+
+    fn collect(
+        root: &Path,
+        directory: &Path,
+        files: &mut Vec<(String, Bytes)>,
+    ) -> Result<(), AgentError> {
+        for entry in std::fs::read_dir(directory).map_err(|error| {
+            AgentError::Io(format!(
+                "Failed to read local skill directory '{}': {error}",
+                directory.display()
+            ))
+        })? {
+            let entry = entry.map_err(|error| {
+                AgentError::Io(format!(
+                    "Failed to inspect local skill directory entry '{}': {error}",
+                    directory.display()
+                ))
+            })?;
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+                AgentError::Io(format!(
+                    "Failed to inspect local skill path '{}': {error}",
+                    path.display()
+                ))
+            })?;
+            if metadata.file_type().is_symlink() {
+                return Err(AgentError::Config(format!(
+                    "Local skill source contains a symlink: {}",
+                    path.display()
+                )));
+            }
+            if metadata.is_dir() {
+                collect(root, &path, files)?;
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err(AgentError::Config(format!(
+                    "Local skill source contains a non-regular file: {}",
+                    path.display()
+                )));
+            }
+            let relative = path.strip_prefix(root).map_err(|error| {
+                AgentError::Config(format!(
+                    "Failed to calculate local skill relative path: {error}"
+                ))
+            })?;
+            let normalized = hermes_skills::normalize_relative_package_path(relative)
+                .map_err(|error| trust_error("Invalid local skill package path", error))?;
+            let bytes = std::fs::read(&path).map_err(|error| {
+                AgentError::Io(format!(
+                    "Failed to read local skill file '{}': {error}",
+                    path.display()
+                ))
+            })?;
+            files.push((normalized, Bytes::from(bytes)));
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(root, root, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(files)
+}
+
+fn install_local_authored_skill(
+    skills_root: &Path,
+    install_name: &str,
+    declared_revision: &str,
+    owner_id: &str,
+    files: Vec<(String, Bytes)>,
+    owner_key_file: &Path,
+    owner_public_keyring_file: &Path,
+    owner_key_id: &str,
+    bootstrap: bool,
+) -> Result<hermes_skills::SkillPackageManifestV2, AgentError> {
+    if owner_id.trim().is_empty() {
+        return Err(AgentError::Config(
+            "Local author attestation requires a non-empty owner ID".to_string(),
+        ));
+    }
+    if bootstrap {
+        return Err(AgentError::Config(
+            "Bootstrap is unavailable for local-authored packages".to_string(),
+        ));
+    }
+    ensure_safe_install_name(install_name)?;
+
+    let package_files = files
+        .into_iter()
+        .map(|(relative_path, bytes)| {
+            hermes_skills::LocalPackageFile::new(relative_path, bytes.to_vec())
+        })
+        .collect::<Vec<_>>();
+    let staging_store = hermes_skills::FileSkillStore::new(skills_root.to_path_buf());
+    staging_store
+        .stage_local_package(install_name, Path::new(install_name), &package_files)
+        .map_err(|error| trust_error("Failed to stage local skill package", error))?;
+    let mut manifest = staging_store
+        .pending_local_manifest(install_name)
+        .map_err(|error| trust_error("Failed to load staged local skill manifest", error))?
+        .ok_or_else(|| {
+            AgentError::Config("Local skill staging did not produce a pending manifest".to_string())
+        })?;
+    if manifest.identity.content_digest != declared_revision {
+        return Err(AgentError::Config(format!(
+            "Local skill source revision mismatch: expected {declared_revision}, got {}",
+            manifest.identity.content_digest
+        )));
+    }
+
+    let owner_keyring =
+        hermes_skills::load_local_owner_keyring_file(skills_root, owner_public_keyring_file)
+            .map_err(|error| trust_error("Failed to load protected local owner keyring", error))?;
+    if !owner_keyring
+        .keys
+        .iter()
+        .any(|key| key.owner_id == owner_id && key.key_id == owner_key_id)
+    {
+        return Err(AgentError::Config(
+            "Local owner/key ID is not present in the protected local owner keyring".to_string(),
+        ));
+    }
+    let owner_signer = hermes_skills::LocalOwnerSigningKey::load_owner_private_key_file(
+        skills_root,
+        owner_key_file,
+    )
+    .map_err(|error| trust_error("Failed to load local owner signing key", error))?;
+    let attestation = owner_signer
+        .sign_local_manifest(
+            &mut manifest,
+            owner_id,
+            owner_key_id,
+            format!("manual-{}", uuid::Uuid::new_v4()),
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .map_err(|error| trust_error("Failed to sign local owner attestation", error))?;
+    let promotion_store = hermes_skills::FileSkillStore::new(skills_root.to_path_buf())
+        .with_trusted_local_owner_keys(owner_keyring.keys);
+    promotion_store
+        .attest_local_skill(install_name, attestation)
+        .map_err(|error| trust_error("Failed to promote local owner-attested package", error))?;
+    hermes_skills::load_lock(skills_root)
+        .map_err(|error| trust_error("Failed to load promoted local package lock", error))?
+        .packages
+        .into_iter()
+        .find(|entry| entry.manifest.identity.name == install_name)
+        .map(|entry| entry.manifest)
+        .ok_or_else(|| {
+            AgentError::Config("Promoted local package is absent from the v2 lock".to_string())
+        })
 }

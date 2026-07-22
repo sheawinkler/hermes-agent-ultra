@@ -1,22 +1,30 @@
-# ContextLattice Replay Evidence Index
+# ContextLattice Fixture-Reference Evidence Index
 
-Generated: `2026-07-03T20:16:19.312670+00:00`
+Generated: `2026-07-19T00:53:42.937344+00:00`
+
+## Authority and Scope
+
+- Coverage scope: `fixture_reference_regression`
+- Capability-promotion authority: `false`
+- Production complete: `false`
+- Registry/fixture entries and their referenced Rust tests preserve regression coverage only. They do not establish an implemented product capability or executable protocol, client, or chaos evidence.
 
 ## Gate State
 
-- Release gate: **PASS**
+- Release gate: **FAIL**
 - CI gate: **FAIL**
 - Test coverage gate: **PASS**
-- SOTA harness gate: **PASS**
-- Queue pending: `0`
+- Fixture/reference regression gate: **PASS**
+- Production complete: `false`
+- Queue pending: `1067`
 
-## Replay Evidence Groups
+## Fixture-Reference Evidence Groups
 
-| Domain | Status | Fixtures | Rust tests | ContextLattice topic |
+| Domain | Regression status | Fixture references | Rust tests | ContextLattice topic |
 | --- | --- | ---: | ---: | --- |
-| `workflow-replay-and-terminal-snapshots` | `covered_by_rust_contracts` | 1 | 2 | `hermes-agent-ultra/parity/sota/workflow-replay-and-terminal-snapshots` |
-| `protocol-differential-contracts` | `covered_by_rust_contracts` | 1 | 2 | `hermes-agent-ultra/parity/sota/protocol-differential-contracts` |
-| `fault-injection-matrix` | `covered_by_rust_contracts` | 1 | 8 | `hermes-agent-ultra/parity/sota/fault-injection-matrix` |
+| `workflow-replay-and-terminal-snapshots` | `fixture_reference_regression_coverage` | 1 | 2 | `hermes-agent-ultra/parity/sota/workflow-replay-and-terminal-snapshots` |
+| `protocol-differential-contracts` | `fixture_reference_regression_coverage` | 1 | 2 | `hermes-agent-ultra/parity/sota/protocol-differential-contracts` |
+| `fault-injection-matrix` | `fixture_reference_regression_coverage` | 1 | 8 | `hermes-agent-ultra/parity/sota/fault-injection-matrix` |
 
 ## Checkpoint Template
 

@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use hermes_agent::provider_profiles;
-    use wiremock::matchers::{body_partial_json, method, path};
+    use std::time::Duration;
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -59,6 +61,912 @@ mod tests {
             }
         });
         format!("event: response.output_text.delta\ndata: {delta}\n\nevent: response.completed\ndata: {completed}\n\n")
+    }
+
+    /// An ephemeral loopback server whose every mounted route is bounded to one request.
+    struct BoundedLoopback {
+        server: MockServer,
+    }
+
+    impl BoundedLoopback {
+        async fn start() -> Self {
+            Self {
+                server: MockServer::start().await,
+            }
+        }
+
+        fn uri(&self) -> String {
+            self.server.uri()
+        }
+
+        async fn expect_json_post(
+            &self,
+            request_path: &str,
+            auth_header: &str,
+            auth_value: &str,
+            expected_body: serde_json::Value,
+            response: ResponseTemplate,
+        ) {
+            Mock::given(method("POST"))
+                .and(path(request_path))
+                .and(header(auth_header, auth_value))
+                .and(header("content-type", "application/json"))
+                .and(body_partial_json(expected_body))
+                .respond_with(response)
+                .expect(1)
+                .mount(&self.server)
+                .await;
+        }
+
+        async fn assert_single_json_request(&self) -> serde_json::Value {
+            self.server.verify().await;
+            let requests = self
+                .server
+                .received_requests()
+                .await
+                .expect("loopback request inspection");
+            assert_eq!(requests.len(), 1, "expected exactly one request");
+            serde_json::from_slice(&requests[0].body).expect("loopback request JSON")
+        }
+
+    }
+
+    fn openai_success_response(model: &str, text: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "application/json")
+            .set_body_string(
+                serde_json::json!({
+                    "id": "chatcmpl-loopback",
+                    "object": "chat.completion",
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": text},
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2
+                    }
+                })
+                .to_string(),
+            )
+    }
+
+    fn anthropic_success_response(model: &str, text: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "application/json")
+            .set_body_string(
+                serde_json::json!({
+                    "id": "msg-loopback",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [{"type": "text", "text": text}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 1, "output_tokens": 1}
+                })
+                .to_string(),
+            )
+    }
+
+    fn configured_provider(
+        provider: &str,
+        api_key: Option<&str>,
+        base_url: impl Into<String>,
+        request_timeout_seconds: Option<f64>,
+    ) -> GatewayConfig {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            provider.to_string(),
+            LlmProviderConfig {
+                api_key: api_key.map(ToString::to_string),
+                base_url: Some(base_url.into()),
+                request_timeout_seconds,
+                ..LlmProviderConfig::default()
+            },
+        );
+        config
+    }
+
+    fn provider_protocol_env_vars() -> &'static [&'static str] {
+        &[
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "NOUS_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "OPENROUTER_API_KEY",
+            "HERMES_QWEN_OAUTH_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "HERMES_GEMINI_OAUTH_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+        ]
+    }
+
+    fn build_with_clean_resolver(
+        config: &GatewayConfig,
+        model: &str,
+        resolver_provider: &str,
+        token: Option<&str>,
+    ) -> std::sync::Arc<dyn hermes_core::LlmProvider> {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(provider_protocol_env_vars());
+        for key in provider_protocol_env_vars() {
+            std::env::remove_var(key);
+        }
+        let resolver = |provider: &str| {
+            if provider == resolver_provider {
+                token.map(ToString::to_string)
+            } else {
+                None
+            }
+        };
+        build_provider_with_auth_resolver(config, model, Some(&resolver))
+    }
+
+    async fn minimal_chat(
+        provider: &std::sync::Arc<dyn hermes_core::LlmProvider>,
+        model: &str,
+    ) -> Result<hermes_core::LlmResponse, AgentError> {
+        provider
+            .chat_completion(
+                &[hermes_core::Message::user("protocol ping")],
+                &[],
+                Some(8),
+                None,
+                Some(model),
+                None,
+            )
+            .await
+    }
+
+    fn assert_openai_request_body(body: &serde_json::Value, model: &str) {
+        assert_eq!(body["model"], model);
+        assert_eq!(
+            body["messages"],
+            serde_json::json!([{"role": "user", "content": "protocol ping"}])
+        );
+    }
+
+    fn assert_error_redacts(error: &AgentError, sentinel: &str) {
+        assert!(
+            !error.to_string().contains(sentinel),
+            "credential leaked through Display: {error}"
+        );
+        assert!(
+            !format!("{error:?}").contains(sentinel),
+            "credential leaked through Debug: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_openai_api_key_protocol() {
+        const TOKEN: &str = "provider-runtime-openai-sentinel";
+        let model = "gpt-4o-mini";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                openai_success_response(model, "openai-ok"),
+            )
+            .await;
+
+        let config = configured_provider("openai", Some(TOKEN), loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("openai:{model}").as_str(),
+            "unused",
+            None,
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("OpenAI API-key loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("openai-ok"));
+        assert_openai_request_body(&loopback.assert_single_json_request().await, model);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_codex_chatgpt_sse_protocol() {
+        let model = "gpt-5.5";
+        let token = chatgpt_oauth_fixture_token("provider-runtime-codex-account");
+        let auth = format!("Bearer {token}");
+        let loopback = BoundedLoopback::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(header("authorization", auth.as_str()))
+            .and(header("content-type", "application/json"))
+            .and(header("accept", "text/event-stream"))
+            .and(header("originator", "codex_cli_rs"))
+            .and(header(
+                "chatgpt-account-id",
+                "provider-runtime-codex-account",
+            ))
+            .and(header("openai-beta", "responses=2026-02-06"))
+            .and(body_partial_json(serde_json::json!({
+                "model": model,
+                "input": [{
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "protocol ping"}]
+                }],
+                "max_output_tokens": 8,
+                "stream": true,
+                "store": false
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(codex_sse_response_body("codex-ok", model)),
+            )
+            .expect(1)
+            .mount(&loopback.server)
+            .await;
+
+        let config = configured_provider("codex", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("codex:{model}").as_str(),
+            "codex",
+            Some(token.as_str()),
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("Codex ChatGPT loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("codex-ok"));
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["model"], model);
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+        assert_eq!(body["max_output_tokens"], 8);
+        assert_eq!(
+            body["input"],
+            serde_json::json!([{
+                "role": "user",
+                "content": [{"type": "input_text", "text": "protocol ping"}]
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_codex_chatgpt_explicit_stream() {
+        let model = "gpt-5.5";
+        let token = chatgpt_oauth_fixture_token("provider-runtime-codex-stream-account");
+        let auth = format!("Bearer {token}");
+        let loopback = BoundedLoopback::start().await;
+        loopback
+            .expect_json_post(
+                "/responses",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "input": [{
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "protocol ping"}]
+                    }],
+                    "max_output_tokens": 8,
+                    "stream": true,
+                    "store": false
+                }),
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(codex_sse_response_body("codex-stream-ok", model)),
+            )
+            .await;
+        let config = configured_provider("codex", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("codex:{model}").as_str(),
+            "codex",
+            Some(token.as_str()),
+        );
+
+        let chunks = provider
+            .chat_completion_stream(
+                &[hermes_core::Message::user("protocol ping")],
+                &[],
+                Some(8),
+                None,
+                Some(model),
+                None,
+            )
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(chunks.len(), 2, "expected delta and terminal chunks");
+        let delta = chunks[0].as_ref().expect("stream delta");
+        assert_eq!(
+            delta
+                .delta
+                .as_ref()
+                .and_then(|chunk| chunk.content.as_deref()),
+            Some("codex-stream-ok")
+        );
+        assert_eq!(
+            chunks[1]
+                .as_ref()
+                .expect("stream completion")
+                .finish_reason
+                .as_deref(),
+            Some("stop")
+        );
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_nous_protocol() {
+        const TOKEN: &str = "provider-runtime-nous-sentinel";
+        let model = "openai/gpt-4o-mini";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                openai_success_response(model, "nous-ok"),
+            )
+            .await;
+
+        let config = configured_provider("nous", Some(TOKEN), loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("nous:{model}").as_str(),
+            "unused",
+            None,
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("Nous loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("nous-ok"));
+        assert_openai_request_body(&loopback.assert_single_json_request().await, model);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_anthropic_protocol() {
+        const TOKEN: &str = "provider-runtime-anthropic-sentinel";
+        let model = "claude-sonnet-4-5";
+        let loopback = BoundedLoopback::start().await;
+        loopback
+            .expect_json_post(
+                "/v1/messages",
+                "x-api-key",
+                TOKEN,
+                serde_json::json!({
+                    "model": model,
+                    "max_tokens": 8,
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"type": "text", "text": "protocol ping"}]
+                    }]
+                }),
+                anthropic_success_response(model, "anthropic-ok"),
+            )
+            .await;
+
+        let config = configured_provider("anthropic", Some(TOKEN), loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("anthropic:{model}").as_str(),
+            "unused",
+            None,
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("Anthropic loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("anthropic-ok"));
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["model"], model);
+        assert_eq!(body["max_tokens"], 8);
+        assert_eq!(
+            body["messages"],
+            serde_json::json!([{
+                "role": "user",
+                "content": [{"type": "text", "text": "protocol ping"}]
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_openrouter_protocol_with_configured_base_url() {
+        const TOKEN: &str = "provider-runtime-openrouter-sentinel";
+        let model = "openai/gpt-4o-mini";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/configured-openrouter/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                openai_success_response(model, "openrouter-ok"),
+            )
+            .await;
+
+        let config = configured_provider(
+            "openrouter",
+            Some(TOKEN),
+            format!("{}/configured-openrouter", loopback.uri()),
+            None,
+        );
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("openrouter:{model}").as_str(),
+            "unused",
+            None,
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("OpenRouter configured-base-url loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("openrouter-ok"));
+        assert_openai_request_body(&loopback.assert_single_json_request().await, model);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_qwen_oauth_compatible_protocol() {
+        const TOKEN: &str = "provider-runtime-qwen-oauth-sentinel";
+        let model = "qwen-plus";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"type": "text", "text": "protocol ping"}]
+                    }],
+                    "vl_high_resolution_images": true
+                }),
+                openai_success_response(model, "qwen-ok"),
+            )
+            .await;
+
+        let config = configured_provider("qwen-cli", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("qwen-cli:{model}").as_str(),
+            "qwen-cli",
+            Some(TOKEN),
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("Qwen OAuth-compatible loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("qwen-ok"));
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["model"], model);
+        assert_eq!(
+            body["messages"],
+            serde_json::json!([{
+                "role": "user",
+                "content": [{"type": "text", "text": "protocol ping"}]
+            }])
+        );
+        assert_eq!(body["vl_high_resolution_images"], true);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_exercises_gemini_cli_oauth_compatible_protocol() {
+        const TOKEN: &str = "provider-runtime-gemini-cli-oauth-sentinel";
+        let model = "gemini-2.5-flash";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                openai_success_response(model, "gemini-cli-ok"),
+            )
+            .await;
+
+        let config = configured_provider("gemini-cli", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("gemini-cli:{model}").as_str(),
+            "gemini-cli",
+            Some(TOKEN),
+        );
+        let response = minimal_chat(&provider, model)
+            .await
+            .expect("Gemini CLI OAuth-compatible loopback completion");
+
+        assert_eq!(response.message.content.as_deref(), Some("gemini-cli-ok"));
+        assert_openai_request_body(&loopback.assert_single_json_request().await, model);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_missing_oauth_token_before_request() {
+        let config = configured_provider(
+            "qwen-cli",
+            None,
+            "https://provider-auth-missing.invalid/v1",
+            None,
+        );
+        let provider = build_with_clean_resolver(&config, "qwen-cli:qwen-plus", "qwen-cli", None);
+        let error = minimal_chat(&provider, "qwen-plus")
+            .await
+            .expect_err("missing OAuth token must reject before transport");
+
+        assert!(error.to_string().contains("NoBackendProvider"), "{error}");
+        assert!(error.to_string().contains("no LLM backend configured"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_401_and_403_without_credential_leaks() {
+        const OPENAI_TOKEN: &str = "provider-runtime-openai-401-sentinel";
+        let openai_model = "gpt-4o-mini";
+        let openai_loopback = BoundedLoopback::start().await;
+        let openai_auth = format!("Bearer {OPENAI_TOKEN}");
+        openai_loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                openai_auth.as_str(),
+                serde_json::json!({
+                    "model": openai_model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                ResponseTemplate::new(401)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"{"error":"unauthorized"}"#),
+            )
+            .await;
+        let openai_config =
+            configured_provider("openai", Some(OPENAI_TOKEN), openai_loopback.uri(), None);
+        let openai_provider = build_with_clean_resolver(
+            &openai_config,
+            format!("openai:{openai_model}").as_str(),
+            "unused",
+            None,
+        );
+        let openai_error = minimal_chat(&openai_provider, openai_model)
+            .await
+            .expect_err("401 must reject");
+        assert!(openai_error.to_string().contains("401"), "{openai_error}");
+        assert_error_redacts(&openai_error, OPENAI_TOKEN);
+        assert_openai_request_body(
+            &openai_loopback.assert_single_json_request().await,
+            openai_model,
+        );
+
+        const ANTHROPIC_TOKEN: &str = "provider-runtime-anthropic-403-sentinel";
+        let anthropic_model = "claude-sonnet-4-5";
+        let anthropic_loopback = BoundedLoopback::start().await;
+        anthropic_loopback
+            .expect_json_post(
+                "/v1/messages",
+                "x-api-key",
+                ANTHROPIC_TOKEN,
+                serde_json::json!({
+                    "model": anthropic_model,
+                    "max_tokens": 8,
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"type": "text", "text": "protocol ping"}]
+                    }]
+                }),
+                ResponseTemplate::new(403)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"{"error":"forbidden"}"#),
+            )
+            .await;
+        let anthropic_config = configured_provider(
+            "anthropic",
+            Some(ANTHROPIC_TOKEN),
+            anthropic_loopback.uri(),
+            None,
+        );
+        let anthropic_provider = build_with_clean_resolver(
+            &anthropic_config,
+            format!("anthropic:{anthropic_model}").as_str(),
+            "unused",
+            None,
+        );
+        let anthropic_error = minimal_chat(&anthropic_provider, anthropic_model)
+            .await
+            .expect_err("403 must reject");
+        assert!(
+            anthropic_error.to_string().contains("403"),
+            "{anthropic_error}"
+        );
+        assert_error_redacts(&anthropic_error, ANTHROPIC_TOKEN);
+        let body = anthropic_loopback.assert_single_json_request().await;
+        assert_eq!(body["model"], anthropic_model);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_malformed_success_without_credential_leak() {
+        const TOKEN: &str = "provider-runtime-malformed-qwen-sentinel";
+        let model = "qwen-plus";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"type": "text", "text": "protocol ping"}]
+                    }],
+                    "vl_high_resolution_images": true
+                }),
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{not-json"),
+            )
+            .await;
+        let config = configured_provider("qwen-cli", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("qwen-cli:{model}").as_str(),
+            "qwen-cli",
+            Some(TOKEN),
+        );
+        let error = minimal_chat(&provider, model)
+            .await
+            .expect_err("malformed success response must reject");
+
+        assert!(error.to_string().contains("Failed to parse response"), "{error}");
+        assert_error_redacts(&error, TOKEN);
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["model"], model);
+        assert_eq!(body["vl_high_resolution_images"], true);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_empty_codex_stream_without_completed_frame() {
+        let model = "gpt-5.5";
+        let token = chatgpt_oauth_fixture_token("provider-runtime-empty-stream-account");
+        let auth = format!("Bearer {token}");
+        let loopback = BoundedLoopback::start().await;
+        loopback
+            .expect_json_post(
+                "/responses",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "input": [{
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "protocol ping"}]
+                    }],
+                    "stream": true,
+                    "store": false
+                }),
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(""),
+            )
+            .await;
+        let config = configured_provider("codex", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("codex:{model}").as_str(),
+            "codex",
+            Some(token.as_str()),
+        );
+        let error = minimal_chat(&provider, model)
+            .await
+            .expect_err("empty Codex stream must reject");
+
+        assert!(
+            error.to_string().contains("before any output"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains("without response.completed"),
+            "unexpected error: {error}"
+        );
+        assert_error_redacts(&error, token.as_str());
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_partial_codex_stream_without_completed_frame() {
+        let model = "gpt-5.5";
+        let token = chatgpt_oauth_fixture_token("provider-runtime-partial-stream-account");
+        let auth = format!("Bearer {token}");
+        let loopback = BoundedLoopback::start().await;
+        loopback
+            .expect_json_post(
+                "/responses",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "input": [{
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "protocol ping"}]
+                    }],
+                    "stream": true,
+                    "store": false
+                }),
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "event: response.output_text.delta\ndata: {\"delta\":\"partial\"}\n\n",
+                    ),
+            )
+            .await;
+        let config = configured_provider("codex", None, loopback.uri(), None);
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("codex:{model}").as_str(),
+            "codex",
+            Some(token.as_str()),
+        );
+        let error = minimal_chat(&provider, model)
+            .await
+            .expect_err("partial Codex stream must reject");
+
+        assert!(
+            error.to_string().contains("after partial output"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains("without response.completed"),
+            "unexpected error: {error}"
+        );
+        assert_error_redacts(&error, token.as_str());
+        let body = loopback.assert_single_json_request().await;
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+    }
+
+    #[tokio::test]
+    async fn provider_runtime_rejects_deterministic_timeout_without_credential_leak() {
+        const TOKEN: &str = "provider-runtime-timeout-sentinel";
+        let model = "gpt-4o-mini";
+        let loopback = BoundedLoopback::start().await;
+        let auth = format!("Bearer {TOKEN}");
+        loopback
+            .expect_json_post(
+                "/chat/completions",
+                "authorization",
+                auth.as_str(),
+                serde_json::json!({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "protocol ping"}]
+                }),
+                openai_success_response(model, "too-late").set_delay(Duration::from_millis(250)),
+            )
+            .await;
+        let config = configured_provider(
+            "openai",
+            Some(TOKEN),
+            loopback.uri(),
+            Some(0.01),
+        );
+        let provider = build_with_clean_resolver(
+            &config,
+            format!("openai:{model}").as_str(),
+            "unused",
+            None,
+        );
+        let error = minimal_chat(&provider, model)
+            .await
+            .expect_err("loopback delay must exceed configured timeout");
+
+        assert!(matches!(error, AgentError::Timeout(_)), "{error:?}");
+        assert_error_redacts(&error, TOKEN);
+        assert_openai_request_body(&loopback.assert_single_json_request().await, model);
+    }
+
+    #[test]
+    fn provider_auth_diagnostics_do_not_serialize_or_debug_secret_values() {
+        const DIRECT_SENTINEL: &str = "provider-runtime-diagnostic-direct-sentinel";
+        let direct_config = configured_provider(
+            "openai",
+            Some(DIRECT_SENTINEL),
+            "https://provider-auth-diagnostic.invalid/v1",
+            None,
+        );
+        let direct = provider_runtime_diagnostic(&direct_config, "openai:gpt-4o-mini");
+        let direct_matrix = provider_auth_diagnostic_matrix_with_auth_resolver(
+            &direct_config,
+            &[provider_auth_diagnostic_case(
+                "direct_redaction",
+                "openai:gpt-4o-mini",
+                "openai",
+                true,
+                Some("config.api_key"),
+                false,
+                false,
+            )],
+            None,
+        );
+        let direct_serialized =
+            serde_json::to_string(&direct_matrix).expect("serialize direct diagnostics");
+        assert!(!format!("{direct:?}").contains(DIRECT_SENTINEL));
+        assert!(!format!("{direct_matrix:?}").contains(DIRECT_SENTINEL));
+        assert!(!direct_serialized.contains(DIRECT_SENTINEL));
+
+        const OAUTH_SENTINEL: &str = "provider-runtime-diagnostic-oauth-sentinel";
+        let oauth_config = configured_provider(
+            "qwen-cli",
+            None,
+            "https://provider-auth-diagnostic.invalid/v1",
+            None,
+        );
+        let (oauth_debug, oauth_matrix_debug, oauth_serialized) = {
+            let _guard = env_test_lock();
+            let _env = EnvSnapshot::capture(provider_protocol_env_vars());
+            for key in provider_protocol_env_vars() {
+                std::env::remove_var(key);
+            }
+            let resolver = |provider: &str| {
+                if provider == "qwen-cli" {
+                    Some(OAUTH_SENTINEL.to_string())
+                } else {
+                    None
+                }
+            };
+            let diagnostic = provider_runtime_diagnostic_with_auth_resolver(
+                &oauth_config,
+                "qwen-cli:qwen-plus",
+                Some(&resolver),
+            );
+            let matrix = provider_auth_diagnostic_matrix_with_auth_resolver(
+                &oauth_config,
+                &[provider_auth_diagnostic_case(
+                    "oauth_redaction",
+                    "qwen-cli:qwen-plus",
+                    "qwen-oauth",
+                    true,
+                    Some("oauth_resolver:qwen-cli"),
+                    false,
+                    false,
+                )],
+                Some(&resolver),
+            );
+            (
+                format!("{diagnostic:?}"),
+                format!("{matrix:?}"),
+                serde_json::to_string(&matrix).expect("serialize OAuth diagnostics"),
+            )
+        };
+        assert!(!oauth_debug.contains(OAUTH_SENTINEL));
+        assert!(!oauth_matrix_debug.contains(OAUTH_SENTINEL));
+        assert!(!oauth_serialized.contains(OAUTH_SENTINEL));
     }
 
     #[tokio::test]
@@ -302,7 +1210,7 @@ mod tests {
         assert!(moa.local_no_key_allowed);
     }
 
-    fn provider_smoke_env_vars() -> &'static [&'static str] {
+    fn provider_diagnostic_env_vars() -> &'static [&'static str] {
         &[
             "HERMES_OPENAI_API_KEY",
             "OPENAI_API_KEY",
@@ -324,14 +1232,14 @@ mod tests {
     }
 
     #[test]
-    fn provider_auth_smoke_matrix_covers_requested_runtime_families() {
+    fn provider_auth_diagnostic_matrix_covers_requested_runtime_families() {
         let _guard = env_test_lock();
-        let _env = EnvSnapshot::capture(provider_smoke_env_vars());
-        for key in provider_smoke_env_vars() {
+        let _env = EnvSnapshot::capture(provider_diagnostic_env_vars());
+        for key in provider_diagnostic_env_vars() {
             std::env::remove_var(key);
         }
 
-        let matrix = deterministic_provider_auth_smoke_matrix();
+        let matrix = deterministic_provider_auth_diagnostic_matrix();
 
         assert!(matrix.pass, "{matrix:#?}");
         assert_eq!(matrix.summary.failed, 0);
@@ -385,17 +1293,17 @@ mod tests {
     }
 
     #[test]
-    fn provider_auth_smoke_matrix_reports_actionable_failures() {
+    fn provider_auth_diagnostic_matrix_reports_actionable_failures() {
         let _guard = env_test_lock();
-        let _env = EnvSnapshot::capture(provider_smoke_env_vars());
-        for key in provider_smoke_env_vars() {
+        let _env = EnvSnapshot::capture(provider_diagnostic_env_vars());
+        for key in provider_diagnostic_env_vars() {
             std::env::remove_var(key);
         }
 
         let cfg = GatewayConfig::default();
-        let matrix = provider_auth_smoke_matrix_with_auth_resolver(
+        let matrix = provider_auth_diagnostic_matrix_with_auth_resolver(
             &cfg,
-            &[provider_auth_smoke_case(
+            &[provider_auth_diagnostic_case(
                 "openrouter_missing_key",
                 "openrouter:anthropic/claude-sonnet-4.6",
                 "openrouter",

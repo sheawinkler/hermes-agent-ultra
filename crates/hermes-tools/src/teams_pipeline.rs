@@ -7,21 +7,55 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
+use parking_lot::Mutex;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use uuid::Uuid;
 
+use crate::bounded_subprocess::{
+    run_bounded_command_with_output_limit, BoundedCommandError, BoundedOutputDirectoryLimit,
+};
 use hermes_config::hermes_home;
-use hermes_core::{subprocess::CommandNoWindowExt, ToolError, ToolHandler};
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError};
 
-pub const DEFAULT_TEAMS_PIPELINE_STORE_FILENAME: &str = "teams_pipeline_store.json";
+pub const DEFAULT_TEAMS_PIPELINE_STORE_FILENAME: &str = "rust_teams_pipeline_store.json";
+const TEAMS_FFMPEG_TIMEOUT: Duration = Duration::from_secs(120);
+const TEAMS_FFMPEG_SEGMENT_SECONDS: u64 = 300;
+const TEAMS_FFMPEG_AUDIO_BITRATE: &str = "64k";
+const TEAMS_FFMPEG_AUDIO_BITRATE_BITS_PER_SECOND: u64 = 64_000;
+const MAX_TEAMS_RECORDING_BYTES: usize = 512 * 1024 * 1024;
+const MAX_TEAMS_TRANSCRIPT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_TEAMS_GRAPH_JSON_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TEAMS_GRAPH_PAGINATION_PAGES: usize = 32;
+const MAX_TEAMS_GRAPH_PAGINATION_ITEMS: usize = 4_096;
+const MAX_TEAMS_GRAPH_PAGINATION_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TEAMS_GRAPH_TOKEN_BYTES: usize = 64 * 1024;
+const MAX_TEAMS_GRAPH_ERROR_BYTES: usize = 64 * 1024;
+// OpenAI and Groq accept files below 25 MB. Keep a decimal margin for the
+// multipart envelope and use it for every selected STT route.
+const MAX_TEAMS_STT_UPLOAD_BYTES: u64 = 24_000_000;
+const MAX_TEAMS_AUDIO_SEGMENTS: usize = 128;
+// 64 kbps mono MP3 for every allowed five-minute segment, plus 1 MiB of
+// container overhead per segment. The running monitor kills ffmpeg before a
+// hostile timestamp stream can consume an unbounded amount of disk.
+const MAX_TEAMS_AUDIO_OUTPUT_BYTES: u64 = (MAX_TEAMS_AUDIO_SEGMENTS as u64
+    * TEAMS_FFMPEG_SEGMENT_SECONDS
+    * TEAMS_FFMPEG_AUDIO_BITRATE_BITS_PER_SECOND
+    / 8)
+    + (MAX_TEAMS_AUDIO_SEGMENTS as u64 * 1024 * 1024);
+// Sanitization below emits ASCII only, so this component cap is identical in
+// UTF-8 bytes and Windows UTF-16 code units.
+const MAX_SAFE_TEAMS_RECORDING_STEM_BYTES: usize = 128;
 
 pub const TERMINAL_PIPELINE_STATES: &[&str] = &["completed", "failed", "retry_scheduled"];
 pub const ACTIVE_PIPELINE_STATES: &[&str] = &[
@@ -31,9 +65,6 @@ pub const ACTIVE_PIPELINE_STATES: &[&str] = &[
     "downloading_recording",
     "transcribing_audio",
     "summarizing",
-    "writing_notion",
-    "writing_linear",
-    "sending_teams",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -52,15 +83,33 @@ pub enum TeamsPipelineError {
     Retryable(String),
     #[error("Teams pipeline artifact unavailable: {0}")]
     ArtifactNotFound(String),
-    #[error("Teams pipeline sink error: {0}")]
-    Sink(String),
     #[error("Microsoft Graph HTTP {status}: {message}")]
-    Graph { status: u16, message: String },
+    Graph {
+        status: u16,
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 }
 
 impl TeamsPipelineError {
     fn is_retryable(&self) -> bool {
         matches!(self, Self::Retryable(_) | Self::ArtifactNotFound(_))
+            || matches!(
+                self,
+                Self::Graph {
+                    status: 0 | 408 | 429 | 500..=u16::MAX,
+                    ..
+                }
+            )
+    }
+
+    fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::Graph {
+                retry_after_secs, ..
+            } => *retry_after_secs,
+            _ => None,
+        }
     }
 }
 
@@ -124,6 +173,14 @@ fn value_string(value: Option<&Value>) -> Option<String> {
     value.and_then(value_to_string)
 }
 
+fn parse_u64(value: Option<&Value>, default: u64) -> u64 {
+    match value {
+        Some(Value::Number(value)) => value.as_u64().unwrap_or(default),
+        Some(Value::String(value)) => value.trim().parse::<u64>().unwrap_or(default),
+        _ => default,
+    }
+}
+
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(value) => Some(value.trim().to_string()).filter(|v| !v.is_empty()),
@@ -135,6 +192,325 @@ fn value_to_string(value: &Value) -> Option<String> {
 
 fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     value.as_object().and_then(|object| object.get(key))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScopedTeamsArtifactResource {
+    organizer_user_id: String,
+    meeting_id: String,
+    artifact_type: String,
+    artifact_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TeamsNotificationIdentity {
+    tenant_id: String,
+    subscription_id: String,
+    change_type: String,
+    scoped_resource: ScopedTeamsArtifactResource,
+}
+
+fn stable_notification_identity(
+    notification: &Value,
+) -> TeamsPipelineResult<TeamsNotificationIdentity> {
+    let resource_data = object_field(notification, "resourceData")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let top_resource = value_string(object_field(notification, "resource"));
+    let data_resource = resource_data.get("@odata.id").and_then(value_to_string);
+    let top_scope = top_resource
+        .as_deref()
+        .map(parse_scoped_teams_artifact_resource)
+        .transpose()?
+        .flatten();
+    let data_scope = data_resource
+        .as_deref()
+        .map(parse_scoped_teams_artifact_resource)
+        .transpose()?
+        .flatten();
+    let scoped_resource = match (top_scope, data_scope) {
+        (Some(top), Some(data)) if top != data => {
+            return Err(TeamsPipelineError::Invalid(
+                "Graph notification resource and resourceData.@odata.id identify different Teams artifacts."
+                    .into(),
+            ));
+        }
+        (Some(scope), _) | (_, Some(scope)) => scope,
+        (None, None) => {
+            return Err(TeamsPipelineError::Invalid(
+                "Graph notification has no parseable scoped users/{organizer}/onlineMeetings/{meeting}/{artifact} resource."
+                    .into(),
+            ));
+        }
+    };
+    if let Some(resource_data_artifact_id) = resource_data.get("id").and_then(value_to_string) {
+        let resource_data_artifact_id = decode_resource_identifier(&resource_data_artifact_id)?;
+        if resource_data_artifact_id != scoped_resource.artifact_id {
+            return Err(TeamsPipelineError::Invalid(
+                "Graph notification resourceData.id does not match its scoped artifact id.".into(),
+            ));
+        }
+    }
+    if let Some(resource_data_meeting_id) = resource_data.get("meetingId").and_then(value_to_string)
+    {
+        let resource_data_meeting_id = decode_resource_identifier(&resource_data_meeting_id)?;
+        if resource_data_meeting_id != scoped_resource.meeting_id {
+            return Err(TeamsPipelineError::Invalid(
+                "Graph notification resourceData.meetingId does not match its scoped meeting id."
+                    .into(),
+            ));
+        }
+    }
+    if let Some(resource_data_organizer) = resource_data
+        .get("organizerUserId")
+        .and_then(value_to_string)
+    {
+        if normalize_organizer_user_id(&resource_data_organizer)?
+            != scoped_resource.organizer_user_id
+        {
+            return Err(TeamsPipelineError::Invalid(
+                "Graph notification resourceData.organizerUserId does not match its scoped organizer."
+                    .into(),
+            ));
+        }
+    }
+    let tenant_id = resource_data
+        .get("tenantId")
+        .and_then(value_to_string)
+        .or_else(|| value_string(object_field(notification, "tenantId")))
+        .ok_or_else(|| {
+            TeamsPipelineError::Invalid(
+                "Graph notification tenantId is required for idempotency.".into(),
+            )
+        })?;
+    let subscription_id = value_string(object_field(notification, "subscriptionId"))
+        .or_else(|| value_string(object_field(notification, "subscription_id")))
+        .ok_or_else(|| {
+            TeamsPipelineError::Invalid(
+                "Graph notification subscriptionId is required for idempotency.".into(),
+            )
+        })?;
+    let change_type = value_string(object_field(notification, "changeType"))
+        .ok_or_else(|| {
+            TeamsPipelineError::Invalid(
+                "Graph notification changeType is required for idempotency.".into(),
+            )
+        })?
+        .to_ascii_lowercase();
+    Ok(TeamsNotificationIdentity {
+        tenant_id,
+        subscription_id,
+        change_type,
+        scoped_resource,
+    })
+}
+
+fn stable_notification_receipt_key(
+    notification: &Value,
+) -> TeamsPipelineResult<(String, TeamsNotificationIdentity)> {
+    let identity = stable_notification_identity(notification)?;
+    let canonical = format!(
+        "tenant={}\nsubscription={}\nchange={}\norganizer={}\nmeeting={}\nartifact_type={}\nartifact={}",
+        identity.tenant_id,
+        identity.subscription_id,
+        identity.change_type,
+        identity.scoped_resource.organizer_user_id,
+        identity.scoped_resource.meeting_id,
+        identity.scoped_resource.artifact_type,
+        identity.scoped_resource.artifact_id,
+    );
+    let digest = Sha256::digest(canonical.as_bytes());
+    Ok((format!("graph:sha256:{}", hex::encode(digest)), identity))
+}
+
+fn normalize_organizer_user_id(value: &str) -> TeamsPipelineResult<String> {
+    Uuid::parse_str(value.trim())
+        .map(|identifier| identifier.to_string())
+        .map_err(|_| {
+            TeamsPipelineError::Invalid(
+                "Teams organizer_user_id must be a Microsoft Entra object-id UUID.".into(),
+            )
+        })
+}
+
+fn parse_scoped_teams_artifact_resource(
+    resource: &str,
+) -> TeamsPipelineResult<Option<ScopedTeamsArtifactResource>> {
+    let mut parts = resource
+        .trim()
+        .trim_start_matches('/')
+        .split('?')
+        .next()
+        .unwrap_or_default()
+        .split('/')
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>();
+    if parts
+        .first()
+        .is_some_and(|part| matches!(*part, "v1.0" | "beta"))
+    {
+        parts.remove(0);
+    }
+    let Some(users_index) = parts.iter().position(|part| *part == "users") else {
+        return Ok(None);
+    };
+    if users_index != 0 {
+        return Err(TeamsPipelineError::Invalid(
+            "Graph notification scoped resource must begin with users/{organizer}.".into(),
+        ));
+    }
+    let organizer = parts.get(1).ok_or_else(|| {
+        TeamsPipelineError::Invalid(
+            "Graph notification scoped resource has no organizer id.".into(),
+        )
+    })?;
+    let organizer_user_id = normalize_organizer_user_id(&decode_resource_identifier(organizer)?)?;
+    let (meeting_id, artifact_cursor) =
+        parse_scoped_resource_collection(&parts, 2, "onlineMeetings")?;
+    let artifact_component = parts.get(artifact_cursor).ok_or_else(|| {
+        TeamsPipelineError::Invalid(
+            "Graph notification scoped resource has no transcript or recording collection.".into(),
+        )
+    })?;
+    let artifact_type = if *artifact_component == "transcripts"
+        || artifact_component.starts_with("transcripts(")
+    {
+        "transcript"
+    } else if *artifact_component == "recordings" || artifact_component.starts_with("recordings(") {
+        "recording"
+    } else {
+        return Err(TeamsPipelineError::Invalid(
+            "Graph notification scoped resource must identify a transcript or recording artifact."
+                .into(),
+        ));
+    };
+    let collection = if artifact_type == "transcript" {
+        "transcripts"
+    } else {
+        "recordings"
+    };
+    let (artifact_id, after_artifact) =
+        parse_scoped_resource_collection(&parts, artifact_cursor, collection)?;
+    if parts
+        .get(after_artifact..)
+        .is_some_and(|remaining| !remaining.is_empty() && remaining != ["content"])
+    {
+        return Err(TeamsPipelineError::Invalid(
+            "Graph notification scoped resource has unsupported trailing path components.".into(),
+        ));
+    }
+    Ok(Some(ScopedTeamsArtifactResource {
+        organizer_user_id,
+        meeting_id,
+        artifact_type: artifact_type.into(),
+        artifact_id,
+    }))
+}
+
+fn parse_scoped_resource_collection(
+    parts: &[&str],
+    index: usize,
+    collection: &str,
+) -> TeamsPipelineResult<(String, usize)> {
+    let component = parts.get(index).ok_or_else(|| {
+        TeamsPipelineError::Invalid(format!(
+            "Graph notification resource has no {collection} collection."
+        ))
+    })?;
+    if *component == collection {
+        let identifier = parts.get(index + 1).ok_or_else(|| {
+            TeamsPipelineError::Invalid(format!(
+                "Graph notification resource has no {collection} identifier."
+            ))
+        })?;
+        return Ok((decode_resource_identifier(identifier)?, index + 2));
+    }
+    let prefix = format!("{collection}(");
+    if let Some(inside) = component
+        .strip_prefix(&prefix)
+        .and_then(|component| component.strip_suffix(')'))
+    {
+        let quoted = inside
+            .strip_prefix('\'')
+            .and_then(|inside| inside.strip_suffix('\''))
+            .ok_or_else(|| {
+                TeamsPipelineError::Invalid(format!(
+                    "Graph notification OData {collection} identifier must be single-quoted."
+                ))
+            })?;
+        return Ok((
+            decode_resource_identifier(&quoted.replace("''", "'"))?,
+            index + 1,
+        ));
+    }
+    Err(TeamsPipelineError::Invalid(format!(
+        "Graph notification resource expected {collection} collection."
+    )))
+}
+
+fn decode_resource_identifier(value: &str) -> TeamsPipelineResult<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(TeamsPipelineError::Invalid(
+            "Graph notification resource contains an empty identifier.".into(),
+        ));
+    }
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes
+                .get(index + 1)
+                .copied()
+                .and_then(hex_nibble)
+                .ok_or_else(|| {
+                    TeamsPipelineError::Invalid(
+                        "Graph notification resource has an invalid percent escape.".into(),
+                    )
+                })?;
+            let low = bytes
+                .get(index + 2)
+                .copied()
+                .and_then(hex_nibble)
+                .ok_or_else(|| {
+                    TeamsPipelineError::Invalid(
+                        "Graph notification resource has an invalid percent escape.".into(),
+                    )
+                })?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded)
+        .map_err(|_| {
+            TeamsPipelineError::Invalid(
+                "Graph notification resource identifier is not valid UTF-8.".into(),
+            )
+        })
+        .map(|value| value.trim().to_string())
+        .and_then(|value| {
+            if value.is_empty() {
+                Err(TeamsPipelineError::Invalid(
+                    "Graph notification resource contains an empty identifier.".into(),
+                ))
+            } else {
+                Ok(value)
+            }
+        })
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn parse_datetime_utc(value: &str) -> Option<DateTime<Utc>> {
@@ -241,16 +617,43 @@ pub struct GraphSubscription {
 }
 
 include!("teams_pipeline/store_records.rs");
-pub fn resolve_teams_pipeline_store_path(path: Option<&Path>) -> PathBuf {
-    if let Some(path) = path {
-        if !path.as_os_str().is_empty() {
-            return path.to_path_buf();
-        }
+pub fn resolve_teams_pipeline_store_path(path: Option<&Path>) -> TeamsPipelineResult<PathBuf> {
+    let selected = path
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| hermes_home().join(DEFAULT_TEAMS_PIPELINE_STORE_FILENAME));
+    let python_store = env_nonempty("MSGRAPH_WEBHOOK_STORE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| hermes_home().join("teams_pipeline_store.json"));
+    if comparable_store_path(&selected) == comparable_store_path(&python_store) {
+        return Err(TeamsPipelineError::Config(format!(
+            "Rust Teams CLI store {} overlaps the Python Teams webhook store {}; choose a distinct --store-path.",
+            selected.display(),
+            python_store.display()
+        )));
     }
-    if let Some(path) = env_nonempty("MSGRAPH_WEBHOOK_STORE_PATH") {
-        return PathBuf::from(path);
+    Ok(selected)
+}
+
+fn comparable_store_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    if let Ok(canonical) = std::fs::canonicalize(&absolute) {
+        return canonical;
     }
-    hermes_home().join(DEFAULT_TEAMS_PIPELINE_STORE_FILENAME)
+    let Some(file_name) = absolute.file_name() else {
+        return absolute;
+    };
+    absolute
+        .parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .map(|parent| parent.join(file_name))
+        .unwrap_or(absolute)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -262,9 +665,10 @@ pub struct TeamsPipelineConfig {
     pub ffmpeg_extract_audio: bool,
     pub transcript_min_chars: usize,
     pub tmp_dir: Option<PathBuf>,
-    pub notion: Option<Value>,
-    pub linear: Option<Value>,
-    pub teams_delivery: Option<Value>,
+    /// Maximum server Retry-After delay recorded for an operator; this
+    /// pipeline never dispatches retries automatically.
+    pub retry_after_cap_secs: u64,
+    pub retry_attempt_cap: u32,
 }
 
 impl Default for TeamsPipelineConfig {
@@ -277,20 +681,32 @@ impl Default for TeamsPipelineConfig {
             ffmpeg_extract_audio: true,
             transcript_min_chars: 80,
             tmp_dir: None,
-            notion: None,
-            linear: None,
-            teams_delivery: None,
+            retry_after_cap_secs: 3_600,
+            retry_attempt_cap: 5,
         }
     }
 }
 
 impl TeamsPipelineConfig {
-    pub fn from_value(value: Option<Value>) -> Self {
-        let Some(Value::Object(object)) = value else {
-            return Self::default();
+    pub fn from_value(value: Option<Value>) -> TeamsPipelineResult<Self> {
+        let Some(value) = value else {
+            return Ok(Self::default());
         };
+        let object = value.as_object().ok_or_else(|| {
+            TeamsPipelineError::Config("Teams pipeline config must be an object.".into())
+        })?;
+        let unsupported = ["notion", "linear", "teams_delivery"]
+            .into_iter()
+            .filter(|key| object.contains_key(*key))
+            .collect::<Vec<_>>();
+        if !unsupported.is_empty() {
+            return Err(TeamsPipelineError::Config(format!(
+                "External Teams sinks ({}) are unsupported in this Rust release; the optional source plugin is not packaged or verified.",
+                unsupported.join(", ")
+            )));
+        }
         let default = Self::default();
-        Self {
+        Ok(Self {
             transcript_preferred: parse_bool(
                 object.get("transcript_preferred"),
                 default.transcript_preferred,
@@ -313,19 +729,17 @@ impl TeamsPipelineConfig {
                 default.transcript_min_chars,
             ),
             tmp_dir: value_string(object.get("tmp_dir")).map(PathBuf::from),
-            notion: object
-                .get("notion")
-                .cloned()
-                .filter(|value| value.is_object()),
-            linear: object
-                .get("linear")
-                .cloned()
-                .filter(|value| value.is_object()),
-            teams_delivery: object
-                .get("teams_delivery")
-                .cloned()
-                .filter(|value| value.is_object()),
-        }
+            retry_after_cap_secs: parse_u64(
+                object.get("retry_after_cap_secs"),
+                default.retry_after_cap_secs,
+            )
+            .clamp(1, 86_400),
+            retry_attempt_cap: parse_u64(
+                object.get("retry_attempt_cap"),
+                u64::from(default.retry_attempt_cap),
+            )
+            .clamp(1, 100) as u32,
+        })
     }
 }
 
@@ -334,6 +748,7 @@ pub trait TeamsGraphBackend: Send + Sync {
     async fn resolve_meeting_reference(
         &self,
         meeting_id: Option<&str>,
+        organizer_user_id: Option<&str>,
         join_web_url: Option<&str>,
         tenant_id: Option<&str>,
     ) -> TeamsPipelineResult<TeamsMeetingRef>;
@@ -382,43 +797,12 @@ pub trait TeamsSummarizer: Send + Sync {
     ) -> TeamsPipelineResult<TeamsMeetingSummaryPayload>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TeamsSinkKind {
-    Notion,
-    Linear,
-    Teams,
-}
-
-impl TeamsSinkKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Notion => "notion",
-            Self::Linear => "linear",
-            Self::Teams => "teams",
-        }
-    }
-}
-
-#[async_trait]
-pub trait TeamsSinkWriter: Send + Sync {
-    async fn write_summary(
-        &self,
-        sink: TeamsSinkKind,
-        payload: &TeamsMeetingSummaryPayload,
-        config: &Value,
-        existing_record: Option<Value>,
-    ) -> TeamsPipelineResult<Value>;
-}
-
 pub struct TeamsMeetingPipeline {
     graph_backend: Arc<dyn TeamsGraphBackend>,
     store: Arc<TeamsPipelineStore>,
     config: TeamsPipelineConfig,
     transcriber: Arc<dyn TeamsTranscriber>,
     summarizer: Arc<dyn TeamsSummarizer>,
-    notion_writer: Option<Arc<dyn TeamsSinkWriter>>,
-    linear_writer: Option<Arc<dyn TeamsSinkWriter>>,
-    teams_sender: Option<Arc<dyn TeamsSinkWriter>>,
 }
 
 impl TeamsMeetingPipeline {
@@ -433,9 +817,6 @@ impl TeamsMeetingPipeline {
             config,
             transcriber: Arc::new(TranscriptionToolTeamsTranscriber),
             summarizer: Arc::new(HeuristicTeamsSummarizer),
-            notion_writer: None,
-            linear_writer: None,
-            teams_sender: None,
         }
     }
 
@@ -446,21 +827,6 @@ impl TeamsMeetingPipeline {
 
     pub fn with_summarizer(mut self, summarizer: Arc<dyn TeamsSummarizer>) -> Self {
         self.summarizer = summarizer;
-        self
-    }
-
-    pub fn with_notion_writer(mut self, writer: Arc<dyn TeamsSinkWriter>) -> Self {
-        self.notion_writer = Some(writer);
-        self
-    }
-
-    pub fn with_linear_writer(mut self, writer: Arc<dyn TeamsSinkWriter>) -> Self {
-        self.linear_writer = Some(writer);
-        self
-    }
-
-    pub fn with_teams_sender(mut self, writer: Arc<dyn TeamsSinkWriter>) -> Self {
-        self.teams_sender = Some(writer);
         self
     }
 
@@ -476,33 +842,21 @@ impl TeamsMeetingPipeline {
         &self,
         notification: Value,
     ) -> TeamsPipelineResult<TeamsMeetingPipelineJob> {
-        let event_id = TeamsPipelineStore::build_notification_receipt_key(&notification);
-        self.store
-            .record_notification_receipt(&event_id, Some(notification.clone()), None)?;
-        if let Some(existing) = self.find_job_by_dedupe_key(&event_id)? {
-            return Ok(existing);
-        }
+        let (event_id, identity) = stable_notification_receipt_key(&notification)?;
         let resource_data = object_field(&notification, "resourceData")
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let resource = value_string(object_field(&notification, "resource"));
-        let meeting_id = resource_data
-            .get("id")
-            .and_then(value_to_string)
-            .or_else(|| value_string(object_field(&notification, "meetingId")))
-            .or_else(|| {
-                resource
-                    .as_deref()
-                    .and_then(extract_meeting_id_from_resource)
-            })
-            .or(resource)
-            .unwrap_or_else(|| event_id.clone());
-        let mut metadata = Map::new();
-        metadata.insert("notification".into(), notification.clone());
-        if let Some(join_web_url) = resource_data.get("joinWebUrl").and_then(value_to_string) {
-            metadata.insert("join_web_url".into(), Value::String(join_web_url));
-        }
+        let mut metadata = Map::from_iter([
+            (
+                "notification_artifact_id".into(),
+                Value::String(identity.scoped_resource.artifact_id.clone()),
+            ),
+            (
+                "notification_artifact_type".into(),
+                Value::String(identity.scoped_resource.artifact_type.clone()),
+            ),
+        ]);
         if let Some(call_record_id) = resource_data
             .get("callRecordId")
             .and_then(value_to_string)
@@ -514,30 +868,27 @@ impl TeamsMeetingPipeline {
         let job = TeamsMeetingPipelineJob {
             job_id: format!("teams-job-{}", &job_suffix[..12]),
             event_id: event_id.clone(),
-            source_event_type: value_string(object_field(&notification, "changeType"))
-                .unwrap_or_else(|| "graph.notification".into()),
-            dedupe_key: event_id,
+            source_event_type: identity.change_type.clone(),
+            dedupe_key: event_id.clone(),
             status: "received".into(),
             retry_count: 0,
             created_at: None,
             updated_at: None,
             meeting_ref: Some(TeamsMeetingRef {
-                meeting_id,
-                organizer_user_id: None,
-                join_web_url: None,
+                meeting_id: identity.scoped_resource.meeting_id.clone(),
+                organizer_user_id: Some(identity.scoped_resource.organizer_user_id.clone()),
+                join_web_url: resource_data.get("joinWebUrl").and_then(value_to_string),
                 calendar_event_id: None,
                 thread_id: None,
-                tenant_id: resource_data
-                    .get("tenantId")
-                    .and_then(value_to_string)
-                    .or_else(|| value_string(object_field(&notification, "tenantId"))),
+                tenant_id: Some(identity.tenant_id.clone()),
                 metadata,
             }),
             selected_artifact_strategy: None,
             summary_payload: None,
             error_info: Map::new(),
         };
-        self.persist_job(job)
+        self.store
+            .create_notification_job(&event_id, &notification, job)
     }
 
     pub async fn run_notification(
@@ -611,21 +962,12 @@ impl TeamsMeetingPipeline {
         job.status = "resolving_meeting".into();
         job = self.persist_job(job)?;
 
-        let notification = meeting_ref
-            .metadata
-            .get("notification")
-            .cloned()
-            .unwrap_or(Value::Null);
         let resolved_meeting = self
             .graph_backend
             .resolve_meeting_reference(
                 Some(&meeting_ref.meeting_id),
-                meeting_ref.join_web_url.as_deref().or_else(|| {
-                    meeting_ref
-                        .metadata
-                        .get("join_web_url")
-                        .and_then(Value::as_str)
-                }),
+                meeting_ref.organizer_user_id.as_deref(),
+                meeting_ref.join_web_url.as_deref(),
                 meeting_ref.tenant_id.as_deref(),
             )
             .await?;
@@ -693,13 +1035,10 @@ impl TeamsMeetingPipeline {
             transcript
         };
 
-        let call_record_id =
-            value_string(object_field(&notification, "callRecordId")).or_else(|| {
-                meeting_ref
-                    .metadata
-                    .get("call_record_id")
-                    .and_then(value_to_string)
-            });
+        let call_record_id = meeting_ref
+            .metadata
+            .get("call_record_id")
+            .and_then(value_to_string);
         if let Some(call_record) = self
             .graph_backend
             .enrich_meeting_with_call_record(&resolved_meeting, call_record_id.as_deref())
@@ -722,53 +1061,8 @@ impl TeamsMeetingPipeline {
         job.summary_payload = Some(summary_payload.clone());
         job = self.persist_job(job)?;
 
-        self.write_sinks(&mut job, &summary_payload).await?;
         job.status = "completed".into();
         self.persist_job(job)
-    }
-
-    async fn write_sinks(
-        &self,
-        job: &mut TeamsMeetingPipelineJob,
-        payload: &TeamsMeetingSummaryPayload,
-    ) -> TeamsPipelineResult<()> {
-        if let (Some(config), Some(writer)) = (&self.config.notion, &self.notion_writer) {
-            if parse_bool(config.as_object().and_then(|o| o.get("enabled")), false) {
-                job.status = "writing_notion".into();
-                *job = self.persist_job(job.clone())?;
-                let sink_key = format!("notion:{}", payload.meeting_ref.meeting_id);
-                let existing = self.store.get_sink_record(&sink_key)?;
-                let result = writer
-                    .write_summary(TeamsSinkKind::Notion, payload, config, existing)
-                    .await?;
-                self.store.upsert_sink_record(&sink_key, result)?;
-            }
-        }
-        if let (Some(config), Some(writer)) = (&self.config.linear, &self.linear_writer) {
-            if parse_bool(config.as_object().and_then(|o| o.get("enabled")), false) {
-                job.status = "writing_linear".into();
-                *job = self.persist_job(job.clone())?;
-                let sink_key = format!("linear:{}", payload.meeting_ref.meeting_id);
-                let existing = self.store.get_sink_record(&sink_key)?;
-                let result = writer
-                    .write_summary(TeamsSinkKind::Linear, payload, config, existing)
-                    .await?;
-                self.store.upsert_sink_record(&sink_key, result)?;
-            }
-        }
-        if let (Some(config), Some(writer)) = (&self.config.teams_delivery, &self.teams_sender) {
-            if parse_bool(config.as_object().and_then(|o| o.get("enabled")), false) {
-                job.status = "sending_teams".into();
-                *job = self.persist_job(job.clone())?;
-                let sink_key = format!("teams:{}", payload.meeting_ref.meeting_id);
-                let existing = self.store.get_sink_record(&sink_key)?;
-                let result = writer
-                    .write_summary(TeamsSinkKind::Teams, payload, config, existing)
-                    .await?;
-                self.store.upsert_sink_record(&sink_key, result)?;
-            }
-        }
-        Ok(())
     }
 
     fn persist_job(
@@ -809,9 +1103,30 @@ fn error_type_name(error: &TeamsPipelineError) -> &'static str {
         TeamsPipelineError::Json(_) => "Json",
         TeamsPipelineError::Retryable(_) => "Retryable",
         TeamsPipelineError::ArtifactNotFound(_) => "ArtifactNotFound",
-        TeamsPipelineError::Sink(_) => "Sink",
         TeamsPipelineError::Graph { .. } => "Graph",
     }
+}
+
+fn append_teams_transcript_chunk(transcript: &mut String, chunk: &str) -> TeamsPipelineResult<()> {
+    let separator_bytes = usize::from(!transcript.is_empty());
+    let total_bytes = transcript
+        .len()
+        .checked_add(separator_bytes)
+        .and_then(|bytes| bytes.checked_add(chunk.len()))
+        .ok_or_else(|| {
+            TeamsPipelineError::Retryable("Teams transcript size overflowed its limit.".into())
+        })?;
+    if total_bytes > MAX_TEAMS_TRANSCRIPT_BYTES {
+        return Err(TeamsPipelineError::Retryable(format!(
+            "Combined STT transcript exceeds the {} byte limit.",
+            MAX_TEAMS_TRANSCRIPT_BYTES
+        )));
+    }
+    if separator_bytes != 0 {
+        transcript.push('\n');
+    }
+    transcript.push_str(chunk);
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -825,39 +1140,424 @@ impl TeamsTranscriber for TranscriptionToolTeamsTranscriber {
         bytes: &[u8],
         config: &TeamsPipelineConfig,
     ) -> TeamsPipelineResult<String> {
+        if bytes.is_empty() {
+            return Err(TeamsPipelineError::Retryable(
+                "Recording fallback received an empty recording.".into(),
+            ));
+        }
+        if bytes.len() > MAX_TEAMS_RECORDING_BYTES {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "Recording fallback input exceeds the {} byte limit.",
+                MAX_TEAMS_RECORDING_BYTES
+            )));
+        }
         let temp_root = config
             .tmp_dir
             .clone()
             .unwrap_or_else(|| hermes_home().join("tmp").join("teams_pipeline"));
-        tokio::fs::create_dir_all(&temp_root).await?;
-        let run_dir = temp_root.join(format!("teams-recording-{}", Uuid::new_v4().simple()));
-        tokio::fs::create_dir_all(&run_dir).await?;
-        let recording_name = recording
-            .display_name
-            .clone()
-            .unwrap_or_else(|| format!("{}.mp4", recording.artifact_id));
-        let recording_path = run_dir.join(safe_file_name(&recording_name));
-        tokio::fs::write(&recording_path, bytes).await?;
-        let audio_path = prepare_audio_path(&recording_path, config.ffmpeg_extract_audio).await?;
-        let handler = crate::tools::transcription::TranscriptionHandler;
-        let response = handler
-            .execute(json!({ "audio_path": audio_path.to_string_lossy() }))
-            .await?;
-        let _ = tokio::fs::remove_dir_all(&run_dir).await;
-        let parsed: Value = serde_json::from_str(&response)?;
-        let transcript = parsed
-            .get("text")
-            .and_then(Value::as_str)
-            .or_else(|| parsed.get("transcript").and_then(Value::as_str))
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if transcript.is_empty() {
-            return Err(TeamsPipelineError::Retryable(
-                "STT returned an empty transcript.".into(),
+        let run_dir_guard = create_private_teams_run_dir(&temp_root).await?;
+        let run_dir = run_dir_guard.path().to_path_buf();
+        let result: TeamsPipelineResult<String> = async {
+            let recording_name = recording
+                .display_name
+                .clone()
+                .unwrap_or_else(|| format!("{}.mp4", recording.artifact_id));
+            let recording_path = run_dir.join(safe_file_name(&recording_name));
+            write_private_teams_recording(&recording_path, bytes).await?;
+            let segment_dir = run_dir.join("audio-segments");
+            let audio_paths =
+                prepare_audio_paths(&recording_path, &segment_dir, config.ffmpeg_extract_audio)
+                    .await?;
+            let handler = crate::tools::transcription::TranscriptionHandler;
+            let mut transcript_text = String::new();
+            for audio_path in audio_paths {
+                let response = handler
+                    .execute_with_trusted_roots(
+                        json!({
+                            "audio_path": audio_path.to_string_lossy(),
+                            "model": config.stt_model.as_deref(),
+                        }),
+                        std::slice::from_ref(&run_dir),
+                    )
+                    .await?;
+                let parsed: Value = serde_json::from_str(&response)?;
+                let transcript = parsed
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| parsed.get("transcript").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .trim();
+                if transcript.is_empty() {
+                    return Err(TeamsPipelineError::Retryable(
+                        "STT returned an empty transcript.".into(),
+                    ));
+                }
+                append_teams_transcript_chunk(&mut transcript_text, transcript)?;
+            }
+            Ok(transcript_text)
+        }
+        .await;
+        let cleanup = tokio::task::spawn_blocking(move || run_dir_guard.close())
+            .await
+            .map_err(|error| {
+                TeamsPipelineError::Io(format!("Teams temp cleanup task failed: {error}"))
+            })?;
+        cleanup?;
+        result
+    }
+}
+
+struct PrivateTeamsRunDir {
+    path: Option<PathBuf>,
+}
+
+impl PrivateTeamsRunDir {
+    fn path(&self) -> &Path {
+        self.path
+            .as_deref()
+            .expect("private Teams run directory is present")
+    }
+
+    fn close(mut self) -> std::io::Result<()> {
+        let result = std::fs::remove_dir_all(self.path());
+        if result.is_ok() {
+            self.path.take();
+        }
+        result
+    }
+}
+
+impl Drop for PrivateTeamsRunDir {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
+async fn create_private_teams_run_dir(temp_root: &Path) -> TeamsPipelineResult<PrivateTeamsRunDir> {
+    let temp_root = temp_root.to_path_buf();
+    tokio::task::spawn_blocking(move || create_private_teams_run_dir_sync(&temp_root))
+        .await
+        .map_err(|error| {
+            TeamsPipelineError::Io(format!("Teams temp directory task failed: {error}"))
+        })?
+        .map_err(TeamsPipelineError::from)
+}
+
+fn create_private_teams_run_dir_sync(temp_root: &Path) -> std::io::Result<PrivateTeamsRunDir> {
+    // No secret is created until the shared policy has verified the root and
+    // every reachable ancestor. `create_dir_all` may only create empty
+    // directories; the following check rejects an unsafe custom root before
+    // the run directory is allocated.
+    std::fs::create_dir_all(temp_root)?;
+    crate::tts_audio::ensure_safe_private_media_parent(
+        &temp_root.join(".teams-run-directory-probe"),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut builder = tempfile::Builder::new();
+        builder
+            .prefix("teams-recording-")
+            .permissions(std::fs::Permissions::from_mode(0o700));
+        let temp_dir = builder.tempdir_in(temp_root)?;
+        let path = temp_dir.keep();
+        if let Err(error) =
+            crate::tts_audio::ensure_safe_private_media_parent(&path.join(".teams-run-probe"))
+        {
+            let _ = std::fs::remove_dir_all(&path);
+            return Err(error);
+        }
+        return Ok(PrivateTeamsRunDir { path: Some(path) });
+    }
+    #[cfg(windows)]
+    {
+        for _ in 0..64 {
+            let path = temp_root.join(format!("teams-recording-{}", Uuid::new_v4()));
+            match windows_private_path::create_directory(&path) {
+                Ok(()) => {
+                    if let Err(error) = crate::tts_audio::ensure_safe_private_media_parent(
+                        &path.join(".teams-run-probe"),
+                    ) {
+                        let _ = std::fs::remove_dir_all(&path);
+                        return Err(error);
+                    }
+                    return Ok(PrivateTeamsRunDir { path: Some(path) });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique private Teams run directory",
+        ));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let path = temp_root.join(format!("teams-recording-{}", Uuid::new_v4()));
+        std::fs::create_dir(&path)?;
+        crate::tts_audio::ensure_safe_private_media_parent(&path.join(".teams-run-probe"))?;
+        Ok(PrivateTeamsRunDir { path: Some(path) })
+    }
+}
+
+async fn write_private_teams_recording(path: &Path, bytes: &[u8]) -> TeamsPipelineResult<()> {
+    let path = path.to_path_buf();
+    let file = tokio::task::spawn_blocking(move || {
+        crate::tts_audio::create_private_temp_file(&path, &path, false)
+    })
+    .await
+    .map_err(|error| {
+        TeamsPipelineError::Io(format!("Teams recording file task failed: {error}"))
+    })??;
+    let mut file = tokio::fs::File::from_std(file);
+    file.write_all(bytes).await?;
+    file.flush().await?;
+    Ok(())
+}
+
+async fn create_private_teams_directory(path: &Path) -> TeamsPipelineResult<()> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || create_private_teams_directory_sync(&path))
+        .await
+        .map_err(|error| {
+            TeamsPipelineError::Io(format!("Teams directory task failed: {error}"))
+        })??;
+    Ok(())
+}
+
+fn create_private_teams_directory_sync(path: &Path) -> std::io::Result<()> {
+    crate::tts_audio::ensure_safe_private_media_parent(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::create_dir(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(windows)]
+    {
+        windows_private_path::create_directory(path)?;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        std::fs::create_dir(path)?;
+    }
+    if let Err(error) =
+        crate::tts_audio::ensure_safe_private_media_parent(&path.join(".teams-segment-probe"))
+    {
+        let _ = std::fs::remove_dir_all(path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn ensure_private_teams_media_file(path: &Path) -> TeamsPipelineResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await?;
+    }
+    #[cfg(windows)]
+    {
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || windows_private_path::set_owner_only_dacl(&path))
+            .await
+            .map_err(|error| {
+                TeamsPipelineError::Io(format!("Teams file DACL task failed: {error}"))
+            })??;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+mod windows_private_path {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+
+    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
+    const ERROR_ALREADY_EXISTS: i32 = 183;
+
+    #[repr(C)]
+    struct SecurityAttributes {
+        length: u32,
+        security_descriptor: *mut c_void,
+        inherit_handle: i32,
+    }
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            string_security_descriptor: *const u16,
+            string_sd_revision: u32,
+            security_descriptor: *mut *mut c_void,
+            security_descriptor_size: *mut u32,
+        ) -> i32;
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            security_descriptor: *const c_void,
+            requested_string_sd_revision: u32,
+            security_information: u32,
+            string_security_descriptor: *mut *mut u16,
+            string_security_descriptor_len: *mut u32,
+        ) -> i32;
+        fn GetFileSecurityW(
+            file_name: *const u16,
+            requested_information: u32,
+            security_descriptor: *mut c_void,
+            length: u32,
+            length_needed: *mut u32,
+        ) -> i32;
+        fn SetFileSecurityW(
+            file_name: *const u16,
+            security_information: u32,
+            security_descriptor: *const c_void,
+        ) -> i32;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateDirectoryW(
+            path_name: *const u16,
+            security_attributes: *const SecurityAttributes,
+        ) -> i32;
+        fn LocalFree(memory: *mut c_void) -> *mut c_void;
+    }
+
+    fn wide(path: &Path) -> std::io::Result<Vec<u16>> {
+        let mut value = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        if value.contains(&0) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path contains NUL",
             ));
         }
-        Ok(transcript)
+        value.push(0);
+        Ok(value)
+    }
+
+    fn private_descriptor() -> std::io::Result<*mut c_void> {
+        let sddl = "D:P(A;;FA;;;OW)"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut descriptor = std::ptr::null_mut();
+        let mut size = 0_u32;
+        if unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                1,
+                &mut descriptor,
+                &mut size,
+            )
+        } == 0
+            || descriptor.is_null()
+            || size == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(descriptor)
+    }
+
+    pub(super) fn create_directory(path: &Path) -> std::io::Result<()> {
+        let path = wide(path)?;
+        let descriptor = private_descriptor()?;
+        let attributes = SecurityAttributes {
+            length: size_of::<SecurityAttributes>() as u32,
+            security_descriptor: descriptor,
+            inherit_handle: 0,
+        };
+        let created = unsafe { CreateDirectoryW(path.as_ptr(), &attributes) };
+        unsafe {
+            LocalFree(descriptor);
+        }
+        if created == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    error,
+                ));
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(super) fn set_owner_only_dacl(path: &Path) -> std::io::Result<()> {
+        let path = wide(path)?;
+        let descriptor = private_descriptor()?;
+        let updated =
+            unsafe { SetFileSecurityW(path.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) };
+        unsafe {
+            LocalFree(descriptor);
+        }
+        if updated == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_protected_owner_only_dacl(path: &Path) -> std::io::Result<bool> {
+        let path = wide(path)?;
+        let mut needed = 0_u32;
+        let initial = unsafe {
+            GetFileSecurityW(
+                path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+            )
+        };
+        if initial != 0 || needed == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER) {
+            return Err(error);
+        }
+        let mut descriptor = vec![0_u8; needed as usize];
+        if unsafe {
+            GetFileSecurityW(
+                path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                descriptor.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut rendered = std::ptr::null_mut();
+        let mut rendered_len = 0_u32;
+        if unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor.as_ptr().cast(),
+                1,
+                DACL_SECURITY_INFORMATION,
+                &mut rendered,
+                &mut rendered_len,
+            )
+        } == 0
+            || rendered.is_null()
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        let sddl = unsafe {
+            String::from_utf16_lossy(std::slice::from_raw_parts(rendered, rendered_len as usize))
+        };
+        unsafe {
+            LocalFree(rendered.cast());
+        }
+        Ok(sddl.trim_end_matches('\0') == "D:P(A;;FA;;;OW)")
     }
 }
 
@@ -879,50 +1579,250 @@ fn safe_file_name(value: &str) -> String {
             }
         })
         .collect::<String>();
-    if cleaned.is_empty() || cleaned.chars().all(|ch| ch == '.') {
-        "recording.mp4".into()
-    } else {
-        cleaned
+    let (stem, requested_extension) = cleaned.rsplit_once('.').unwrap_or((cleaned.as_str(), ""));
+    let stem = stem.trim_matches('.');
+    if stem.is_empty() {
+        return "recording.mp4".into();
     }
+    let extension = requested_extension.to_ascii_lowercase();
+    let extension = if is_safe_recording_extension(&extension) {
+        extension.as_str()
+    } else {
+        "mp4"
+    };
+    let stem = if is_windows_reserved_file_stem(stem) {
+        "recording"
+    } else {
+        stem
+    };
+    let stem = &stem[..stem.len().min(MAX_SAFE_TEAMS_RECORDING_STEM_BYTES)];
+    format!("{stem}.{extension}")
 }
 
-async fn prepare_audio_path(
+fn is_safe_recording_extension(extension: &str) -> bool {
+    is_supported_transcription_audio_extension(extension)
+        || matches!(extension, "mp4" | "mov" | "mkv" | "avi" | "mpeg" | "mpg")
+}
+
+// Windows reserves these device basenames even when a normal-looking
+// extension is appended. Normalize them on every platform so an artifact
+// chosen elsewhere remains creatable on Windows.
+fn is_windows_reserved_file_stem(stem: &str) -> bool {
+    let device = stem.split('.').next().unwrap_or(stem);
+    if ["con", "prn", "aux", "nul", "conin_", "conout_"]
+        .iter()
+        .any(|reserved| device.eq_ignore_ascii_case(reserved))
+    {
+        return true;
+    }
+    device.len() == 4
+        && (device[..3].eq_ignore_ascii_case("com") || device[..3].eq_ignore_ascii_case("lpt"))
+        && matches!(device.as_bytes()[3], b'1'..=b'9')
+}
+
+fn is_supported_transcription_audio_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "wav" | "mp3" | "m4a" | "webm" | "ogg" | "oga" | "flac"
+    )
+}
+
+async fn prepare_audio_paths(
     recording_path: &Path,
+    segment_dir: &Path,
     ffmpeg_extract_audio: bool,
-) -> TeamsPipelineResult<PathBuf> {
+) -> TeamsPipelineResult<Vec<PathBuf>> {
+    prepare_audio_paths_with_timeout(
+        recording_path,
+        segment_dir,
+        ffmpeg_extract_audio,
+        TEAMS_FFMPEG_TIMEOUT,
+    )
+    .await
+}
+
+async fn prepare_audio_paths_with_timeout(
+    recording_path: &Path,
+    segment_dir: &Path,
+    ffmpeg_extract_audio: bool,
+    timeout: Duration,
+) -> TeamsPipelineResult<Vec<PathBuf>> {
+    let metadata = tokio::fs::metadata(recording_path).await?;
     let extension = recording_path
         .extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if matches!(
-        extension.as_str(),
-        "wav" | "mp3" | "m4a" | "ogg" | "flac" | "aac" | "webm"
-    ) || !ffmpeg_extract_audio
+    if !ffmpeg_extract_audio
+        && is_supported_transcription_audio_extension(&extension)
+        && metadata.len() < MAX_TEAMS_STT_UPLOAD_BYTES
     {
-        return Ok(recording_path.to_path_buf());
+        return Ok(vec![recording_path.to_path_buf()]);
     }
-    let audio_path = recording_path.with_extension("wav");
-    let output = Command::new("ffmpeg")
+
+    create_private_teams_directory(segment_dir).await?;
+    let segment_template = segment_dir.join("segment-%04d.mp3");
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-nostdin")
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
         .arg("-y")
         .arg("-i")
         .arg(recording_path)
-        .arg(&audio_path)
-        .suppress_windows_console()
-        .output()
+        .arg("-vn")
+        .arg("-map")
+        .arg("0:a:0")
+        .arg("-map_metadata")
+        .arg("-1")
+        .arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("16000")
+        .arg("-c:a")
+        .arg("libmp3lame")
+        .arg("-b:a")
+        .arg(TEAMS_FFMPEG_AUDIO_BITRATE)
+        .arg("-minrate")
+        .arg(TEAMS_FFMPEG_AUDIO_BITRATE)
+        .arg("-maxrate")
+        .arg(TEAMS_FFMPEG_AUDIO_BITRATE)
+        .arg("-bufsize")
+        .arg(TEAMS_FFMPEG_AUDIO_BITRATE)
+        .arg("-f")
+        .arg("segment")
+        .arg("-segment_time")
+        .arg(TEAMS_FFMPEG_SEGMENT_SECONDS.to_string())
+        .arg("-segment_start_number")
+        .arg("0")
+        .arg("-reset_timestamps")
+        .arg("1")
+        .arg("-segment_format")
+        .arg("mp3")
+        .arg(&segment_template)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .suppress_windows_console();
+    let output_limit = BoundedOutputDirectoryLimit::new(
+        segment_dir.to_path_buf(),
+        MAX_TEAMS_AUDIO_SEGMENTS,
+        MAX_TEAMS_AUDIO_OUTPUT_BYTES,
+    );
+    let output = match run_bounded_command_with_output_limit(command, timeout, true, output_limit)
         .await
-        .map_err(|e| {
-            TeamsPipelineError::Retryable(format!(
-                "Recording fallback requires ffmpeg for audio extraction, but ffmpeg failed to start: {e}"
-            ))
-        })?;
+    {
+        Ok(output) => output,
+        Err(BoundedCommandError::Start(error)) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "Recording fallback requires ffmpeg for mono MP3 extraction, but ffmpeg failed to start: {error}"
+            )));
+        }
+        Err(BoundedCommandError::Stdin(error)) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg audio extraction rejected its closed stdin: {error}"
+            )));
+        }
+        Err(BoundedCommandError::Wait(error)) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg audio extraction wait failed: {error}"
+            )));
+        }
+        Err(BoundedCommandError::Stderr(error)) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg audio extraction diagnostics failed: {error}"
+            )));
+        }
+        Err(BoundedCommandError::OutputLimit(error)) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg audio extraction exceeded its bounded output limit: {error}"
+            )));
+        }
+        Err(BoundedCommandError::TimedOut) => {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg audio extraction timed out after {:.3} seconds",
+                timeout.as_secs_f64()
+            )));
+        }
+    };
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if detail.is_empty() {
+            String::new()
+        } else {
+            format!(": {detail}")
+        };
         return Err(TeamsPipelineError::Retryable(format!(
-            "ffmpeg audio extraction failed: {detail}"
+            "ffmpeg mono MP3 extraction failed with {}{detail}",
+            output.status
         )));
     }
-    Ok(audio_path)
+    collect_teams_audio_segments(segment_dir).await
+}
+
+async fn collect_teams_audio_segments(segment_dir: &Path) -> TeamsPipelineResult<Vec<PathBuf>> {
+    let mut entries = tokio::fs::read_dir(segment_dir).await?;
+    let mut segments = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if segments.len() >= MAX_TEAMS_AUDIO_SEGMENTS {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced more than {MAX_TEAMS_AUDIO_SEGMENTS} Teams audio segments."
+            )));
+        }
+        let file_name = entry.file_name();
+        let name = file_name.to_str().ok_or_else(|| {
+            TeamsPipelineError::Retryable("ffmpeg produced a non-UTF-8 segment name.".into())
+        })?;
+        let index = teams_audio_segment_index(name).ok_or_else(|| {
+            TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced an unexpected Teams segment name: {name}"
+            ))
+        })?;
+        if !entry.file_type().await?.is_file() {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced a non-file Teams segment: {name}"
+            )));
+        }
+        let path = entry.path();
+        let metadata = entry.metadata().await?;
+        if metadata.len() == 0 {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced an empty Teams segment: {name}"
+            )));
+        }
+        if metadata.len() >= MAX_TEAMS_STT_UPLOAD_BYTES {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced Teams segment {name} at {} bytes, above the {} byte STT upload limit.",
+                metadata.len(),
+                MAX_TEAMS_STT_UPLOAD_BYTES
+            )));
+        }
+        ensure_private_teams_media_file(&path).await?;
+        segments.push((index, path));
+    }
+    if segments.is_empty() {
+        return Err(TeamsPipelineError::Retryable(
+            "ffmpeg produced no audio segments for the recording.".into(),
+        ));
+    }
+    segments.sort_unstable_by_key(|(index, _)| *index);
+    for (expected, (actual, _)) in segments.iter().enumerate() {
+        if *actual != expected {
+            return Err(TeamsPipelineError::Retryable(format!(
+                "ffmpeg produced non-contiguous Teams segment order; expected {expected:04}, got {actual:04}."
+            )));
+        }
+    }
+    Ok(segments.into_iter().map(|(_, path)| path).collect())
+}
+
+fn teams_audio_segment_index(name: &str) -> Option<usize> {
+    let index = name.strip_prefix("segment-")?.strip_suffix(".mp3")?;
+    if index.len() != 4 || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    index.parse().ok()
 }
 
 #[derive(Debug)]
@@ -935,7 +1835,7 @@ impl TeamsSummarizer for HeuristicTeamsSummarizer {
         resolved_meeting: &TeamsMeetingRef,
         transcript_text: &str,
         artifacts: &[MeetingArtifact],
-        config: &TeamsPipelineConfig,
+        _config: &TeamsPipelineConfig,
     ) -> TeamsPipelineResult<TeamsMeetingSummaryPayload> {
         let parsed = heuristic_summary(transcript_text);
         let call_metrics = collect_call_metrics(artifacts);
@@ -965,21 +1865,6 @@ impl TeamsSummarizer for HeuristicTeamsSummarizer {
             source_artifacts: artifacts.to_vec(),
             confidence: Some(parsed.confidence),
             confidence_notes: Some(parsed.confidence_notes),
-            notion_target: config
-                .notion
-                .as_ref()
-                .and_then(|v| object_field(v, "database_id"))
-                .and_then(value_to_string),
-            linear_target: config
-                .linear
-                .as_ref()
-                .and_then(|v| object_field(v, "team_id"))
-                .and_then(value_to_string),
-            teams_target: config.teams_delivery.as_ref().and_then(|v| {
-                object_field(v, "channel_id")
-                    .and_then(value_to_string)
-                    .or_else(|| object_field(v, "chat_id").and_then(value_to_string))
-            }),
         })
     }
 }

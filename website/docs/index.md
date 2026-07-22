@@ -49,8 +49,8 @@ It's not a coding copilot tethered to an IDE or a chatbot wrapper around a singl
 | 📚 **[Skills System](/docs/user-guide/features/skills)** | Procedural memory the agent creates and reuses |
 | 🔌 **[MCP Integration](/docs/user-guide/features/mcp)** | Connect to MCP servers, filter their tools, and extend Hermes safely |
 | 🧭 **[Use MCP with Hermes](/docs/guides/use-mcp-with-hermes)** | Practical MCP setup patterns, examples, and tutorials |
-| 🎙️ **[Voice Mode](/docs/user-guide/features/voice-mode)** | Real-time voice interaction in CLI, Telegram, Discord, and Discord VC |
-| 🗣️ **[Use Voice Mode with Hermes](/docs/guides/use-voice-mode-with-hermes)** | Hands-on setup and usage patterns for Hermes voice workflows |
+| 🎙️ **[Voice Mode](/docs/user-guide/features/voice-mode)** | Shipped surfaces: `text_to_speech`, callable `transcription` tool, status-only `/voice` |
+| 🗣️ **[Use Voice Mode with Hermes](/docs/guides/use-voice-mode-with-hermes)** | Practical setup for TTS and the transcription tool (not auto-STT or interactive mic/VC) |
 | 🎭 **[Personality & SOUL.md](/docs/user-guide/features/personality)** | Define Hermes' default voice with a global SOUL.md |
 | 📄 **[Context Files](/docs/user-guide/features/context-files)** | Project context files that shape every conversation |
 | 🔒 **[Security](/docs/user-guide/security)** | Command approval, authorization, container isolation |

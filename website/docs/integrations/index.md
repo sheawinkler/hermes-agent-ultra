@@ -53,17 +53,19 @@ See [Browser Automation](/docs/user-guide/features/browser) for setup and usage.
 
 ## Voice & TTS Providers
 
-Text-to-speech and speech-to-text across all messaging platforms:
+Text-to-speech via the `text_to_speech` tool, plus a callable `transcription` HTTP tool — not automatic STT on every messaging voice note.
 
-| Provider | Quality | Cost | API Key |
-||----------|---------|------|---------|
-|| **Edge TTS** (default) | Good | Free | None needed |
-|| **ElevenLabs** | Excellent | Paid | `ELEVENLABS_API_KEY` |
-|| **OpenAI TTS** | Good | Paid | `VOICE_TOOLS_OPENAI_KEY` |
-|| **MiniMax** | Good | Paid | `MINIMAX_API_KEY` |
-|| **NeuTTS** | Good | Free | None needed |
+Rust TTS built-ins: **OpenAI**, **ElevenLabs**, **MiniMax**, and **Piper**, plus custom command providers. Upstream-only names (`edge`, `xai`, `mistral`, `gemini`, `neutts`, `kittentts`) fail closed — Hermes does not silently substitute another provider.
 
-Speech-to-text supports six providers: local faster-whisper (free, runs on-device), a local command wrapper, Groq, OpenAI Whisper API, Mistral, and xAI. Voice message transcription works across Telegram, Discord, WhatsApp, and other messaging platforms. See [Voice & TTS](/docs/user-guide/features/tts) and [Voice Mode](/docs/user-guide/features/voice-mode) for details.
+| Provider | Credential / requirement |
+|----------|--------------------------|
+| **OpenAI TTS** | `VOICE_TOOLS_OPENAI_KEY`, `HERMES_OPENAI_API_KEY`, or `OPENAI_API_KEY` |
+| **ElevenLabs** | `ELEVENLABS_API_KEY` |
+| **MiniMax** | `MINIMAX_API_KEY` |
+| **Piper** (local) | `piper` binary + `PIPER_MODEL` (no automatic install/download) |
+| **Command provider** | Local CLI under `tts.providers.<name>` |
+
+Speech-to-text is the callable **`transcription`** tool only: **OpenAI / Nous-managed OpenAI audio**, **Groq**, and **Mistral**. Messaging may prepend `[transcription_candidate]` for audio paths; it does **not** auto-invoke the handler. No local faster-whisper, whisper CLI, local-command STT, or xAI STT in this Rust handler. Interactive mic/Discord-VC “voice mode” is **not** a complete shipped product — see [Voice & TTS](/docs/user-guide/features/tts) and [Voice Mode](/docs/user-guide/features/voice-mode).
 
 ## IDE & Editor Integration
 

@@ -4,11 +4,529 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import datetime as dt
+import hashlib
 import json
+import math
+from functools import lru_cache
+import re
 from pathlib import Path
 from typing import Any
 
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+NON_EVIDENCE_GATE_METRICS = {
+    "max_commits_behind",
+    "max_upstream_patch_missing",
+}
+
+
+def canonical_json_digest(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def is_full_sha(value: object) -> bool:
+    return bool(SHA_RE.fullmatch(str(value).strip().lower()))
+
+@lru_cache(maxsize=1)
+def _local_source_contract_module() -> Any:
+    path = Path(__file__).with_name("generate-upstream-patch-queue.py")
+    spec = importlib.util.spec_from_file_location("upstream_patch_queue_local_source", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("canonical local-source contract is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_local_source_record(local_source: object) -> list[str]:
+    return list(_local_source_contract_module().validate_local_source_record(local_source))
+
+
+def sanitize_public_message(message: object) -> str:
+    return str(_local_source_contract_module().sanitize_public_message(message))
+
+
+def public_repo_relative_path(repo_root: Path, path: Path) -> str:
+    candidate = path if path.is_absolute() else repo_root / path
+    return str(_local_source_contract_module().public_repo_relative_path(candidate, repo_root))
+
+
+def resample_local_source(repo_root: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        record, errors = _local_source_contract_module().build_local_source_record(
+            repo_root,
+            reviewed_dirty_source=False,
+        )
+    except (OSError, RuntimeError, AttributeError) as exc:
+        return None, [
+            sanitize_public_message(f"canonical local-source resample failed: {exc}")
+        ]
+    return record, [sanitize_public_message(error) for error in errors]
+
+def generated_evidence_output_error(repo_root: Path, path: Path) -> str | None:
+    return _local_source_contract_module().generated_evidence_output_error(repo_root, path)
+
+
+def parse_utc(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def require_numeric_metric(
+    payload: dict[str, Any],
+    path: tuple[str, ...],
+    label: str,
+) -> str | None:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return f"{label} is missing"
+        current = current[key]
+    if isinstance(current, bool):
+        return f"{label} must be numeric, not boolean"
+    try:
+        value = float(current)
+    except (TypeError, ValueError):
+        return f"{label} is not numeric"
+    if not math.isfinite(value):
+        return f"{label} is not finite"
+    return None
+
+
+def validate_queue_provenance(
+    repo_root: Path,
+    patch_queue: dict[str, Any],
+    source_ledger_path: Path,
+    max_source_age_seconds: int,
+) -> dict[str, Any]:
+    """Require a current, complete queue ledger before either proof gate can pass."""
+
+    errors: list[str] = []
+    if patch_queue.get("schema_version") != 2:
+        errors.append("patch queue schema_version must be 2")
+    source = patch_queue.get("source_ledger")
+    if not isinstance(source, dict):
+        errors.append("patch queue has no source_ledger object")
+        source = {}
+    expected_relative = "docs/parity/upstream-source-ledger.json"
+    if source.get("path") != expected_relative:
+        errors.append("patch queue does not point at the canonical source ledger path")
+    try:
+        ledger = load_json(source_ledger_path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        errors.append(sanitize_public_message(f"source ledger is unreadable: {exc}"))
+        ledger = {}
+    if ledger.get("schema_version") != 2:
+        errors.append("source ledger schema_version must be 2")
+    generator = ledger.get("generator")
+    if not isinstance(generator, dict) or not str(generator.get("version", "")).strip():
+        errors.append("source ledger generator provenance is missing")
+    if ledger.get("source_valid") is not True:
+        errors.append("source ledger is not valid")
+    ledger_errors = ledger.get("source_errors")
+    if not isinstance(ledger_errors, list):
+        errors.append("source ledger source_errors is missing or malformed")
+    elif ledger_errors:
+        errors.append("source ledger reports source or classification errors")
+    freshness = ledger.get("freshness")
+    if not isinstance(freshness, dict) or freshness.get("state") != "fresh" or freshness.get(
+        "freshly_fetched"
+    ) is not True:
+        errors.append("source ledger does not prove fresh fetches")
+    if max_source_age_seconds <= 0:
+        errors.append("configured source freshness bound must be positive")
+    recorded_freshness_bound: int | None = None
+    if isinstance(freshness, dict):
+        raw_bound = freshness.get("required_within_seconds")
+        if isinstance(raw_bound, bool):
+            raw_bound = None
+        try:
+            recorded_freshness_bound = int(raw_bound)
+        except (TypeError, ValueError):
+            recorded_freshness_bound = None
+    if (
+        recorded_freshness_bound is None
+        or recorded_freshness_bound <= 0
+        or recorded_freshness_bound > max_source_age_seconds
+    ):
+        errors.append("source ledger freshness bound is missing, invalid, or weaker than proof policy")
+    now = dt.datetime.now(dt.timezone.utc)
+    ledger_sources = ledger.get("sources")
+    if not isinstance(ledger_sources, dict):
+        errors.append("source ledger sources is missing or malformed")
+        ledger_sources = {}
+    for name in ("fork", "upstream"):
+        item = ledger_sources.get(name)
+        if not isinstance(item, dict):
+            errors.append(f"source ledger {name} source is missing")
+            continue
+        if not is_full_sha(item.get("fetched_sha")):
+            errors.append(f"source ledger {name} fetched SHA is missing or malformed")
+        canonical_url = item.get("canonical_url")
+        configured_canonical_url = item.get("configured_canonical_url")
+        if (
+            not isinstance(canonical_url, str)
+            or not canonical_url.strip()
+            or canonical_url != configured_canonical_url
+        ):
+            errors.append(f"source ledger {name} canonical remote URL is missing or mismatched")
+        history = item.get("history")
+        if not isinstance(history, dict) or history.get("complete") is not True:
+            errors.append(f"source ledger {name} history is incomplete")
+        elif history.get("is_shallow_repository") is not False:
+            errors.append(f"source ledger {name} shallow state is not full")
+        fetch = item.get("fetch")
+        fetched_at = parse_utc(fetch.get("fetched_at_utc") if isinstance(fetch, dict) else None)
+        if fetched_at is None:
+            errors.append(f"source ledger {name} fetch timestamp is missing or malformed")
+        elif (
+            (age_seconds := (now - fetched_at).total_seconds()) < -60
+            or age_seconds > max_source_age_seconds
+        ):
+            errors.append(f"source ledger {name} fetch timestamp is stale or in the future")
+    local_source = ledger.get("local_source")
+    errors.extend(validate_local_source_record(local_source))
+    local_source_sha256 = (
+        canonical_json_digest(local_source) if isinstance(local_source, dict) else None
+    )
+    if ledger.get("local_source_sha256") != local_source_sha256:
+        errors.append("source ledger local-source record digest does not match its contents")
+    if source.get("local_source_sha256") != local_source_sha256:
+        errors.append("patch queue local-source record digest does not match source ledger")
+    local_tree_state_digest = (
+        local_source.get("tree_state_digest") if isinstance(local_source, dict) else None
+    )
+    if source.get("local_tree_state_digest") != local_tree_state_digest:
+        errors.append("patch queue local tree-state digest does not match source ledger")
+    fork_sha = ledger_sources.get("fork", {}).get("fetched_sha")
+    if isinstance(local_source, dict) and local_source.get("head_sha") != fork_sha:
+        errors.append("source ledger local-source HEAD does not match fetched fork SHA")
+    resampled_local_source, resample_errors = resample_local_source(repo_root)
+    if resample_errors:
+        errors.extend(
+            f"canonical local-source resample reported: {message}" for message in resample_errors
+        )
+    if not isinstance(resampled_local_source, dict):
+        errors.append("canonical local-source resample is missing or malformed")
+    else:
+        resampled_sha256 = canonical_json_digest(resampled_local_source)
+        if resampled_sha256 != local_source_sha256:
+            errors.append("current local-source record does not match the canonical source ledger")
+        if resampled_local_source.get("tree_state_digest") != local_tree_state_digest:
+            errors.append("current local tree-state digest does not match the source ledger")
+    commit_range = ledger.get("range")
+    merge_base = ledger.get("merge_base")
+    merge_base_is_usable = (
+        isinstance(merge_base, dict)
+        and merge_base.get("status") == "present"
+        and is_full_sha(merge_base.get("sha"))
+    )
+    reviewed_anchor = ledger.get("reviewed_anchor")
+    anchor_is_usable = (
+        isinstance(reviewed_anchor, dict)
+        and reviewed_anchor.get("valid") is True
+        and is_full_sha(reviewed_anchor.get("anchor_sha"))
+        and is_full_sha(reviewed_anchor.get("evidence_fork_commit"))
+        and isinstance(reviewed_anchor.get("review_basis"), dict)
+        and isinstance(reviewed_anchor["review_basis"].get("kind"), str)
+        and bool(reviewed_anchor["review_basis"]["kind"].strip())
+        and isinstance(reviewed_anchor["review_basis"].get("semantic_evidence"), str)
+        and bool(reviewed_anchor["review_basis"]["semantic_evidence"].strip())
+        and isinstance(reviewed_anchor.get("evidence_artifacts"), list)
+        and bool(reviewed_anchor.get("evidence_artifacts"))
+    )
+    if anchor_is_usable:
+        anchor_sha = str(reviewed_anchor["anchor_sha"])
+        for artifact in reviewed_anchor["evidence_artifacts"]:
+            classification = artifact.get("anchor_classification") if isinstance(artifact, dict) else None
+            if (
+                not isinstance(artifact, dict)
+                or not isinstance(artifact.get("path"), str)
+                or not artifact["path"].strip()
+                or not isinstance(classification, dict)
+                or classification.get("sha") != anchor_sha
+                or not isinstance(classification.get("disposition"), str)
+                or not classification["disposition"].strip()
+                or not isinstance(classification.get("classification_rule"), str)
+                or not classification["classification_rule"].strip()
+            ):
+                anchor_is_usable = False
+                errors.append("source ledger reviewed anchor exact evidence is malformed")
+                break
+    range_base = commit_range.get("base_ref") if isinstance(commit_range, dict) else None
+    if merge_base_is_usable and range_base == merge_base.get("sha"):
+        pass
+    elif anchor_is_usable and range_base == reviewed_anchor.get("anchor_sha"):
+        pass
+    elif not merge_base_is_usable and not anchor_is_usable:
+        errors.append("source ledger has neither an exact merge base nor a validated reviewed anchor")
+    else:
+        errors.append("source ledger range base is not proven by its merge base or reviewed anchor")
+    if (
+        not isinstance(commit_range, dict)
+        or commit_range.get("complete") is not True
+        or not isinstance(commit_range.get("commit_shas"), list)
+        or not all(is_full_sha(sha) for sha in commit_range.get("commit_shas", []))
+    ):
+        errors.append("source ledger complete classified range is unavailable")
+    if source.get("sha256") != canonical_json_digest(ledger):
+        errors.append("patch queue source-ledger digest does not match the ledger")
+    for name in ("fork", "upstream"):
+        expected_sha = ledger_sources.get(name, {}).get("fetched_sha")
+        if source.get(f"{name}_sha") != expected_sha:
+            errors.append(f"patch queue {name} SHA does not match source ledger")
+    if source.get("range_sha256") != (commit_range or {}).get("sha256"):
+        errors.append("patch queue range digest does not match source ledger")
+    classifications = (commit_range or {}).get("classifications")
+    range_shas = (commit_range or {}).get("commit_shas", [])
+    if (
+        not isinstance(classifications, list)
+        or len(classifications) != len(range_shas)
+        or any(
+            not isinstance(record, dict)
+            or record.get("sha") != sha
+            or not isinstance(record.get("disposition"), str)
+            or not isinstance(record.get("classification_rule"), str)
+            for record, sha in zip(classifications, range_shas)
+        )
+    ):
+        errors.append("source ledger complete classified range is malformed")
+    else:
+        classification_digest = canonical_json_digest({"classifications": classifications})
+        if (commit_range or {}).get("classification_sha256") != classification_digest:
+            errors.append("source ledger classification digest is malformed")
+        if source.get("classification_sha256") != classification_digest:
+            errors.append("patch queue classification digest does not match source ledger")
+        queue_rows = patch_queue.get("commits")
+        if not isinstance(queue_rows, list) or len(queue_rows) != len(classifications):
+            errors.append("patch queue rows do not cover the complete classified range")
+        elif any(
+            not isinstance(row, dict)
+            or row.get("sha") != record.get("sha")
+            or row.get("disposition") != record.get("disposition")
+            or row.get("classification_rule") != record.get("classification_rule")
+            or row.get("semantic_equivalence") != record.get("semantic_equivalence")
+            for row, record in zip(queue_rows, classifications)
+        ):
+            errors.append("patch queue classifications do not match source ledger")
+    truth = patch_queue.get("truth")
+    if not isinstance(truth, dict) or truth.get("pass") is not True:
+        errors.append("patch queue truth status is not PASS")
+    elif truth.get("error_count") != 0 or truth.get("errors") not in ([], None):
+        errors.append("patch queue truth status has unacknowledged errors")
+    summary = patch_queue.get("summary")
+    if not isinstance(summary, dict):
+        errors.append("patch queue summary is missing or malformed")
+    else:
+        for key in (
+            "total_commits",
+            "complete_range_commit_count",
+            "unowned_divergence_count",
+        ):
+            error = require_numeric_metric(summary, (key,), f"patch queue summary.{key}")
+            if error:
+                errors.append(error)
+        if not isinstance(summary.get("by_disposition"), dict):
+            errors.append("patch queue summary.by_disposition is missing or malformed")
+        elif require_numeric_metric(
+            summary,
+            ("by_disposition", "pending"),
+            "patch queue summary.by_disposition.pending",
+        ):
+            errors.append("patch queue summary.by_disposition.pending is missing or malformed")
+        if (
+            isinstance(commit_range, dict)
+            and summary.get("complete_range_commit_count") != commit_range.get("commit_count")
+        ):
+            errors.append("patch queue complete range count does not match source ledger")
+    return {
+        "pass": not errors,
+        "errors": errors,
+        "ledger_path": public_repo_relative_path(repo_root, source_ledger_path),
+        "ledger_sha256": canonical_json_digest(ledger) if ledger else None,
+        "fork_sha": ledger_sources.get("fork", {}).get("fetched_sha"),
+        "upstream_sha": ledger_sources.get("upstream", {}).get("fetched_sha"),
+        "local_source_sha256": local_source_sha256,
+        "local_tree_state_digest": local_tree_state_digest,
+    }
+
+
+def parity_matrix_source_errors(
+    parity: dict[str, Any],
+    queue_provenance: dict[str, Any],
+) -> list[str]:
+    refs = parity.get("refs")
+    if not isinstance(refs, dict):
+        return ["parity matrix source refs are missing or malformed"]
+    errors: list[str] = []
+    if refs.get("local_sha") != queue_provenance.get("fork_sha"):
+        errors.append("parity matrix local SHA is stale relative to the canonical source ledger")
+    if refs.get("upstream_sha") != queue_provenance.get("upstream_sha"):
+        errors.append("parity matrix upstream SHA is stale relative to the canonical source ledger")
+    return errors
+
+
+def append_truth_failure(gate: dict[str, Any], metric: str, errors: list[str]) -> None:
+    if not errors:
+        return
+    gate["pass"] = False
+    gate["checks"].append(
+        {
+            "metric": metric,
+            "status": "fail",
+            "actual": errors,
+            "limit": "no source/provenance/metric errors",
+        }
+    )
+
+
+def required_source_metric_errors(
+    parity_summary: dict[str, Any],
+    divergence_summary: dict[str, Any],
+    intent_summary: dict[str, Any],
+    test_coverage_summary: dict[str, Any],
+    test_coverage_gate: dict[str, Any],
+    sota_harness_summary: dict[str, Any],
+    sota_harness_gate: dict[str, Any],
+    behavioral_summary: dict[str, Any],
+    deep_summary: dict[str, Any],
+) -> list[str]:
+    required = (
+        (parity_summary, ("commits_behind",), "parity_matrix.summary.commits_behind"),
+        (
+            parity_summary,
+            ("upstream_patch_missing",),
+            "parity_matrix.summary.upstream_patch_missing",
+        ),
+        (parity_summary, ("files_only_upstream",), "parity_matrix.summary.files_only_upstream"),
+        (divergence_summary, ("unowned",), "divergence_validation.summary.unowned"),
+        (
+            divergence_summary,
+            ("review_overdue",),
+            "divergence_validation.summary.review_overdue",
+        ),
+        (intent_summary, ("mapping_ratio",), "test_intent_mapping.summary.mapping_ratio"),
+        (
+            test_coverage_summary,
+            ("tracked_behavior_coverage_ratio",),
+            "test_coverage_audit.summary.tracked_behavior_coverage_ratio",
+        ),
+        (
+            test_coverage_gate,
+            ("critical_gaps",),
+            "test_coverage_audit.audit_gate.critical_gaps",
+        ),
+        (
+            test_coverage_summary,
+            ("missing_rust_test_refs",),
+            "test_coverage_audit.summary.missing_rust_test_refs",
+        ),
+        (
+            sota_harness_summary,
+            ("domain_coverage_ratio",),
+            "fixture_reference_matrix.summary.domain_coverage_ratio",
+        ),
+        (
+            sota_harness_gate,
+            ("critical_gaps",),
+            "fixture_reference_matrix.gate.critical_gaps",
+        ),
+        (
+            sota_harness_gate,
+            ("missing_rust_test_refs",),
+            "fixture_reference_matrix.gate.missing_rust_test_refs",
+        ),
+        (
+            behavioral_summary,
+            ("behavioral_similarity_ratio",),
+            "behavioral_similarity_diff.summary.behavioral_similarity_ratio",
+        ),
+        (
+            behavioral_summary,
+            ("superior_cases",),
+            "behavioral_similarity_diff.summary.superior_cases",
+        ),
+        (
+            behavioral_summary,
+            ("regressions",),
+            "behavioral_similarity_diff.summary.regressions",
+        ),
+        (behavioral_summary, ("gaps",), "behavioral_similarity_diff.summary.gaps"),
+        (
+            behavioral_summary,
+            ("unverified_cases",),
+            "behavioral_similarity_diff.summary.unverified_cases",
+        ),
+        (
+            behavioral_summary,
+            ("missing_rust_test_refs",),
+            "behavioral_similarity_diff.summary.missing_rust_test_refs",
+        ),
+        (
+            deep_summary,
+            ("deep_problem_solving_ratio",),
+            "deep_problem_solving_diff.summary.deep_problem_solving_ratio",
+        ),
+        (
+            deep_summary,
+            ("superior_cases",),
+            "deep_problem_solving_diff.summary.superior_cases",
+        ),
+        (
+            deep_summary,
+            ("total_cases",),
+            "deep_problem_solving_diff.summary.total_cases",
+        ),
+        (deep_summary, ("regressions",), "deep_problem_solving_diff.summary.regressions"),
+        (deep_summary, ("gaps",), "deep_problem_solving_diff.summary.gaps"),
+        (
+            deep_summary,
+            ("unverified_cases",),
+            "deep_problem_solving_diff.summary.unverified_cases",
+        ),
+        (
+            deep_summary,
+            ("missing_rust_test_refs",),
+            "deep_problem_solving_diff.summary.missing_rust_test_refs",
+        ),
+    )
+    return [
+        error
+        for payload, path, label in required
+        if (error := require_numeric_metric(payload, path, label)) is not None
+    ]
+
+
+def fixture_reference_scope_errors(
+    authority: dict[str, Any],
+    scope: dict[str, Any],
+    gate: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    if authority.get("capability_promotion_authoritative") is not False:
+        errors.append(
+            "fixture_reference_matrix.authority.capability_promotion_authoritative must be false"
+        )
+    if authority.get("production_complete") is not False:
+        errors.append("fixture_reference_matrix.authority.production_complete must be false")
+    if scope.get("coverage_kind") != "fixture_reference_regression":
+        errors.append(
+            "fixture_reference_matrix.scope.coverage_kind must be fixture_reference_regression"
+        )
+    if gate.get("scope") != "fixture_reference_regression":
+        errors.append(
+            "fixture_reference_matrix.gate.scope must be fixture_reference_regression"
+        )
+    return errors
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -22,13 +540,20 @@ def gate_mode(thresholds: dict[str, Any]) -> str:
 def gate_metric_thresholds(thresholds: dict[str, Any]) -> dict[str, Any]:
     metric_thresholds = thresholds.get("metric_thresholds")
     if isinstance(metric_thresholds, dict):
-        return metric_thresholds
-    out: dict[str, Any] = {}
-    for key, value in thresholds.items():
-        if key in {"required_workstreams_complete", "gate_mode", "special_rules"}:
-            continue
-        out[key] = value
-    return out
+        raw = metric_thresholds
+    else:
+        raw = {
+            key: value
+            for key, value in thresholds.items()
+            if key not in {"required_workstreams_complete", "gate_mode", "special_rules"}
+        }
+    # Commit reachability counts are retained as drift observations, never as
+    # functional parity evidence or release/CI gate inputs.
+    return {
+        key: value
+        for key, value in raw.items()
+        if key not in NON_EVIDENCE_GATE_METRICS
+    }
 
 
 def evaluate_gate(metrics: dict[str, float], thresholds: dict[str, Any]) -> dict[str, Any]:
@@ -76,13 +601,12 @@ def apply_ci_special_rules(
         if isinstance(checks, list):
             failed_checks = [c for c in checks if c.get("status") == "fail"]
             failed_metrics = {str(c.get("metric", "")).strip() for c in failed_checks}
-            allowed_metrics_raw = tree_rule_cfg.get(
-                "metrics", ["max_commits_behind", "max_upstream_patch_missing"]
-            )
+            allowed_metrics_raw = tree_rule_cfg.get("metrics", [])
             allowed_metrics = {
-                str(metric).strip()
+                normalized
                 for metric in allowed_metrics_raw
-                if str(metric).strip()
+                if (normalized := str(metric).strip())
+                and normalized not in NON_EVIDENCE_GATE_METRICS
             }
             release_ok = (not bool(tree_rule_cfg.get("requires_release_gate_pass", True))) or bool(
                 release_gate.get("pass", False)
@@ -94,7 +618,9 @@ def apply_ci_special_rules(
                 tree_rule_cfg.get("requires_min_test_coverage_tracked_behavior_ratio", 1.0)
             )
             sota_ratio = float(
-                tree_rule_cfg.get("requires_min_sota_harness_domain_coverage_ratio", 1.0)
+                tree_rule_cfg.get(
+                    "requires_min_fixture_reference_category_coverage_ratio", 1.0
+                )
             )
             behavioral_ratio = float(
                 tree_rule_cfg.get("requires_min_behavioral_similarity_ratio", 1.0)
@@ -122,7 +648,8 @@ def apply_ci_special_rules(
                 and metrics.get("max_unowned_divergences", 0.0) <= unowned_limit
                 and metrics.get("max_divergence_review_overdue", 0.0) <= review_limit
                 and metrics.get("min_test_coverage_tracked_behavior_ratio", 0.0) >= coverage_ratio
-                and metrics.get("min_sota_harness_domain_coverage_ratio", 0.0) >= sota_ratio
+                and metrics.get("min_fixture_reference_category_coverage_ratio", 0.0)
+                >= sota_ratio
                 and metrics.get("min_behavioral_similarity_ratio", 0.0) >= behavioral_ratio
                 and metrics.get("max_behavioral_regressions", 0.0)
                 <= behavioral_regression_limit
@@ -221,7 +748,9 @@ def apply_ci_special_rules(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate global parity proof report.")
+    parser = argparse.ArgumentParser(
+        description="Generate global parity gate report."
+    )
     parser.add_argument("--repo-root", default=".", help="Repository root path")
     parser.add_argument(
         "--thresholds",
@@ -272,6 +801,12 @@ def main() -> int:
         help="Upstream patch queue JSON file",
     )
     parser.add_argument(
+        "--source-ledger",
+        default="docs/parity/upstream-source-ledger.json",
+        type=Path,
+        help="Canonical fresh upstream/fork source ledger JSON file",
+    )
+    parser.add_argument(
         "--test-coverage-audit",
         default="docs/parity/test-coverage-audit.json",
         type=Path,
@@ -281,7 +816,7 @@ def main() -> int:
         "--sota-harness-matrix",
         default="docs/parity/sota-harness-matrix.json",
         type=Path,
-        help="SOTA harness matrix JSON file",
+        help="Fixture-reference regression matrix JSON file",
     )
     parser.add_argument(
         "--behavioral-diff",
@@ -307,11 +842,22 @@ def main() -> int:
         type=Path,
         help="Output proof markdown path",
     )
+    parser.add_argument(
+        "--max-source-age-seconds",
+        type=int,
+        default=3600,
+        help="Maximum accepted age for source-ledger fetch timestamps",
+    )
     parser.add_argument("--check-ci", action="store_true", help="Fail if CI gate fails")
     parser.add_argument("--check-release", action="store_true", help="Fail if release gate fails")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
+    output_errors = [
+        f"{label}: {error}"
+        for label, candidate in (("proof JSON", args.out_json), ("proof markdown", args.out_md))
+        if (error := generated_evidence_output_error(repo_root, candidate))
+    ]
     thresholds = load_json((repo_root / args.thresholds).resolve())
     parity = load_json((repo_root / args.parity_matrix).resolve())
     ws = load_json((repo_root / args.workstream_status).resolve())
@@ -324,6 +870,13 @@ def main() -> int:
     sota_harness = load_json((repo_root / args.sota_harness_matrix).resolve())
     behavioral_diff = load_json((repo_root / args.behavioral_diff).resolve())
     deep_problem_solving = load_json((repo_root / args.deep_problem_solving_diff).resolve())
+    source_ledger_path = (repo_root / args.source_ledger).resolve()
+    queue_provenance = validate_queue_provenance(
+        repo_root,
+        patch_queue,
+        source_ledger_path,
+        args.max_source_age_seconds,
+    )
 
     parity_summary = parity.get("summary", {})
     intent_summary = intents.get("summary", {})
@@ -334,6 +887,8 @@ def main() -> int:
     test_coverage_gate = test_coverage.get("audit_gate", {})
     sota_harness_summary = sota_harness.get("summary", {})
     sota_harness_gate = sota_harness.get("gate", {})
+    fixture_reference_authority = sota_harness.get("authority", {})
+    fixture_reference_scope = sota_harness.get("scope", {})
     behavioral_summary = behavioral_diff.get("summary", {})
     behavioral_gate = behavioral_diff.get("gate", {})
     deep_summary = deep_problem_solving.get("summary", {})
@@ -341,6 +896,39 @@ def main() -> int:
     ws_states = ws.get("states", {})
     shared_diff_items = {str(i.get("path", "")) for i in shared_diff.get("items", [])}
     parity_shared = {str(i.get("path", "")) for i in parity.get("top_shared_different", [])}
+    source_metric_errors = required_source_metric_errors(
+        parity_summary,
+        divergence_summary,
+        intent_summary,
+        test_coverage_summary,
+        test_coverage_gate,
+        sota_harness_summary,
+        sota_harness_gate,
+        behavioral_summary,
+        deep_summary,
+    )
+    fixture_reference_errors = fixture_reference_scope_errors(
+        fixture_reference_authority
+        if isinstance(fixture_reference_authority, dict)
+        else {},
+        fixture_reference_scope if isinstance(fixture_reference_scope, dict) else {},
+        sota_harness_gate if isinstance(sota_harness_gate, dict) else {},
+    )
+    parity_provenance_errors = parity_matrix_source_errors(parity, queue_provenance)
+    proof_truth_errors = [
+        *output_errors,
+        *queue_provenance["errors"],
+        *parity_provenance_errors,
+        *source_metric_errors,
+        *fixture_reference_errors,
+    ]
+    proof_truth = {
+        "pass": not proof_truth_errors,
+        "errors": proof_truth_errors,
+        "queue_provenance": queue_provenance,
+        "missing_metric_count": len(source_metric_errors),
+        "stale_source_count": len(parity_provenance_errors),
+    }
 
     gpar_completion = {
         "GPAR-01": float(intent_summary.get("mapping_ratio", 0.0)) >= 0.9,
@@ -350,7 +938,10 @@ def main() -> int:
         "GPAR-05": any(i.get("id") == "environment-lifecycle-contract" and i.get("mapped") for i in intents.get("intents", []))
         and any(i.get("id") == "tool-call-parser-contract" and i.get("mapped") for i in intents.get("intents", [])),
         "GPAR-06": parity_shared.issubset(shared_diff_items),
-        "GPAR-07": int(queue_summary.get("total_commits", 0)) > 0,
+        "GPAR-07": bool(proof_truth["pass"])
+        and int(queue_summary.get("total_commits", 0)) > 0
+        and int(queue_summary.get("by_disposition", {}).get("pending", 0)) == 0
+        and int(queue_summary.get("unowned_divergence_count", 0)) == 0,
         "GPAR-08": int(divergence_summary.get("errors", 0)) == 0
         and int(divergence_summary.get("unowned", 0)) == 0
         and int(divergence_summary.get("review_overdue", 0)) == 0,
@@ -359,9 +950,11 @@ def main() -> int:
         "GPAR-11": bool(deep_gate.get("pass", False)),
     }
 
+    drift_observations = {
+        "commits_behind": float(parity_summary.get("commits_behind", 0)),
+        "upstream_patch_missing": float(parity_summary.get("upstream_patch_missing", 0)),
+    }
     metrics = {
-        "max_commits_behind": float(parity_summary.get("commits_behind", 0)),
-        "max_upstream_patch_missing": float(parity_summary.get("upstream_patch_missing", 0)),
         "max_files_only_upstream": float(parity_summary.get("files_only_upstream", 0)),
         "max_unowned_divergences": float(divergence_summary.get("unowned", 0)),
         "max_divergence_review_overdue": float(divergence_summary.get("review_overdue", 0)),
@@ -375,13 +968,13 @@ def main() -> int:
         "max_test_coverage_missing_rust_refs": float(
             test_coverage_summary.get("missing_rust_test_refs", 0)
         ),
-        "min_sota_harness_domain_coverage_ratio": float(
+        "min_fixture_reference_category_coverage_ratio": float(
             sota_harness_summary.get("domain_coverage_ratio", 0.0)
         ),
-        "max_sota_harness_critical_gaps": float(
+        "max_fixture_reference_critical_gaps": float(
             sota_harness_gate.get("critical_gaps", 0)
         ),
-        "max_sota_harness_missing_rust_refs": float(
+        "max_fixture_reference_missing_rust_refs": float(
             sota_harness_gate.get("missing_rust_test_refs", 0)
         ),
         "min_behavioral_similarity_ratio": float(
@@ -461,35 +1054,49 @@ def main() -> int:
         release_gate=release_gate,
         ci_thresholds=thresholds.get("ci_thresholds", {}),
     )
+    append_truth_failure(ci_gate, "source_provenance_and_required_metrics", proof_truth_errors)
+    append_truth_failure(
+        release_gate,
+        "source_provenance_and_required_metrics",
+        proof_truth_errors,
+    )
 
     payload = {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "program": thresholds.get("program", {}),
         "metrics": metrics,
+        "drift_observations": drift_observations,
         "gpar_completion": gpar_completion,
         "ws_legacy_states": ws_states,
         "ci_gate": ci_gate,
         "release_gate": release_gate,
         "sources": {
-            "thresholds": str(args.thresholds),
-            "parity_matrix": str(args.parity_matrix),
-            "workstream_status": str(args.workstream_status),
-            "intent_mapping": str(args.intent_mapping),
-            "adapter_matrix": str(args.adapter_matrix),
-            "shared_diff_classification": str(args.shared_diff_classification),
-            "divergence_validation": str(args.divergence_validation),
-            "patch_queue": str(args.patch_queue),
-            "test_coverage_audit": str(args.test_coverage_audit),
-            "sota_harness_matrix": str(args.sota_harness_matrix),
-            "behavioral_diff": str(args.behavioral_diff),
-            "deep_problem_solving_diff": str(args.deep_problem_solving_diff),
+            name: public_repo_relative_path(repo_root, path)
+            for name, path in {
+                "thresholds": args.thresholds,
+                "parity_matrix": args.parity_matrix,
+                "workstream_status": args.workstream_status,
+                "intent_mapping": args.intent_mapping,
+                "adapter_matrix": args.adapter_matrix,
+                "shared_diff_classification": args.shared_diff_classification,
+                "divergence_validation": args.divergence_validation,
+                "patch_queue": args.patch_queue,
+                "test_coverage_audit": args.test_coverage_audit,
+                "fixture_reference_matrix": args.sota_harness_matrix,
+                "behavioral_diff": args.behavioral_diff,
+                "deep_problem_solving_diff": args.deep_problem_solving_diff,
+                "source_ledger": args.source_ledger,
+            }.items()
         },
+        "truth": proof_truth,
         "queue_summary": queue_summary,
         "test_coverage_audit_summary": {
             "summary": test_coverage_summary,
             "audit_gate": test_coverage_gate,
         },
-        "sota_harness_summary": {
+        "fixture_reference_coverage": {
+            "authority": fixture_reference_authority,
+            "scope": fixture_reference_scope,
             "summary": sota_harness_summary,
             "gate": sota_harness_gate,
         },
@@ -505,21 +1112,13 @@ def main() -> int:
 
     out_json = (repo_root / args.out_json).resolve()
     out_md = (repo_root / args.out_md).resolve()
-    if args.check_release or args.check_ci:
-        print(f"Checked {out_json}")
-        print(f"Checked {out_md}")
-        if args.check_release and not release_gate["pass"]:
-            return 1
-        if args.check_ci and not ci_gate["pass"]:
-            return 1
-        return 0
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     md = [
-        "# Global Parity Proof",
+        "# Global Parity Gate Report",
         "",
         f"Generated: `{payload['generated_at_utc']}`",
         "",
@@ -530,6 +1129,11 @@ def main() -> int:
         f"- Release gate: **{'PASS' if release_gate['pass'] else 'FAIL'}**",
         f"- Release gate mode: `{release_gate.get('mode', 'legacy')}`",
         "",
+        "## Source Truth",
+        "",
+        f"- Source truth: **{'PASS' if proof_truth['pass'] else 'FAIL'}**",
+        f"- Provenance or required-metric errors: `{len(proof_truth_errors)}`",
+        "",
         "## Metrics",
         "",
         "| Metric | Value |",
@@ -537,6 +1141,12 @@ def main() -> int:
     ]
     for key, value in metrics.items():
         md.append(f"| `{key}` | {value} |")
+    md.append("")
+    md.append("## Drift Observations (Non-Gating)")
+    md.append("")
+    md.append("- Commit reachability counts are not parity evidence.")
+    for key, value in drift_observations.items():
+        md.append(f"- `{key}`: `{value}`")
     md.append("")
     md.append("## GPAR Ticket Completion")
     md.append("")
@@ -560,20 +1170,40 @@ def main() -> int:
     )
     md.append("")
 
-    md.append("## SOTA Harness Matrix")
+    md.append("## Fixture-Reference Regression Hygiene (Non-Authoritative)")
     md.append("")
-    md.append(f"- Harness gate: **{'PASS' if sota_harness_gate.get('pass') else 'FAIL'}**")
     md.append(
-        "- Domain coverage ratio: "
+        "- Coverage scope: "
+        f"`{fixture_reference_scope.get('coverage_kind', 'missing')}`"
+    )
+    md.append(
+        "- Capability-promotion authority: "
+        f"`{str(fixture_reference_authority.get('capability_promotion_authoritative', 'missing')).lower()}`"
+    )
+    md.append(
+        "- Production complete: "
+        f"`{str(fixture_reference_authority.get('production_complete', 'missing')).lower()}`"
+    )
+    md.append(
+        "- Fixture-reference matrix metrics below are regression hygiene only and do not establish production completeness."
+    )
+    md.append(
+        f"- Fixture/reference gate: **{'PASS' if sota_harness_gate.get('pass') else 'FAIL'}**"
+    )
+    md.append(
+        "- Fixture-category coverage ratio: "
         f"`{sota_harness_summary.get('domain_coverage_ratio', 0)}`"
     )
-    md.append(f"- Critical gaps: `{sota_harness_gate.get('critical_gaps', 0)}`")
     md.append(
-        "- Missing Rust test refs: "
+        "- Unresolved fixture-reference gaps: "
+        f"`{sota_harness_gate.get('critical_gaps', 0)}`"
+    )
+    md.append(
+        "- Missing referenced Rust test refs: "
         f"`{sota_harness_gate.get('missing_rust_test_refs', 0)}`"
     )
     md.append(
-        "- Direct Rust tests: "
+        "- Referenced Rust tests: "
         f"`{sota_harness_summary.get('direct_rust_tests', 0)}`"
     )
     md.append("")
@@ -652,6 +1282,10 @@ def main() -> int:
     print(f"Wrote {out_json}")
     print(f"Wrote {out_md}")
 
+    if args.check_release and not release_gate["pass"]:
+        return 1
+    if args.check_ci and not ci_gate["pass"]:
+        return 1
     return 0
 
 

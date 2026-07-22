@@ -1,3 +1,5 @@
+use crate::media::stage_media_delivery_path;
+
 impl Gateway {
     /// Non-streaming message routing: invoke agent, send complete response.
     async fn route_non_streaming(
@@ -5,63 +7,108 @@ impl Gateway {
         incoming: &IncomingMessage,
         messages: Vec<Message>,
         session_key: &str,
+        lease: &TurnLease,
+        delivery_started: &AtomicBool,
     ) -> Result<(), GatewayError> {
-        self.emit_hook_event(
-            "agent:start",
-            serde_json::json!({
-                "platform": incoming.platform,
-                "chat_id": incoming.chat_id,
-                "user_id": incoming.user_id,
-                "session_id": session_key,
-                "streaming": false
-            }),
-        )
-        .await;
+        self.emit_turn_start(incoming, session_key, lease, false)
+            .await?;
         let deferred_messages = Arc::new(StdMutex::new(Vec::new()));
         let deferred_release = Arc::new(AtomicBool::new(false));
-        let mut runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let mut runtime_context = self
+            .build_runtime_context(incoming, session_key, Some(lease))
+            .await;
         runtime_context.deferred_post_delivery_messages = Some(deferred_messages.clone());
         runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.message_handler_with_context.read().await.clone();
-        let response_result = if let Some(handler) = context_handler {
-            handler(messages, runtime_context).await
-        } else {
-            let handler = self.message_handler.read().await;
-            let handler = handler
-                .as_ref()
-                .ok_or_else(|| GatewayError::Platform("No message handler configured".into()))?;
-            let messages = self.inject_runtime_hints(session_key, messages).await;
-            handler(messages).await
+        if !self.is_turn_current(lease).await {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before handler start".to_string(),
+            ));
+        }
+        let turn_timeout_secs = self.config.turn_timeout_secs.max(1);
+        let response_result = match tokio::time::timeout(
+            Duration::from_secs(turn_timeout_secs),
+            async {
+                if let Some(handler) = context_handler {
+                    handler(messages, runtime_context).await
+                } else {
+                    let handler = self.message_handler.read().await.clone();
+                    let handler = handler.ok_or_else(|| {
+                        GatewayError::Platform("No message handler configured".into())
+                    })?;
+                    let messages = self.inject_runtime_hints(session_key, messages).await;
+                    handler(messages).await
+                }
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                let _ = self.busy_sessions.write().await.interrupt_if_current(
+                    lease,
+                    "Gateway turn deadline exceeded; stop active agent and tool work.",
+                );
+                Err(GatewayError::Platform(format!(
+                    "gateway turn timed out after {turn_timeout_secs}s"
+                )))
+            }
         };
         let response = match response_result {
             Ok(text) => text,
             Err(e) => {
-                self.emit_hook_event(
-                    "agent:end",
-                    serde_json::json!({
-                        "platform": incoming.platform,
-                        "chat_id": incoming.chat_id,
-                        "user_id": incoming.user_id,
-                        "session_id": session_key,
-                        "streaming": false,
-                        "success": false,
-                        "error": e.to_string()
-                    }),
+                let turn_lock = self.session_turn_lock(session_key).await;
+                let error_guard = turn_lock.lock().await;
+                let busy = self.busy_sessions.read().await;
+                if !busy.is_current(lease) {
+                    return Err(GatewayError::SessionExpired(
+                        "gateway turn was reset before error lifecycle commit".to_string(),
+                    ));
+                }
+                drop(busy);
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.emit_hook_event(
+                        "agent:end",
+                        serde_json::json!({
+                            "platform": incoming.platform,
+                            "chat_id": incoming.chat_id,
+                            "user_id": incoming.user_id,
+                            "session_id": session_key,
+                            "streaming": false,
+                            "success": false,
+                            "error": e.to_string()
+                        }),
+                    ),
                 )
                 .await;
+                drop(error_guard);
                 return Err(e);
             }
         };
 
-        // Add assistant response to session
+        let reply_thread_id = Self::reply_thread_id(incoming);
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let commit_guard = turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before response commit".to_string(),
+            ));
+        }
         self.session_manager
             .add_message(session_key, Message::assistant(&response))
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
+        drop(busy);
 
-        // Send response back to the platform
-        let reply_thread_id = Self::reply_thread_id(incoming);
+        // Once the outbound call starts, cancellation or transport failure
+        // cannot prove Discord/the adapter did not accept the response. Do
+        // not impose a second 30-second umbrella timeout here: every typed
+        // adapter operation below has its own finite delivery bound, and that
+        // bound must be allowed to return PartialDelivery/ambiguous evidence.
+        delivery_started.store(true, Ordering::Release);
         self.send_notify_message_threaded(
             &incoming.platform,
             &incoming.chat_id,
@@ -78,19 +125,23 @@ impl Gateway {
             deferred_release,
         )
         .await;
-        self.emit_hook_event(
-            "agent:end",
-            serde_json::json!({
-                "platform": incoming.platform,
-                "chat_id": incoming.chat_id,
-                "user_id": incoming.user_id,
-                "session_id": session_key,
-                "streaming": false,
-                "success": true,
-                "response_chars": response.chars().count()
-            }),
+        let _ = tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            self.emit_hook_event(
+                "agent:end",
+                serde_json::json!({
+                    "platform": incoming.platform,
+                    "chat_id": incoming.chat_id,
+                    "user_id": incoming.user_id,
+                    "session_id": session_key,
+                    "streaming": false,
+                    "success": true,
+                    "response_chars": response.chars().count()
+                }),
+            ),
         )
         .await;
+        drop(commit_guard);
 
         Ok(())
     }
@@ -101,21 +152,16 @@ impl Gateway {
         incoming: &IncomingMessage,
         messages: Vec<Message>,
         session_key: &str,
+        lease: &TurnLease,
+        delivery_started: &AtomicBool,
     ) -> Result<(), GatewayError> {
-        self.emit_hook_event(
-            "agent:start",
-            serde_json::json!({
-                "platform": incoming.platform,
-                "chat_id": incoming.chat_id,
-                "user_id": incoming.user_id,
-                "session_id": session_key,
-                "streaming": true
-            }),
-        )
-        .await;
+        self.emit_turn_start(incoming, session_key, lease, true)
+            .await?;
         let deferred_messages = Arc::new(StdMutex::new(Vec::new()));
         let deferred_release = Arc::new(AtomicBool::new(false));
-        let mut runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let mut runtime_context = self
+            .build_runtime_context(incoming, session_key, Some(lease))
+            .await;
         runtime_context.deferred_post_delivery_messages = Some(deferred_messages.clone());
         runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.streaming_handler_with_context.read().await.clone();
@@ -123,101 +169,258 @@ impl Gateway {
             .inject_runtime_hints(session_key, messages.clone())
             .await;
 
-        // Start a stream
+        let stream_turn_lock = self.session_turn_lock(session_key).await;
+        let start_guard = stream_turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before streaming start".to_string(),
+            ));
+        }
         let stream_handle = self
             .stream_manager
             .start_stream(&incoming.platform, &incoming.chat_id)
             .await;
         let stream_id = stream_handle.id.clone();
-
-        // Send an initial streaming anchor message.
         let reply_thread_id = Self::reply_thread_id(incoming).map(str::to_string);
-        self.send_message_threaded(
-            &incoming.platform,
-            &incoming.chat_id,
-            "...",
-            None,
-            reply_thread_id.as_deref(),
-        )
-        .await?;
+        drop(busy);
+        delivery_started.store(true, Ordering::Release);
+        let anchor_result = match AssertUnwindSafe(tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            self.send_message_threaded(
+                &incoming.platform,
+                &incoming.chat_id,
+                "...",
+                None,
+                reply_thread_id.as_deref(),
+            ),
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(GatewayError::Platform(
+                "gateway streaming anchor delivery timed out".to_string(),
+            )),
+            Err(_) => Err(GatewayError::Platform(
+                "gateway streaming anchor delivery panicked".to_string(),
+            )),
+        };
+        drop(start_guard);
+        if let Err(error) = anchor_result {
+            self.stream_manager.finish_stream(&stream_id).await;
+            return Err(error);
+        }
 
-        // Set up the chunk callback that updates the stream and edits the message
+        // Serialize chunk updates through one supervised worker. This avoids
+        // spawning one task per token while preserving ordered stream edits.
         let stream_manager = self.stream_manager.clone();
         let platform = incoming.platform.clone();
         let chat_id = incoming.chat_id.clone();
         let thread_id = reply_thread_id.clone();
         let gateway_adapters = self.adapters.read().await.clone();
+        let busy_sessions = self.busy_sessions.clone();
+        let turn_lease = lease.clone();
+        let chunk_turn_lock = stream_turn_lock.clone();
         let sid = stream_id.clone();
-
-        let on_chunk: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |chunk: String| {
-            let sm = stream_manager.clone();
-            let sid = sid.clone();
-            let platform = platform.clone();
-            let chat_id = chat_id.clone();
-            let thread_id = thread_id.clone();
-            let adapters = gateway_adapters.clone();
-
-            tokio::spawn(async move {
-                if let Some(should_flush) = sm.update_stream(&sid, &chunk).await {
-                    if should_flush {
-                        if let Some(content) = sm.get_stream_content(&sid).await {
-                            if let Some(adapter) = adapters.get(&platform) {
-                                // For streaming, we'd need the message_id from the initial send.
-                                // This is a simplified version.
-                                let _ = adapter
-                                    .send_message_with_options(
-                                        &chat_id,
-                                        &content,
-                                        None,
-                                        SendMessageOptions::threaded(thread_id.as_deref()),
-                                    )
-                                    .await;
+        let shutting_down = self.shutting_down.clone();
+        let chunk_mailbox = Arc::new(StreamChunkMailbox::default());
+        let chunk_mailbox_closer = StreamChunkMailboxCloser(chunk_mailbox.clone());
+        let worker_mailbox = chunk_mailbox.clone();
+        let (chunk_done_tx, chunk_done_rx) = tokio::sync::oneshot::channel::<()>();
+        let (chunk_start_tx, chunk_start_rx) = tokio::sync::oneshot::channel::<()>();
+        let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
+        let workers = self.turn_workers.clone();
+        let handle = tokio::spawn(async move {
+            if chunk_start_rx.await.is_ok() {
+                let _ = AssertUnwindSafe(async {
+                    while let Some(chunk) = worker_mailbox.recv().await {
+                        if shutting_down.load(Ordering::Acquire) {
+                            break;
+                        }
+                        let _commit_guard = chunk_turn_lock.lock().await;
+                        if !busy_sessions.read().await.is_current(&turn_lease) {
+                            break;
+                        }
+                        if let Some(should_flush) =
+                            stream_manager.update_stream(&sid, &chunk).await
+                        {
+                            if should_flush {
+                                if let Some(content) =
+                                    stream_manager.get_stream_content(&sid).await
+                                {
+                                    if let Some(adapter) = gateway_adapters.get(&platform) {
+                                        let _ = Self::await_adapter_call(
+                                            "stream chunk delivery",
+                                            SESSION_COMMIT_TIMEOUT,
+                                            || {
+                                                adapter.send_message_with_options(
+                                                    &chat_id,
+                                                    &content,
+                                                    None,
+                                                    SendMessageOptions::threaded(
+                                                        thread_id.as_deref(),
+                                                    ),
+                                                )
+                                            },
+                                        )
+                                        .await;
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            });
+                })
+                .catch_unwind()
+                .await;
+                let _ = chunk_done_tx.send(());
+            }
+            workers.lock().unwrap().remove(&worker_id);
         });
+        let mut handle = Some(handle);
+        let rejected = {
+            let mut registered_workers = self.turn_workers.lock().unwrap();
+            if self.shutting_down.load(Ordering::Acquire) {
+                true
+            } else {
+                registered_workers.insert(
+                    worker_id,
+                    handle.take().expect("stream worker handle missing"),
+                );
+                false
+            }
+        };
+        if rejected {
+            handle
+                .take()
+                .expect("rejected stream worker handle missing")
+                .abort();
+            self.stream_manager.finish_stream(&stream_id).await;
+            return Err(GatewayError::SessionExpired(
+                "gateway is shutting down".to_string(),
+            ));
+        }
+        if chunk_start_tx.send(()).is_err() {
+            if let Some(handle) = self.turn_workers.lock().unwrap().remove(&worker_id) {
+                handle.abort();
+            }
+            self.stream_manager.finish_stream(&stream_id).await;
+            return Err(GatewayError::Platform(
+                "stream chunk worker ended before startup".to_string(),
+            ));
+        }
+        let callback_mailbox = chunk_mailbox.clone();
+        let on_chunk: Arc<dyn Fn(String) + Send + Sync> =
+            Arc::new(move |chunk: String| callback_mailbox.push(chunk));
 
         // Invoke the streaming handler
-        let response_result = if let Some(handler) = context_handler {
-            handler(messages, runtime_context, on_chunk).await
-        } else {
-            let handler = self.streaming_handler.read().await;
-            let handler = handler
-                .as_ref()
-                .ok_or_else(|| GatewayError::Platform("No streaming handler configured".into()))?;
-            handler(legacy_messages, on_chunk).await
+        if !self.is_turn_current(lease).await {
+            self.stream_manager.finish_stream(&stream_id).await;
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before streaming handler start".to_string(),
+            ));
+        }
+        let turn_timeout_secs = self.config.turn_timeout_secs.max(1);
+        let mut response_result = match tokio::time::timeout(
+            Duration::from_secs(turn_timeout_secs),
+            AssertUnwindSafe(async {
+                if let Some(handler) = context_handler {
+                    handler(messages, runtime_context, on_chunk).await
+                } else {
+                    let handler = self.streaming_handler.read().await.clone();
+                    match handler {
+                        Some(handler) => handler(legacy_messages, on_chunk).await,
+                        None => Err(GatewayError::Platform(
+                            "No streaming handler configured".into(),
+                        )),
+                    }
+                }
+            })
+            .catch_unwind(),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(GatewayError::Platform(
+                "gateway streaming handler panicked".to_string(),
+            )),
+            Err(_) => {
+                let _ = self.busy_sessions.write().await.interrupt_if_current(
+                    lease,
+                    "Gateway streaming turn deadline exceeded; stop active agent and tool work.",
+                );
+                Err(GatewayError::Platform(format!(
+                    "gateway streaming turn timed out after {turn_timeout_secs}s"
+                )))
+            }
         };
+        chunk_mailbox_closer.0.close();
+        let chunk_drained = matches!(
+            tokio::time::timeout(SESSION_COMMIT_TIMEOUT, chunk_done_rx).await,
+            Ok(Ok(()))
+        );
+        if !chunk_drained {
+            if let Some(handle) = self.turn_workers.lock().unwrap().remove(&worker_id) {
+                handle.abort();
+            }
+            if response_result.is_ok() {
+                response_result = Err(GatewayError::Platform(
+                    "stream chunk worker did not drain before final delivery".to_string(),
+                ));
+            }
+        }
         let response = match response_result {
             Ok(text) => text,
             Err(e) => {
-                self.emit_hook_event(
-                    "agent:end",
-                    serde_json::json!({
-                        "platform": incoming.platform,
-                        "chat_id": incoming.chat_id,
-                        "user_id": incoming.user_id,
-                        "session_id": session_key,
-                        "streaming": true,
-                        "success": false,
-                        "error": e.to_string()
-                    }),
+                self.stream_manager.finish_stream(&stream_id).await;
+                let error_guard = stream_turn_lock.lock().await;
+                let busy = self.busy_sessions.read().await;
+                if !busy.is_current(lease) {
+                    return Err(GatewayError::SessionExpired(
+                        "gateway turn was reset before streaming error lifecycle commit"
+                            .to_string(),
+                    ));
+                }
+                drop(busy);
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.emit_hook_event(
+                        "agent:end",
+                        serde_json::json!({
+                            "platform": incoming.platform,
+                            "chat_id": incoming.chat_id,
+                            "user_id": incoming.user_id,
+                            "session_id": session_key,
+                            "streaming": true,
+                            "success": false,
+                            "error": e.to_string()
+                        }),
+                    ),
                 )
                 .await;
+                drop(error_guard);
                 return Err(e);
             }
         };
 
         // Finish the stream
         self.stream_manager.finish_stream(&stream_id).await;
-
-        // Add assistant response to session
+        let commit_guard = stream_turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before streaming response commit".to_string(),
+            ));
+        }
         self.session_manager
             .add_message(session_key, Message::assistant(&response))
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
+        drop(busy);
+        // Final delivery owns typed, finite adapter deadlines. A 30-second
+        // wrapper would cancel a compound Discord forum/upload operation
+        // after an accepted prefix and discard its PartialDelivery evidence.
         if !response.trim().is_empty() {
             self.send_notify_message_threaded(
                 &incoming.platform,
@@ -236,20 +439,61 @@ impl Gateway {
             deferred_release,
         )
         .await;
-        self.emit_hook_event(
-            "agent:end",
-            serde_json::json!({
-                "platform": incoming.platform,
-                "chat_id": incoming.chat_id,
-                "user_id": incoming.user_id,
-                "session_id": session_key,
-                "streaming": true,
-                "success": true,
-                "response_chars": response.chars().count()
-            }),
+        let _ = tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            self.emit_hook_event(
+                "agent:end",
+                serde_json::json!({
+                    "platform": incoming.platform,
+                    "chat_id": incoming.chat_id,
+                    "user_id": incoming.user_id,
+                    "session_id": session_key,
+                    "streaming": true,
+                    "success": true,
+                    "response_chars": response.chars().count()
+                }),
+            ),
         )
         .await;
+        drop(commit_guard);
 
+        Ok(())
+    }
+
+    async fn emit_turn_start(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+        lease: &TurnLease,
+        streaming: bool,
+    ) -> Result<(), GatewayError> {
+        let turn_lock = self.session_turn_lock(session_key).await;
+        let start_guard = turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before start lifecycle commit".to_string(),
+            ));
+        }
+        drop(busy);
+        tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            self.emit_hook_event(
+                "agent:start",
+                serde_json::json!({
+                    "platform": incoming.platform,
+                    "chat_id": incoming.chat_id,
+                    "user_id": incoming.user_id,
+                    "session_id": session_key,
+                    "streaming": streaming
+                }),
+            ),
+        )
+        .await
+        .map_err(|_| {
+            GatewayError::Platform("gateway start lifecycle hook timed out".to_string())
+        })?;
+        drop(start_guard);
         Ok(())
     }
 
@@ -307,6 +551,7 @@ impl Gateway {
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
+        lease: Option<&TurnLease>,
     ) -> GatewayRuntimeContext {
         let default_model = self.default_model.read().await.clone();
         let state = self
@@ -317,10 +562,22 @@ impl Gateway {
             .cloned()
             .unwrap_or_default();
         let mcp_reload_generation = *self.mcp_reload_generation.read().await;
+        let session_id = self
+            .session_manager
+            .get_session(session_key)
+            .await
+            .map(|session| session.id);
 
         GatewayRuntimeContext {
             session_key: session_key.to_string(),
             platform: incoming.platform.clone(),
+            tenant_id: (!incoming.platform.trim().is_empty())
+                .then(|| incoming.platform.clone()),
+            // IncomingMessage has no authenticated team field. Do not infer
+            // one from a group chat id and accidentally widen visibility.
+            team_id: None,
+            session_id,
+            is_dm: incoming.is_dm,
             chat_id: incoming.chat_id.clone(),
             thread_id: incoming.thread_id.clone(),
             user_id: incoming.user_id.clone(),
@@ -338,10 +595,9 @@ impl Gateway {
             yolo: state.yolo,
             reasoning: state.reasoning,
             mcp_reload_generation,
-            busy_control: Some(BusyControlRegistration::new(
-                session_key,
-                self.busy_sessions.clone(),
-            )),
+            busy_control: lease.map(|lease| {
+                BusyControlRegistration::new(lease.clone(), self.busy_sessions.clone())
+            }),
             deferred_post_delivery_messages: None,
             deferred_post_delivery_released: None,
         }
@@ -380,6 +636,29 @@ impl Gateway {
                 );
             }
         }
+    }
+
+    async fn send_turn_bound_message(
+        &self,
+        incoming: &IncomingMessage,
+        lease: &TurnLease,
+        text: &str,
+    ) -> Result<(), GatewayError> {
+        let turn_lock = self.session_turn_lock(lease.session_key()).await;
+        let _commit_guard = turn_lock.lock().await;
+        let busy = self.busy_sessions.read().await;
+        if !busy.is_current(lease) {
+            return Err(GatewayError::SessionExpired(
+                "gateway turn was reset before message delivery".to_string(),
+            ));
+        }
+        drop(busy);
+        tokio::time::timeout(
+            SESSION_COMMIT_TIMEOUT,
+            self.send_message(&incoming.platform, &incoming.chat_id, text, None),
+        )
+        .await
+        .map_err(|_| GatewayError::Platform("gateway message delivery timed out".to_string()))?
     }
 
     async fn bump_input_usage(&self, session_key: &str, chars: usize) {
@@ -453,7 +732,13 @@ impl Gateway {
         Ok(out)
     }
 
-    async fn compress_context(&self, session_key: &str, max_messages: usize) -> CompressionOutcome {
+    async fn compress_context(
+        &self,
+        session_key: &str,
+        max_messages: usize,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
+    ) -> CompressionOutcome {
         let current = self.session_manager.get_messages(session_key).await;
         if current.len() <= max_messages {
             return CompressionOutcome::default();
@@ -494,9 +779,13 @@ impl Gateway {
         }
         compressed.extend(tail);
 
-        self.session_manager
+        let replaced = self
+            .session_manager
             .replace_messages(session_key, compressed)
             .await;
+        if replaced {
+            self.commit_command_dedup(dedup_key, dedup_claim).await;
+        }
         CompressionOutcome {
             removed_messages,
             summary_warning,
@@ -574,7 +863,14 @@ impl Gateway {
         session_key: &str,
         prompt: &str,
         isolated_context: bool,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<bool, GatewayError> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(GatewayError::Platform(
+                "gateway is shutting down".to_string(),
+            ));
+        }
         let trimmed = prompt.trim();
         if trimmed.eq_ignore_ascii_case("list") {
             let tasks = self.background_tasks.list_tasks();
@@ -593,6 +889,9 @@ impl Gateway {
         }
         if let Some(task_id) = trimmed.strip_prefix("cancel ").map(str::trim) {
             let ok = self.background_tasks.cancel(task_id);
+            if ok {
+                self.commit_command_dedup(dedup_key, dedup_claim).await;
+            }
             let msg = if ok {
                 format!("Cancelled background task {}", task_id)
             } else {
@@ -621,27 +920,6 @@ impl Gateway {
             return Ok(true);
         }
 
-        let task_id = if isolated_context {
-            Self::python_async_task_id("btw")
-        } else {
-            Self::python_async_task_id("bg")
-        };
-        self.background_tasks
-            .submit_with_id(task_id.clone(), trimmed.to_string())
-            .map_err(GatewayError::Platform)?;
-
-        let preview = Self::gateway_command_preview(trimmed);
-        let ack = if isolated_context {
-            format!("💬 /btw: \"{}\"\nReply will appear here shortly.", preview)
-        } else {
-            format!(
-                "🔄 Background task started: \"{}\"\nTask ID: {}\nYou can keep chatting — results will appear when done.",
-                preview, task_id
-            )
-        };
-        self.send_message(&incoming.platform, &incoming.chat_id, &ack, None)
-            .await?;
-
         let legacy_handler = self.message_handler.read().await.as_ref().cloned();
         let context_handler = self
             .message_handler_with_context
@@ -654,6 +932,23 @@ impl Gateway {
                 "No message handler configured".into(),
             ));
         }
+
+        let task_id = if isolated_context {
+            Self::python_async_task_id("btw")
+        } else {
+            Self::python_async_task_id("bg")
+        };
+
+        let preview = Self::gateway_command_preview(trimmed);
+        let ack = if isolated_context {
+            format!("💬 /btw: \"{}\"\nReply will appear here shortly.", preview)
+        } else {
+            format!(
+                "🔄 Background task started: \"{}\"\nTask ID: {}\nYou can keep chatting — results will appear when done.",
+                preview, task_id
+            )
+        };
+
         let manager = self.background_tasks.clone();
         let task_id_for_task = task_id.clone();
         let adapters = self.adapters.read().await.clone();
@@ -676,59 +971,164 @@ impl Gateway {
             vec![Message::user(trimmed)]
         };
         let legacy_messages = original_messages.clone();
-        let runtime_context = self.build_runtime_context(incoming, session_key).await;
-        tokio::spawn(async move {
-            let result = if let Some(handler) = context_handler {
-                handler(original_messages, runtime_context).await
-            } else if let Some(handler) = legacy_handler {
-                handler(legacy_messages).await
-            } else {
-                Err(GatewayError::Platform(
-                    "No message handler configured".into(),
-                ))
+        let runtime_context = self.build_runtime_context(incoming, session_key, None).await;
+        let turn_timeout_secs = self.config.turn_timeout_secs.max(1);
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(GatewayError::Platform(
+                "gateway is shutting down".to_string(),
+            ));
+        }
+        self.background_tasks
+            .submit_with_id(task_id.clone(), trimmed.to_string())
+            .map_err(GatewayError::Platform)?;
+        let shutting_down = self.shutting_down.clone();
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let _worker_guard = manager.worker_guard(task_id_for_task.clone());
+            if start_rx.await.is_err() {
+                manager.fail(
+                    &task_id_for_task,
+                    "background startup abandoned".to_string(),
+                );
+                return;
+            }
+            if shutting_down.load(Ordering::Acquire) {
+                manager.fail(
+                    &task_id_for_task,
+                    "gateway is shutting down".to_string(),
+                );
+                return;
+            }
+            if let Some(adapter) = adapters.get(&platform) {
+                if let Err(error) = Self::await_adapter_call(
+                    "background start acknowledgement",
+                    NONCRITICAL_ADAPTER_TIMEOUT,
+                    || {
+                        adapter.send_message_with_options(
+                            &chat_id,
+                            &ack,
+                            None,
+                            SendMessageOptions::notify_threaded(thread_id.as_deref()),
+                        )
+                    },
+                )
+                .await
+                {
+                    warn!(
+                        platform = %platform,
+                        chat_id = %chat_id,
+                        task_id = %task_id_for_task,
+                        error = %error,
+                        "failed to acknowledge accepted background task; work remains owned"
+                    );
+                }
+            }
+            let result = match tokio::time::timeout(
+                Duration::from_secs(turn_timeout_secs),
+                AssertUnwindSafe(async {
+                    if let Some(handler) = context_handler {
+                        handler(original_messages, runtime_context).await
+                    } else if let Some(handler) = legacy_handler {
+                        handler(legacy_messages).await
+                    } else {
+                        Err(GatewayError::Platform(
+                            "No message handler configured".into(),
+                        ))
+                    }
+                })
+                .catch_unwind(),
+            )
+            .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => Err(GatewayError::Platform(
+                    "background task handler panicked".to_string(),
+                )),
+                Err(_) => Err(GatewayError::Platform(format!(
+                    "background task timed out after {turn_timeout_secs}s"
+                ))),
             };
 
             match result {
                 Ok(result) => {
-                    manager.complete(&task_id_for_task, result.clone());
+                    if !manager.complete(&task_id_for_task, result.clone()) {
+                        return;
+                    }
+                    if shutting_down.load(Ordering::Acquire) {
+                        return;
+                    }
                     if let Some(adapter) = adapters.get(&platform) {
                         let prefix = if isolated_context {
                             "💬 /btw result".to_string()
                         } else {
                             format!("✅ Background task {notify_task_id} completed")
                         };
-                        let _ = adapter
-                            .send_message_with_options(
-                                &chat_id,
-                                &format!("{prefix}:\n{result}"),
-                                None,
-                                SendMessageOptions::notify_threaded(thread_id.as_deref()),
-                            )
-                            .await;
+                        let notification = format!("{prefix}:\n{result}");
+                        let _ = Self::await_adapter_call(
+                            "background completion delivery",
+                            SESSION_COMMIT_TIMEOUT,
+                            || {
+                                adapter.send_message_with_options(
+                                    &chat_id,
+                                    &notification,
+                                    None,
+                                    SendMessageOptions::notify_threaded(
+                                        thread_id.as_deref(),
+                                    ),
+                                )
+                            },
+                        )
+                        .await;
                     }
                 }
                 Err(err) => {
                     let error = err.to_string();
-                    manager.fail(&task_id_for_task, error.clone());
+                    if !manager.fail(&task_id_for_task, error.clone()) {
+                        return;
+                    }
+                    if shutting_down.load(Ordering::Acquire) {
+                        return;
+                    }
                     if let Some(adapter) = adapters.get(&platform) {
                         let prefix = if isolated_context {
                             "❌ /btw failed".to_string()
                         } else {
                             format!("❌ Background task {notify_task_id} failed")
                         };
-                        let _ = adapter
-                            .send_message_with_options(
-                                &chat_id,
-                                &format!("{prefix}: {error}"),
-                                None,
-                                SendMessageOptions::notify_threaded(thread_id.as_deref()),
-                            )
-                            .await;
+                        let notification = format!("{prefix}: {error}");
+                        let _ = Self::await_adapter_call(
+                            "background failure delivery",
+                            SESSION_COMMIT_TIMEOUT,
+                            || {
+                                adapter.send_message_with_options(
+                                    &chat_id,
+                                    &notification,
+                                    None,
+                                    SendMessageOptions::notify_threaded(
+                                        thread_id.as_deref(),
+                                    ),
+                                )
+                            },
+                        )
+                        .await;
                     }
                 }
             }
         });
-
+        if !self.background_tasks.register_handle(&task_id, handle) {
+            self.background_tasks.cancel(&task_id);
+            return Err(GatewayError::Platform(
+                "background task was cancelled before startup".to_string(),
+            ));
+        }
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
+        if start_tx.send(()).is_err() {
+            self.background_tasks
+                .fail(&task_id, "background worker ended before startup".to_string());
+            return Err(GatewayError::Platform(
+                "background worker ended before startup".to_string(),
+            ));
+        }
         Ok(true)
     }
 
@@ -745,12 +1145,64 @@ impl Gateway {
         ))
     }
 
-    async fn should_suppress_duplicate(&self, incoming: &IncomingMessage) -> bool {
+    async fn acquire_dedup_claim(&self, incoming: &IncomingMessage) -> DedupIngressClaim {
         let Some(key) = Self::dedup_key(incoming) else {
-            return false;
+            return DedupIngressClaim::Untracked;
         };
-        self.message_deduplicator.write().await.seen_or_record(key)
+        loop {
+            let outcome = self.message_deduplicator.lock().claim(key.clone());
+            match outcome {
+                DedupClaimOutcome::Owner => {
+                    return DedupIngressClaim::Owner {
+                        guard: DedupClaimGuard::new(
+                            self.message_deduplicator.clone(),
+                            key.clone(),
+                        ),
+                        key,
+                    };
+                }
+                DedupClaimOutcome::Completed => return DedupIngressClaim::Completed,
+                DedupClaimOutcome::InFlight(receiver) => match receiver.await {
+                    Ok(DedupResolution::Completed) => return DedupIngressClaim::Completed,
+                    Ok(DedupResolution::Retry) | Err(_) => continue,
+                },
+            }
+        }
     }
+
+    async fn complete_dedup_key(&self, key: Option<&str>) {
+        let Some(key) = key else {
+            return;
+        };
+        self.message_deduplicator.lock().complete(key);
+    }
+
+    async fn release_dedup_key(&self, key: Option<&str>) {
+        let Some(key) = key else {
+            return;
+        };
+        self.message_deduplicator.lock().forget(key);
+    }
+
+    async fn complete_dedup_keys(&self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        let mut deduplicator = self.message_deduplicator.lock();
+        for key in keys {
+            deduplicator.complete(key);
+        }
+    }
+    async fn release_dedup_keys(&self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        let mut deduplicator = self.message_deduplicator.lock();
+        for key in keys {
+            deduplicator.forget(key);
+        }
+    }
+
 
     /// `preview = prompt[:60] + ("..." if len(prompt) > 60 else "")` (Python gateway).
     fn gateway_command_preview(prompt: &str) -> String {
@@ -800,6 +1252,26 @@ impl Gateway {
     ) -> Result<(), GatewayError> {
         self.send_message_threaded(platform, chat_id, text, parse_mode, None)
             .await
+    }
+
+    /// Continue a durably recorded provider suffix. Non-retryable records are
+    /// rejected by the adapter rather than risking a duplicate visible reply.
+    pub async fn resume_partial_delivery(
+        &self,
+        partial: &hermes_core::errors::PartialDelivery,
+    ) -> Result<(), GatewayError> {
+        let adapter = self.get_adapter(&partial.platform).await.ok_or_else(|| {
+            GatewayError::Platform(format!(
+                "No adapter registered for platform: {}",
+                partial.platform
+            ))
+        })?;
+        Self::await_adapter_call(
+            "partial message delivery",
+            SESSION_COMMIT_TIMEOUT,
+            || adapter.resume_partial_delivery(partial),
+        )
+        .await
     }
 
     /// Send a text message to a specific platform chat, optionally preserving
@@ -877,6 +1349,31 @@ impl Gateway {
             .await
     }
 
+    async fn await_adapter_call<T, F, M>(
+        operation: &str,
+        timeout: Duration,
+        make_future: M,
+    ) -> Result<T, GatewayError>
+    where
+        F: Future<Output = Result<T, GatewayError>>,
+        M: FnOnce() -> F,
+    {
+        match tokio::time::timeout(
+            timeout,
+            AssertUnwindSafe(async move { make_future().await }).catch_unwind(),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(GatewayError::Platform(format!(
+                "platform adapter panicked during {operation}"
+            ))),
+            Err(_) => Err(GatewayError::Platform(format!(
+                "platform adapter timed out during {operation}"
+            ))),
+        }
+    }
+
     async fn send_adapter_text_with_options(
         adapter: &Arc<dyn PlatformAdapter>,
         chat_id: &str,
@@ -884,14 +1381,31 @@ impl Gateway {
         parse_mode: Option<ParseMode>,
         options: SendMessageOptions,
     ) -> Result<(), GatewayError> {
-        let prepared = prepare_platform_message_for_adapter(
-            adapter.as_ref(),
-            text,
-            options.delivery_audit_label.as_deref(),
-        )?;
-        adapter
-            .send_message_with_options(chat_id, prepared.as_ref(), parse_mode, options)
-            .await
+        let prepared = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            prepare_platform_message_for_adapter(
+                adapter.as_ref(),
+                text,
+                options.delivery_audit_label.as_deref(),
+            )
+        }))
+        .map_err(|_| {
+            GatewayError::Platform(
+                "platform adapter panicked while preparing message delivery".to_string(),
+            )
+        })??;
+        // A platform's `send_message_with_options` can be compound (Discord
+        // chunks/forum starter+follow-up). Give it the same finite bound as
+        // the longest native transfer so it can return typed acceptance or
+        // partial-delivery evidence to the gateway.
+        Self::await_adapter_call("message delivery", ADAPTER_FILE_TIMEOUT, || {
+            adapter.send_message_with_options(
+                chat_id,
+                prepared.as_ref(),
+                parse_mode,
+                options,
+            )
+        })
+        .await
     }
 
     async fn send_message_with_options(
@@ -932,35 +1446,61 @@ impl Gateway {
         }
 
         for image in images {
-            if let Err(err) = adapter
-                .send_image_url(chat_id, &image.url, image.alt_text.as_deref())
-                .await
-            {
-                warn!(
-                    platform = platform,
-                    chat_id = chat_id,
-                    image_url = %image.url,
-                    error = %err,
-                    "native image send failed; falling back to plain URL message"
-                );
-
-                let fallback = match image.alt_text.as_deref().map(str::trim) {
-                    Some(caption) if !caption.is_empty() => format!("{caption}\n{}", image.url),
-                    _ => image.url.clone(),
-                };
-                Self::send_adapter_text_with_options(
-                    &adapter,
-                    chat_id,
-                    &fallback,
-                    Some(ParseMode::Plain),
-                    options.clone(),
-                )
-                .await?;
+            let Err(err) = Self::await_adapter_call(
+                "image delivery",
+                SESSION_COMMIT_TIMEOUT,
+                || {
+                    adapter.send_image_url_with_options(
+                        chat_id,
+                        &image.url,
+                        image.alt_text.as_deref(),
+                        options.clone(),
+                    )
+                },
+            )
+            .await
+            else {
+                continue;
+            };
+            if !matches!(
+                adapter.classify_native_media_failure(&err),
+                NativeMediaFailureClass::Unsupported | NativeMediaFailureClass::Rejected
+            ) {
+                return Err(err);
             }
+
+            warn!(
+                platform = platform,
+                chat_id = chat_id,
+                image_url = %image.url,
+                error = %err,
+                "native image send was conclusively rejected; falling back to plain URL message"
+            );
+            let fallback = match image.alt_text.as_deref().map(str::trim) {
+                Some(caption) if !caption.is_empty() => format!("{caption}\n{}", image.url),
+                _ => image.url.clone(),
+            };
+            #[cfg(feature = "discord")]
+            let fallback = if platform.eq_ignore_ascii_case("discord") {
+                crate::platforms::discord::discord_image_fallback_text(
+                    &image.url,
+                    image.alt_text.as_deref(),
+                )
+            } else {
+                fallback
+            };
+            Self::send_adapter_text_with_options(
+                &adapter,
+                chat_id,
+                &fallback,
+                Some(ParseMode::Plain),
+                options.clone(),
+            )
+            .await?;
         }
 
         for media in media_files {
-            let Some(validated_path) = validate_media_delivery_path(&media.path) else {
+            let Some(validated_delivery) = stage_media_delivery_path(&media.path).await else {
                 warn!(
                     platform = platform,
                     chat_id = chat_id,
@@ -978,7 +1518,7 @@ impl Gateway {
                 .await?;
                 continue;
             };
-            let Some(validated_path) = validated_path.to_str() else {
+            let Some(validated_path) = validated_delivery.staged_path().to_str() else {
                 warn!(
                     platform = platform,
                     chat_id = chat_id,
@@ -997,27 +1537,59 @@ impl Gateway {
                 continue;
             };
 
-            if let Err(err) = adapter
-                .send_file_with_options(chat_id, validated_path, None, options.clone())
-                .await
-            {
-                warn!(
-                    platform = platform,
-                    chat_id = chat_id,
-                    media_path = %validated_path,
-                    as_voice = media.as_voice,
-                    error = %err,
-                    "native media file send failed; falling back to plain file marker"
-                );
-                Self::send_adapter_text_with_options(
-                    &adapter,
-                    chat_id,
-                    &format!("[media attachment] {validated_path}"),
-                    Some(ParseMode::Plain),
-                    options.clone(),
-                )
-                .await?;
+            let media_name = Path::new(validated_path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("attachment");
+            let media_options = options
+                .clone()
+                .with_voice_delivery(media.as_voice);
+            let Err(err) = Self::await_adapter_call(
+                "media file delivery",
+                ADAPTER_FILE_TIMEOUT,
+                || {
+                    adapter.send_file_with_options(
+                        chat_id,
+                        validated_path,
+                        None,
+                        media_options.clone(),
+                    )
+                },
+            )
+            .await
+            else {
+                continue;
+            };
+            if !matches!(
+                adapter.classify_native_media_failure(&err),
+                NativeMediaFailureClass::Unsupported | NativeMediaFailureClass::Rejected
+            ) {
+                return Err(err);
             }
+            let media_notice = match &err {
+                GatewayError::MediaPreflightFailed { file_name, code } => {
+                    format!("[media attachment unavailable: {file_name} ({code})]")
+                }
+                _ => format!("[media attachment unavailable: {media_name}]"),
+            };
+
+            warn!(
+                platform = platform,
+                chat_id = chat_id,
+                media_file = media_name,
+                as_voice = media.as_voice,
+                error = %err,
+                "native media file send was conclusively rejected; falling back to safe attachment notice"
+            );
+            Self::send_adapter_text_with_options(
+                &adapter,
+                chat_id,
+                &media_notice,
+                Some(ParseMode::Plain),
+                options.clone(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -1034,7 +1606,10 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter.edit_message(chat_id, message_id, text).await
+        Self::await_adapter_call("message edit", SESSION_COMMIT_TIMEOUT, || {
+            adapter.edit_message(chat_id, message_id, text)
+        })
+        .await
     }
 
     /// Send a status update, editing an existing status bubble when the
@@ -1047,12 +1622,44 @@ impl Gateway {
         text: &str,
         parse_mode: Option<ParseMode>,
     ) -> Result<(), GatewayError> {
+        self.send_or_update_status_threaded(
+            platform,
+            chat_id,
+            status_key,
+            text,
+            parse_mode,
+            None,
+        )
+        .await
+    }
+
+    /// Send a status update to an optional native thread/topic target.
+    ///
+    /// The parent chat remains the portable routing key; adapters that model a
+    /// thread as a separate channel may route the status directly to it.
+    pub async fn send_or_update_status_threaded(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        status_key: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter
-            .send_or_update_status(chat_id, status_key, text, parse_mode)
-            .await
+        let options = SendMessageOptions::non_conversational_threaded(thread_id);
+        Self::await_adapter_call("status update", SESSION_COMMIT_TIMEOUT, || {
+            adapter.send_or_update_status_with_options(
+                chat_id,
+                status_key,
+                text,
+                parse_mode.clone(),
+                options.clone(),
+            )
+        })
+        .await
     }
 
     /// Send a file to a specific platform chat with an optional caption.
@@ -1066,13 +1673,16 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        let validated_path = validate_media_delivery_path(file_path).ok_or_else(|| {
+        let validated_delivery = stage_media_delivery_path(file_path).await.ok_or_else(|| {
             GatewayError::SendFailed("Refusing to deliver unsafe local file path".to_string())
         })?;
-        let validated_path = validated_path.to_str().ok_or_else(|| {
+        let validated_path = validated_delivery.staged_path().to_str().ok_or_else(|| {
             GatewayError::SendFailed("Refusing to deliver non-UTF-8 local file path".to_string())
         })?;
-        adapter.send_file(chat_id, validated_path, caption).await
+        Self::await_adapter_call("file delivery", ADAPTER_FILE_TIMEOUT, || {
+            adapter.send_file(chat_id, validated_path, caption)
+        })
+        .await
     }
 
     // -----------------------------------------------------------------------
@@ -1091,7 +1701,7 @@ impl Gateway {
 
     /// Get a reference to the gateway config.
     pub fn config(&self) -> &GatewayConfig {
-        &self.config
+        self.config.as_ref()
     }
 
     /// List the names of all registered adapters.
@@ -1104,10 +1714,18 @@ impl Gateway {
         let mut ticker =
             tokio::time::interval(std::time::Duration::from_secs(interval_secs.max(30)));
         loop {
-            ticker.tick().await;
-            let expired = self.expire_idle_sessions_once("idle_expiry").await;
-            if expired > 0 {
-                tracing::info!(expired, "Expired idle sessions");
+            tokio::select! {
+                biased;
+                _ = self.wait_for_shutdown() => return,
+                _ = ticker.tick() => {
+                    if self.shutting_down.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let expired = self.expire_idle_sessions_once("idle_expiry").await;
+                    if expired > 0 {
+                        tracing::info!(expired, "Expired idle sessions");
+                    }
+                }
             }
         }
     }
@@ -1115,12 +1733,92 @@ impl Gateway {
     /// Expire idle sessions once and emit lifecycle finalization hooks for
     /// each removed session using retained session snapshots.
     pub async fn expire_idle_sessions_once(&self, reason: &str) -> usize {
-        let expired = self.session_manager.expire_idle_session_snapshots().await;
-        for (session_key, session) in &expired {
-            self.emit_session_finalize(session_key, session, reason)
-                .await;
+        if self.shutting_down.load(Ordering::Acquire) {
+            return 0;
         }
-        expired.len()
+        let candidates = self.session_manager.idle_session_keys().await;
+        let mut expired = 0usize;
+        for session_key in candidates {
+            if self.shutting_down.load(Ordering::Acquire) {
+                break;
+            }
+            let Some(expiry_lease) = ({
+                let mut busy = self.busy_sessions.write().await;
+                busy.begin_idle_expiry(&session_key)
+            }) else {
+                continue;
+            };
+
+            let gateway = self.clone();
+            let reason = reason.to_string();
+            let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+            let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
+            let workers = self.turn_workers.clone();
+            let registered = {
+                let mut registered_workers = self.turn_workers.lock().unwrap();
+                if self.shutting_down.load(Ordering::Acquire) {
+                    false
+                } else {
+                    let handle = tokio::spawn(async move {
+                        let removed = match AssertUnwindSafe(async {
+                            let turn_lock = gateway.session_turn_lock(&session_key).await;
+                            let _turn_guard = turn_lock.lock().await;
+                            let current = gateway.session_manager.get_session(&session_key).await;
+                            if let Some(session) =
+                                current.as_ref().filter(|session| session.should_reset())
+                            {
+                                let _ = tokio::time::timeout(
+                                    NONCRITICAL_ADAPTER_TIMEOUT,
+                                    gateway.emit_session_finalize(&session_key, session, &reason),
+                                )
+                                .await;
+                                let removed = gateway
+                                    .session_manager
+                                    .expire_idle_session_snapshot(&session_key)
+                                    .await;
+                                if removed.is_some() {
+                                    gateway.purge_removed_session_state(&session_key).await;
+                                }
+                                removed
+                            } else {
+                                None
+                            }
+                        })
+                        .catch_unwind()
+                        .await
+                        {
+                            Ok(removed) => removed,
+                            Err(_) => {
+                                warn!(session_key, "idle-expiry worker panicked");
+                                None
+                            }
+                        };
+
+                        let completion = {
+                            let mut busy = gateway.busy_sessions.write().await;
+                            busy.complete_turn(&expiry_lease, ProcessingOutcome::Success)
+                        };
+                        if let TurnCompletion::Completed {
+                            next: Some((lease, entry)),
+                        } = completion
+                        {
+                            gateway.spawn_turn_chain_detached(lease, entry);
+                        }
+                        let _ = completion_tx.send(removed.is_some());
+                        workers.lock().unwrap().remove(&worker_id);
+                    });
+                    registered_workers.insert(worker_id, handle);
+                    true
+                }
+            };
+            if !registered {
+                break;
+            }
+            if completion_rx.await.unwrap_or(false) {
+                expired += 1;
+            }
+        }
+        expired
     }
 
     /// Monitors adapter health and attempts reconnect through stop/start.
@@ -1129,11 +1827,65 @@ impl Gateway {
             tokio::time::interval(std::time::Duration::from_secs(interval_secs.max(20)));
         loop {
             ticker.tick().await;
+            if self.shutting_down.load(Ordering::Acquire) {
+                return;
+            }
             let snapshot = self.adapters.read().await.clone();
             for (name, adapter) in snapshot {
-                if !adapter.is_running() {
+                let running = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    adapter.is_running()
+                })) {
+                    Ok(running) => running,
+                    Err(_) => {
+                        tracing::warn!(
+                            platform = %name,
+                            "Adapter panicked during health check"
+                        );
+                        false
+                    }
+                };
+                let reconnectable = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    adapter.is_reconnectable()
+                })) {
+                    Ok(reconnectable) => reconnectable,
+                    Err(_) => {
+                        tracing::warn!(
+                            platform = %name,
+                            "Adapter panicked while checking reconnect eligibility"
+                        );
+                        false
+                    }
+                };
+                if !running && !reconnectable {
+                    tracing::warn!(
+                        platform = %name,
+                        "Adapter is terminally offline; skipping automatic reconnect"
+                    );
+                    continue;
+                }
+                if !running {
                     tracing::warn!(platform = %name, "Adapter appears offline, reconnecting");
-                    let _ = adapter.start().await;
+                    match tokio::time::timeout(
+                        SESSION_COMMIT_TIMEOUT,
+                        AssertUnwindSafe(async { adapter.start().await }).catch_unwind(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Ok(()))) => {}
+                        Ok(Ok(Err(error))) => tracing::warn!(
+                            platform = %name,
+                            %error,
+                            "Adapter reconnect failed"
+                        ),
+                        Ok(Err(_)) => tracing::warn!(
+                            platform = %name,
+                            "Adapter panicked during reconnect"
+                        ),
+                        Err(_) => tracing::warn!(
+                            platform = %name,
+                            "Adapter timed out during reconnect"
+                        ),
+                    }
                 }
             }
         }
@@ -1159,7 +1911,7 @@ impl Gateway {
 
     /// Build deterministic signature for config-change detection.
     pub fn agent_config_signature(&self) -> String {
-        let s = serde_json::to_string(&self.config).unwrap_or_default();
+        let s = serde_json::to_string(self.config.as_ref()).unwrap_or_default();
         format!("{:x}", md5::compute(s))
     }
 

@@ -58,6 +58,24 @@ fn apply_patch_save_load_roundtrip() {
     assert_eq!(loaded.max_turns, 15);
 }
 
+#[test]
+fn resource_limits_opt_in_patch_roundtrips_and_displays() {
+    use tempfile::tempdir;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    assert!(!GatewayConfig::default().resource_limits_enabled);
+
+    set_user_config_value(dir.path(), "resource_limits_enabled", "true").unwrap();
+
+    let loaded = load_user_config_file(&path).unwrap();
+    assert!(loaded.resource_limits_enabled);
+    assert_eq!(
+        user_config_field_display(&loaded, "resource_limits_enabled").unwrap(),
+        "true"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn save_config_yaml_writes_owner_only_file_when_chmod_enabled() {
@@ -127,7 +145,7 @@ agent:
 
 #[test]
 fn prefill_messages_file_resolution_prefers_env_then_top_level_then_legacy_agent_key() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
@@ -159,7 +177,7 @@ fn prefill_messages_file_resolution_prefers_env_then_top_level_then_legacy_agent
 fn load_config_accepts_canonical_and_legacy_prefill_messages_file_keys() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
 
@@ -193,7 +211,7 @@ fn load_config_accepts_canonical_and_legacy_prefill_messages_file_keys() {
 fn load_prefill_messages_resolves_relative_json_under_config_home() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
 
@@ -357,7 +375,7 @@ llm_providers:
 #[test]
 fn apply_patch_dotted_llm_proxy_budget() {
     let mut c = GatewayConfig::default();
-    apply_user_config_patch(&mut c, "llm.openai.api_key", "sk-test").unwrap();
+    apply_user_config_patch(&mut c, "llm.openai.api_key", "clé-秘密-token").unwrap();
     apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1").unwrap();
     apply_user_config_patch(&mut c, "llm.openai.api_mode", "codex-responses").unwrap();
     apply_user_config_patch(&mut c, "llm.openai.models", "gpt-4o,gpt-4o-mini").unwrap();
@@ -374,7 +392,7 @@ fn apply_patch_dotted_llm_proxy_budget() {
     apply_user_config_patch(&mut c, "sessions.min_interval_hours", "12").unwrap();
     assert_eq!(
         c.llm_providers.get("openai").unwrap().api_key.as_deref(),
-        Some("sk-test")
+        Some("clé-秘密-token")
     );
     assert_eq!(
         c.llm_providers.get("openai").unwrap().base_url.as_deref(),
@@ -421,9 +439,10 @@ fn apply_patch_dotted_llm_proxy_budget() {
     assert_eq!(c.sessions.retention_days, 30);
     assert!(!c.sessions.vacuum_after_prune);
     assert_eq!(c.sessions.min_interval_hours, 12);
-    assert!(user_config_field_display(&c, "llm.openai.api_key")
-        .unwrap()
-        .starts_with("***"));
+    assert_eq!(
+        user_config_field_display(&c, "llm.openai.api_key").unwrap(),
+        "[REDACTED]"
+    );
     assert_eq!(
         user_config_field_display(&c, "llm.openai.command").unwrap(),
         "copilot-language-server"
@@ -468,6 +487,113 @@ fn apply_patch_dotted_llm_proxy_budget() {
     assert!(apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "fast").is_err());
     assert!(apply_user_config_patch(&mut c, "llm.openai.max_tokens", "0").is_err());
     assert!(apply_user_config_patch(&mut c, "llm.openai.discover_models", "maybe").is_err());
+}
+
+#[test]
+fn config_display_redacts_proxy_url_credentials() {
+    let mut config = GatewayConfig::default();
+    config.proxy = Some(ProxyConfig {
+        http_proxy: Some(
+            "http://alice:super-secret@proxy.example.test:8080?api_key=query-secret".to_string(),
+        ),
+        socks_proxy: Some("socks5://bob:socks-secret@proxy.example.test:1080".to_string()),
+        ..Default::default()
+    });
+
+    let http = user_config_field_display(&config, "proxy.http_proxy").unwrap();
+    let socks = user_config_field_display(&config, "proxy.socks_proxy").unwrap();
+    for displayed in [&http, &socks] {
+        assert!(displayed.contains("proxy.example.test"));
+        assert!(!displayed.contains("alice"));
+        assert!(!displayed.contains("bob"));
+        assert!(!displayed.contains("super-secret"));
+        assert!(!displayed.contains("socks-secret"));
+        assert!(!displayed.contains("query-secret"));
+    }
+    assert_eq!(
+        redact_url_credentials_for_display("alice:secret@proxy.example.test:8080"),
+        "[REDACTED_URL]"
+    );
+    assert_eq!(
+        redact_url_credentials_for_display("proxy.example.test?api_key=secret"),
+        "[REDACTED_URL]"
+    );
+    let exact_keys = redact_url_credentials_for_display(
+        "https://proxy.example.test/path?key=key-secret&session=session-secret",
+    );
+    assert!(!exact_keys.contains("key-secret"));
+    assert!(!exact_keys.contains("session-secret"));
+    let signed_url = redact_url_credentials_for_display(
+        "https://storage.example.test/blob?X-Amz-Security-Token=aws-token&X-Amz-Credential=aws-credential&api-key=provider-key&sig=azure-signature",
+    );
+    for sentinel in [
+        "aws-token",
+        "aws-credential",
+        "provider-key",
+        "azure-signature",
+    ] {
+        assert!(!signed_url.contains(sentinel));
+    }
+    assert_eq!(
+        redact_url_credentials_for_display("https://proxy.example.test/path?monkey=visible"),
+        "https://proxy.example.test/path?monkey=visible"
+    );
+    assert_eq!(
+        redact_url_credentials_for_display(
+            "https://proxy.example.test/path?max_tokens=4&api_key_env=KEY_ENV&token_endpoint=https%3A%2F%2Fauth.example&zipcode=12345&author=hermes"
+        ),
+        "https://proxy.example.test/path?max_tokens=4&api_key_env=KEY_ENV&token_endpoint=https%3A%2F%2Fauth.example&zipcode=12345&author=hermes"
+    );
+}
+
+#[test]
+fn config_get_redacts_credentials_from_model_and_provider_urls() {
+    let mut config = GatewayConfig::default();
+    for (key, value) in [
+        (
+            "model",
+            "https://model-user:model-secret@models.example.test/v1?api_key=model-query",
+        ),
+        (
+            "delegation.base_url",
+            "https://delegate-user:delegate-secret@delegate.example.test/v1",
+        ),
+        (
+            "llm.openai.base_url",
+            "https://llm.example.test/v1?token=llm-secret",
+        ),
+        (
+            "auxiliary.vision.base_url",
+            "https://vision-user:vision-secret@vision.example.test/v1",
+        ),
+    ] {
+        apply_user_config_patch(&mut config, key, value).unwrap();
+        let displayed = user_config_field_display(&config, key).unwrap();
+        assert!(displayed.contains("REDACTED"), "{key}: {displayed}");
+        for secret in [
+            "model-user",
+            "model-secret",
+            "model-query",
+            "delegate-user",
+            "delegate-secret",
+            "llm-secret",
+            "vision-user",
+            "vision-secret",
+        ] {
+            assert!(!displayed.contains(secret), "{key} leaked {secret}");
+        }
+    }
+
+    apply_user_config_patch(
+        &mut config,
+        "llm.openai.oauth_token_url",
+        "https://auth.example.test/oauth/token",
+    )
+    .unwrap();
+    assert_eq!(
+        user_config_field_display(&config, "llm.openai.oauth_token_url").unwrap(),
+        "https://auth.example.test/oauth/token"
+    );
 }
 
 #[test]
@@ -550,9 +676,10 @@ fn apply_patch_dotted_delegation_provider_model_runtime_values() {
         user_config_field_display(&c, "delegation.base_url").unwrap(),
         "http://localhost:1234/v1"
     );
-    assert!(user_config_field_display(&c, "delegation.api_key")
-        .unwrap()
-        .starts_with("***"));
+    assert_eq!(
+        user_config_field_display(&c, "delegation.api_key").unwrap(),
+        "[REDACTED]"
+    );
     assert_eq!(
         user_config_field_display(&c, "delegation.max_spawn_depth").unwrap(),
         "9"
@@ -592,10 +719,30 @@ fn apply_patch_dotted_auxiliary_values() {
     );
     assert_eq!(
         user_config_field_display(&c, "auxiliary.vision.api_key").unwrap(),
-        "***-key"
+        "[REDACTED]"
     );
     assert_eq!(
         user_config_field_display(&c, "auxiliary.vision.timeout").unwrap(),
         "120"
+    );
+}
+
+#[test]
+fn execution_mode_user_config_key_rejects_explicit_empty_value_before_write() {
+    use tempfile::tempdir;
+
+    let directory = tempdir().expect("create config directory");
+    let error = set_user_config_value(directory.path(), "execution_mode", "")
+        .expect_err("empty execution-mode config value must fail closed");
+
+    assert!(
+        error
+            .to_string()
+            .contains(hermes_core::ExecutionModeSource::ConfigFile.as_str()),
+        "expected config-file source, got {error}"
+    );
+    assert!(
+        !directory.path().join("config.yaml").exists(),
+        "invalid execution mode must not be persisted"
     );
 }

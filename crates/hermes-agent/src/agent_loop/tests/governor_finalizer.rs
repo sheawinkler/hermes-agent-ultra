@@ -89,53 +89,6 @@ fn test_looks_like_tool_error_output_detects_text_error_signatures() {
     assert!(!looks_like_tool_error_output("all good"));
 }
 
-#[test]
-fn test_redact_json_value_masks_sensitive_fields() {
-    let mut payload = serde_json::json!({
-        "api_key": "abc",
-        "nested": { "token": "def", "safe": "ok" },
-        "list": [{"password":"x"}, {"value":"y"}],
-        "text": "Authorization: Bearer sk-secretvalue12345"
-    });
-    redact_json_value(&mut payload);
-    assert_eq!(payload["api_key"], "[redacted]");
-    assert_eq!(payload["nested"]["token"], "[redacted]");
-    assert_eq!(payload["nested"]["safe"], "ok");
-    assert_eq!(payload["list"][0]["password"], "[redacted]");
-    assert_eq!(payload["text"], "Authorization: Bearer [redacted]");
-}
-
-#[test]
-fn test_replay_recorder_adds_hash_chain_metadata() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let replay_path = tmp.path().join("trace.jsonl");
-    let recorder = ReplayRecorder {
-        path: Some(replay_path.clone()),
-        state: Some(Arc::new(Mutex::new(ReplayState {
-            seq: 0,
-            prev_hash: short_sha256_hex("seed"),
-            trace_root: short_sha256_hex("trace-seed"),
-        }))),
-    };
-
-    recorder.record("turn_start", serde_json::json!({"token":"abc"}));
-    recorder.record("tool_call", serde_json::json!({"cmd":"echo ok"}));
-
-    let body = std::fs::read_to_string(&replay_path).expect("replay file");
-    let mut lines = body.lines();
-    let first: serde_json::Value =
-        serde_json::from_str(lines.next().expect("line1")).expect("json line1");
-    let second: serde_json::Value =
-        serde_json::from_str(lines.next().expect("line2")).expect("json line2");
-
-    assert_eq!(first["seq"], 1);
-    assert_eq!(second["seq"], 2);
-    assert!(first.get("trace_id").is_some());
-    assert!(second.get("trace_id").is_some());
-    assert_eq!(first["payload"]["token"], "[redacted]");
-    assert_eq!(second["prev_hash"], first["event_hash"]);
-    assert_ne!(first["event_hash"], second["event_hash"]);
-}
 
 #[test]
 fn test_detect_contextlattice_connect_intent() {
@@ -813,22 +766,3 @@ fn test_coerce_textual_tool_calls_keeps_declared_calls() {
     assert_eq!(coerced.content.as_deref(), Some("Running tool."));
 }
 
-#[test]
-fn test_extract_objective_state_marker_prefers_explicit_marker() {
-    let text = "ANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.12 SOL";
-    assert_eq!(extract_objective_state_marker(text), "advancing");
-    let colon_text = "ANALYTICS_VERIFIED:\n- objective_state: regressing metric=-0.30 SOL";
-    assert_eq!(extract_objective_state_marker(colon_text), "regressing");
-}
-
-#[test]
-fn test_extract_marker_values_collects_unique_paths_and_cmds() {
-    let text = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nDEEP_AUDIT_VERIFIED:\n- cmd=rg -n objective src\n- cmd=cargo test -p hermes-agent objective_guard";
-    let files = extract_marker_values(text, "path=", 8);
-    let cmds = extract_marker_values(text, "cmd=", 8);
-    assert_eq!(
-        files,
-        vec!["/tmp/a.rs".to_string(), "/tmp/b.rs".to_string()]
-    );
-    assert_eq!(cmds, vec!["rg".to_string(), "cargo".to_string()]);
-}

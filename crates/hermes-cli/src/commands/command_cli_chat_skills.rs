@@ -49,16 +49,18 @@ async fn query_mode_remediation_target(provider_model: &str) -> Option<QueryMode
 
 /// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
 pub async fn handle_cli_chat(
+    config_dir: Option<String>,
     query: Option<String>,
     preload_skill: Option<String>,
     yolo: bool,
     model_override: Option<String>,
     provider_override: Option<String>,
     allow_tools_flag: bool,
+    execution_mode_override: Option<String>,
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
-    use crate::terminal_backend::build_terminal_backend;
-    use hermes_cli_ui::tool_preview::{build_tool_preview_from_value, tool_emoji};
+    use crate::terminal_backend::build_execution_backend_binding;
+    use hermes_cli_ui::tool_preview::tool_emoji;
     use hermes_config::load_config;
     use hermes_skills::{FileSkillStore, SkillManager};
     use hermes_tools::ToolRegistry;
@@ -70,12 +72,22 @@ pub async fn handle_cli_chat(
         println!("[YOLO mode: tool confirmations disabled]");
     }
 
-    let mut config =
-        load_config(None).map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+    let mut config = load_config(config_dir.as_deref())
+        .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?;
+    let execution_mode =
+        hermes_config::resolve_runtime_execution_mode(&config, execution_mode_override.as_deref())
+            .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?;
+    let run_runtime = Arc::new(
+        RunRuntime::open(hermes_config::state_dir(
+            config_dir.as_deref().map(std::path::Path::new),
+        ))
+            .map_err(|error| AgentError::Io(format!("run-record startup failed: {error}")))?,
+    );
 
     if yolo {
         config.approval.require_approval = false;
     }
+    let execution_backend = build_execution_backend_binding(&config, execution_mode)?;
 
     let query_mode = query.is_some();
     let tools_enabled = query_mode_tools_enabled(query_mode, allow_tools_flag);
@@ -95,7 +107,7 @@ pub async fn handle_cli_chat(
 
     let tool_registry = Arc::new(ToolRegistry::new());
     let tool_schemas = if tools_enabled {
-        let terminal_backend = build_terminal_backend(&config);
+        let terminal_backend = Arc::clone(&execution_backend.terminal_backend);
         let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
@@ -104,12 +116,18 @@ pub async fn handle_cli_chat(
         let cron_data_dir = hermes_config::cron_dir();
         std::fs::create_dir_all(&cron_data_dir)
             .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
-            &config,
-            &current_model,
-            cron_data_dir,
-            &tool_registry,
-        ));
+        let cron_scheduler = Arc::new(
+            build_runtime_cron_scheduler(
+                &config,
+                &current_model,
+                cron_data_dir,
+                &tool_registry,
+                run_runtime.clone(),
+                execution_mode,
+                Arc::clone(&execution_backend.containment_context),
+            )
+            .map_err(|error| hermes_core::AgentError::Config(error.to_string()))?,
+        );
         cron_scheduler
             .load_persisted_jobs()
             .await
@@ -120,35 +138,59 @@ pub async fn handle_cli_chat(
     } else {
         Vec::new()
     };
-    let agent_tool_registry = Arc::new(crate::app::bridge_tool_registry(&tool_registry));
+    let agent_tool_registry = Arc::new(
+        crate::app::bridge_tool_registry_with_execution_context(
+            &tool_registry,
+            Arc::clone(&execution_backend.containment_context),
+        ),
+    );
 
     let build_query_callbacks = || {
-        let on_tool_start: ToolStartCallback = Box::new(move |name: &str, args: &serde_json::Value| {
-                let emoji = tool_emoji(name);
-                let preview = build_tool_preview_from_value(name, args, 56).unwrap_or_default();
-                if preview.is_empty() {
-                    println!("┊ {emoji} {name}");
-                } else {
-                    println!("┊ {emoji} {name:<16} {preview}");
+        let (observer_sink, mut observer_rx) =
+            hermes_agent::AgentObserverSink::channel(128);
+        let _ = std::thread::Builder::new()
+            .name("hermes-cli-query-observer".to_string())
+            .spawn(move || {
+                while let Some(event) = observer_rx.blocking_recv() {
+                    match event {
+                        hermes_agent::AgentObserverEvent::ToolStarted {
+                            name,
+                            args_preview,
+                        } => {
+                            let emoji = tool_emoji(&name);
+                            let preview: String = args_preview.trim().chars().take(56).collect();
+                            if preview.is_empty() {
+                                println!("┊ {emoji} {name}");
+                            } else {
+                                println!("┊ {emoji} {name:<16} {preview}");
+                            }
+                        }
+                        hermes_agent::AgentObserverEvent::ToolCompleted {
+                            name,
+                            result_preview,
+                        } => {
+                            let mut snippet: String =
+                                result_preview.trim().chars().take(96).collect();
+                            if result_preview.trim().chars().count() > 96 {
+                                snippet.push_str("...");
+                            }
+                            let emoji = tool_emoji(&name);
+                            if snippet.is_empty() {
+                                println!("┊ {emoji} {name:<16} done");
+                            } else {
+                                println!("┊ {emoji} {name:<16} done: {snippet}");
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             });
-        let on_tool_complete: ToolCompleteCallback = Box::new(move |name: &str, result: &str| {
-                let mut snippet: String = result.trim().chars().take(96).collect();
-                if result.trim().chars().count() > 96 {
-                    snippet.push_str("...");
-                }
-                let emoji = tool_emoji(name);
-                if snippet.is_empty() {
-                    println!("┊ {emoji} {name:<16} done");
-                } else {
-                    println!("┊ {emoji} {name:<16} done: {snippet}");
-                }
-            });
-        hermes_agent::AgentCallbacks {
-            on_tool_start: Some(on_tool_start),
-            on_tool_complete: Some(on_tool_complete),
-            ..Default::default()
-        }
+        (
+            hermes_agent::AgentCallbacks {
+                observer_sink: Some(observer_sink.clone()),
+            },
+            observer_sink,
+        )
     };
 
     match query {
@@ -174,17 +216,21 @@ pub async fn handle_cli_chat(
                     active_model = remediation.next_model;
                 }
             }
-            let outcome = match run_noninteractive_query(
+            let (query_callbacks, query_observer) = build_query_callbacks();
+            let query_result = run_noninteractive_query(
                 &config,
+                run_runtime.clone(),
+                execution_mode,
                 &active_model,
                 &q,
                 Arc::clone(&agent_tool_registry),
                 tool_schemas,
-                build_query_callbacks(),
+                query_callbacks,
                 crate::app::build_provider,
             )
-            .await
-            {
+            .await;
+            let _ = query_observer.flush().await;
+            let outcome = match query_result {
                 Ok(outcome) => outcome,
                 Err(err) => {
                     if query_mode_model_not_found(&err) {
@@ -307,7 +353,37 @@ pub async fn handle_cli_skills(
     yes: bool,
     sync_now: bool,
 ) -> Result<(), hermes_core::AgentError> {
+    handle_cli_skills_with_trust_args(
+        action,
+        name,
+        extra,
+        None,
+        None,
+        None,
+        remove,
+        yes,
+        sync_now,
+    )
+    .await
+}
+
+pub async fn handle_cli_skills_with_trust_args(
+    action: Option<String>,
+    name: Option<String>,
+    extra: Option<String>,
+    authority_dir: Option<PathBuf>,
+    trust_file: Option<PathBuf>,
+    expected_sha256: Option<String>,
+    remove: bool,
+    yes: bool,
+    sync_now: bool,
+) -> Result<(), hermes_core::AgentError> {
     let requested_action = action.as_deref().unwrap_or("list");
+    if requested_action != "trust" && (trust_file.is_some() || expected_sha256.is_some()) {
+        return Err(hermes_core::AgentError::Config(
+            "--file and --expected-sha256 are reserved for `hermes skills trust`".to_string(),
+        ));
+    }
     if !skills_tier_bypass_enabled() {
         let tier = skills_execution_tier();
         let tier_name = match requested_action {
@@ -341,17 +417,28 @@ pub async fn handle_cli_skills(
                 );
                 return Ok(());
             }
-            let skills = collect_local_skill_summaries(&skills_dir);
-            println!("Installed skills ({}):", skills_dir.display());
-            for summary in &skills {
+            let lock = load_v2_skill_lock(&skills_dir)?;
+            println!("Verified installed skills ({}):", skills_dir.display());
+            for entry in &lock.packages {
+                let status = entry
+                    .quarantine
+                    .as_ref()
+                    .map(|quarantine| format!("quarantined:{:?}", quarantine.reason))
+                    .unwrap_or_else(|| {
+                        format!("admitted-recorded:{}", entry.manifest.scan.verdict.as_str())
+                    });
                 println!(
-                    "  • {} — {}",
-                    format_skill_display_name(summary),
-                    summary.title
+                    "  • {} v{} — trust={} revision={} verdict={} status={}",
+                    entry.manifest.identity.name,
+                    entry.manifest.identity.version,
+                    skill_package_trust_label(&entry.manifest),
+                    entry.manifest.identity.immutable_source_revision,
+                    entry.manifest.scan.verdict.as_str(),
+                    status
                 );
             }
-            if skills.is_empty() {
-                println!("  (no skills installed)");
+            if lock.packages.is_empty() {
+                println!("  (no v2 verified skills installed)");
             }
         }
         "sync" => {
@@ -500,7 +587,10 @@ pub async fn handle_cli_skills(
                         } else {
                             rec.description.trim()
                         };
-                        println!("  • [{}] {} — {}", rec.source, rec.identifier, short_desc);
+                        println!(
+                            "  • [{}] {} — {} [trust=unverified revision=unresolved verdict=not-admitted]",
+                            rec.source, rec.identifier, short_desc
+                        );
                     }
                     println!(
                         "\nInstall with: hermes skills install <identifier> (example: skills.sh/anthropics/skills/skill-creator)"
@@ -537,7 +627,10 @@ pub async fn handle_cli_skills(
                                         .get("version")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("?");
-                                    println!("  • {} (v{}) — {}", name, version, desc);
+                                    println!(
+                                        "  • {} (v{}) — {} [trust=unverified revision=unresolved verdict=not-admitted]",
+                                        name, version, desc
+                                    );
                                 }
                                 println!("\nInstall with: hermes skills install <name>");
                             }
@@ -565,7 +658,10 @@ pub async fn handle_cli_skills(
                         displayed_results = true;
                         println!("\nSkills.sh fallback matches:");
                         for (name, identifier) in skills_sh_hits {
-                            println!("  • {} — {}", name, identifier);
+                            println!(
+                                "  • {} — {} [trust=unverified revision=unresolved verdict=not-admitted]",
+                                name, identifier
+                            );
                         }
                         println!(
                             "\nInstall with: hermes skills install skills.sh/<owner/repo/skill>"
@@ -583,7 +679,10 @@ pub async fn handle_cli_skills(
                 } else {
                     println!("\nTap-backed matches:");
                     for (name, source) in fallback {
-                        println!("  • {} — {}", name, source);
+                        println!(
+                            "  • {} — {} [trust=unverified revision=unresolved verdict=not-admitted]",
+                            name, source
+                        );
                     }
                     println!(
                         "\nInstall with: hermes skills install <name> or hermes skills install <owner/repo/path>"
@@ -686,29 +785,42 @@ pub async fn handle_cli_skills(
                     "Missing skill name. Usage: hermes skills uninstall <name>".into(),
                 )
             })?;
-            let target = skills_dir.join(&skill_name);
-            if target.exists() {
-                std::fs::remove_dir_all(&target).map_err(|e| {
-                    hermes_core::AgentError::Io(format!("Failed to remove skill: {}", e))
-                })?;
-                let removed = record_skill_uninstall_in_hub_lock(&skills_dir, &skill_name)?;
-                if let Some(entry) = removed {
+            let result = uninstall_verified_skill(&skills_dir, &skill_name)?;
+            if let Some(entry) = result.removed {
+                println!(
+                    "Skill '{}' removed from the v2 lock before file cleanup (trust={}, revision={}).",
+                    entry.manifest.identity.name,
+                    skill_package_trust_label(&entry.manifest),
+                    entry.manifest.identity.immutable_source_revision
+                );
+                if let Some(error) = result.cleanup_error {
                     println!(
-                        "Skill '{}' uninstalled (source={}, id={}).",
-                        skill_name, entry.source, entry.identifier
+                        "Warning: skill files remain at {} after lock removal: {}",
+                        skills_dir.join(&entry.install_path).display(),
+                        error
+                    );
+                }
+            } else {
+                let target = skills_dir.join(&skill_name);
+                let cleanup_error = match std::fs::symlink_metadata(&target) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        std::fs::remove_file(&target).err()
+                    }
+                    Ok(_) => std::fs::remove_dir_all(&target).err(),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => Some(error),
+                };
+                if let Some(error) = cleanup_error {
+                    println!(
+                        "Skill '{}' was not loadable from the v2 lock; file cleanup failed: {}",
+                        skill_name, error
                     );
                 } else {
-                    println!("Skill '{}' uninstalled.", skill_name);
+                    println!(
+                        "Skill '{}' was not in the v2 lock and is not loadable; any residual files were removed.",
+                        skill_name
+                    );
                 }
-            } else if let Some(entry) =
-                record_skill_uninstall_in_hub_lock(&skills_dir, &skill_name)?
-            {
-                println!(
-                    "Skill '{}' not found locally, but removed stale lock entry (source={}, id={}).",
-                    skill_name, entry.source, entry.identifier
-                );
-            } else {
-                println!("Skill '{}' not found.", skill_name);
             }
         }
         "check" => {
@@ -773,9 +885,10 @@ pub async fn handle_cli_skills(
         "config" => include!("command_cli_chat_skills/config.rs"),
         "quality" => include!("command_cli_chat_skills/quality.rs"),
         "audit" => include!("command_cli_chat_skills/audit.rs"),
+        "trust" => include!("command_cli_chat_skills/trust.rs"),
         other => {
             println!("Skills action '{}' is not recognized.", other);
-            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, sync, opt-out, opt-in, publish, snapshot, tap, config, quality, audit");
+            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, sync, opt-out, opt-in, publish, snapshot, tap, config, quality, audit, trust");
         }
     }
     Ok(())

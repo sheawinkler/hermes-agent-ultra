@@ -12,15 +12,23 @@
 //!   2. Environment variables (`HONCHO_API_KEY`, `HONCHO_BASE_URL`)
 //!   3. Defaults
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use hermes_core::{
+    MemoryAuditActor, MemoryExportCompletion, MemoryExportEvidenceDigest, MemoryExportPage,
+    MemoryExportReceipt, MemoryExportSink, MemoryExportSnapshot, MemoryForgetReceipt,
+    MemoryGovernanceOperation, MemoryProviderGovernanceError, MemoryReadbackReceipt,
+    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySubject, MemorySubjectStorageKey,
+    MemoryVisibility,
+};
+use hermes_intelligence::redact_sensitive_text;
+use parking_lot::Mutex;
 use reqwest::Method;
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 
 use crate::memory_manager::MemoryProviderPlugin;
 use crate::memory_plugins::config_io;
@@ -28,10 +36,22 @@ use crate::memory_plugins::config_io;
 const HOST: &str = "hermes";
 const DEFAULT_BASE_URL: &str = "https://api.honcho.dev";
 const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
-const PEER_ID_HASH_ESCALATION_LENGTHS: &[usize] = &[8, 12, 16, 24, 32, 64];
 const OAUTH_ACCESS_TOKEN_PREFIX: &str = "hch-at-";
 const OAUTH_REFRESH_SKEW_SECONDS: f64 = 120.0;
 const OAUTH_REFRESH_TIMEOUT_SECS: f64 = 15.0;
+const EXPORT_PAGE_SIZE: u32 = 100;
+
+enum HonchoExportError {
+    Unsupported,
+    Failed(&'static str),
+}
+
+struct HonchoStablePage {
+    snapshot: String,
+    revision: String,
+    next_cursor: Option<String>,
+    records: Vec<Value>,
+}
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -40,21 +60,20 @@ const OAUTH_REFRESH_TIMEOUT_SECS: f64 = 15.0;
 fn profile_schema() -> Value {
     json!({
         "name": "honcho_profile",
-        "description": "Retrieve the user's peer card from Honcho — a curated list of key facts about them. Fast, no LLM reasoning.",
-        "parameters": {"type": "object", "properties": {"peer": {"type":"string"}}, "required": []}
+        "description": "Retrieve the authenticated subject's Honcho peer card.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     })
 }
 
 fn search_schema() -> Value {
     json!({
         "name": "honcho_search",
-        "description": "Semantic search over Honcho's stored context about the user. Returns raw excerpts ranked by relevance.",
+        "description": "Search only the authenticated subject's Honcho memory.",
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "What to search for in Honcho's memory."},
-                "max_tokens": {"type": "integer", "description": "Token budget for returned context (default 800, max 2000)."},
-                "peer": {"type":"string", "description": "Peer alias or peer id (default user)."}
+                "query": {"type": "string"},
+                "max_tokens": {"type": "integer"}
             },
             "required": ["query"]
         }
@@ -64,13 +83,10 @@ fn search_schema() -> Value {
 fn context_schema() -> Value {
     json!({
         "name": "honcho_context",
-        "description": "Ask Honcho a natural language question and get a synthesized answer using dialectic reasoning.",
+        "description": "Ask Honcho only about the authenticated subject.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "A natural language question."},
-                "peer": {"type": "string", "description": "Which peer to query about: 'user' (default) or 'ai'."}
-            },
+            "properties": {"query": {"type": "string"}},
             "required": ["query"]
         }
     })
@@ -79,13 +95,12 @@ fn context_schema() -> Value {
 fn conclude_schema() -> Value {
     json!({
         "name": "honcho_conclude",
-        "description": "Write a conclusion about the user back to Honcho's memory. Conclusions are persistent facts that build the user's profile.",
+        "description": "Persist or delete a conclusion only for the authenticated subject.",
         "parameters": {
             "type": "object",
             "properties": {
-                "conclusion": {"type": "string", "description": "A factual statement about the user to persist."},
-                "delete_id": {"type": "string", "description": "Optional conclusion id to delete."},
-                "peer": {"type":"string", "description": "Peer alias or peer id (default user)."}
+                "conclusion": {"type": "string"},
+                "delete_id": {"type": "string"}
             },
             "required": []
         }
@@ -103,12 +118,8 @@ struct HonchoConfig {
     enabled: bool,
     recall_mode: String,
     context_tokens: Option<usize>,
-    workspace_id: String,
-    peer_name: Option<String>,
-    ai_peer: String,
-    pin_user_peer: bool,
-    user_peer_aliases: HashMap<String, String>,
-    runtime_peer_prefix: String,
+    // Provider endpoints and OAuth profile selection only. Subject identity is
+    // never configurable and is always the opaque bound filter.
     timeout_secs: f64,
     endpoints: HashMap<String, String>,
     host_had_explicit_api_key: bool,
@@ -230,12 +241,8 @@ impl HonchoConfig {
             base_url,
             recall_mode: "hybrid".to_string(),
             context_tokens: Some(800),
-            workspace_id: "hermes".to_string(),
-            peer_name: None,
-            ai_peer: "hermes".to_string(),
-            pin_user_peer: false,
-            user_peer_aliases: HashMap::new(),
-            runtime_peer_prefix: String::new(),
+            // `workspace_id` is deliberately not configurable: each request
+            // uses the bound opaque subject key instead.
             timeout_secs,
             endpoints,
             host_had_explicit_api_key: false,
@@ -250,8 +257,6 @@ impl HonchoConfig {
         let host = active_host();
         config.host = host.clone();
         config.config_path = Self::config_path(hermes_home);
-        config.workspace_id = host.clone();
-        config.ai_peer = host.clone();
         for config_path in honcho_config_load_paths(hermes_home) {
             let Ok(content) = std::fs::read_to_string(&config_path) else {
                 continue;
@@ -302,11 +307,7 @@ impl HonchoConfig {
 
         let now = epoch_seconds();
         let cache_key = oauth_cache_key(&self.config_path, &self.host);
-        if let Some((expires_at, token)) = honcho_oauth_expiry_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&cache_key)
-            .cloned()
+        if let Some((expires_at, token)) = honcho_oauth_expiry_cache().lock().get(&cache_key).cloned()
         {
             if now < expires_at - OAUTH_REFRESH_SKEW_SECONDS {
                 self.api_key = token;
@@ -324,9 +325,7 @@ impl HonchoConfig {
             return Ok(false);
         }
 
-        let _process_guard = honcho_oauth_refresh_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _process_guard = honcho_oauth_refresh_lock().lock();
         let _file_guard = ConfigRefreshLock::acquire(&self.config_path);
 
         if let Some(on_disk) = read_oauth_credential(&self.config_path, &self.host) {
@@ -389,38 +388,6 @@ impl HonchoConfig {
         }
         if let Some(tokens) = raw.get("contextTokens").and_then(|v| v.as_u64()) {
             config.context_tokens = Some(tokens.clamp(32, 4000) as usize);
-        }
-        if let Some(ws) = raw.get("workspace").and_then(|v| v.as_str()) {
-            config.workspace_id = ws.to_string();
-        }
-        if let Some(peer) = raw.get("peerName").and_then(|v| v.as_str()) {
-            config.peer_name = Some(peer.to_string());
-        }
-        if let Some(ai) = raw.get("aiPeer").and_then(|v| v.as_str()) {
-            config.ai_peer = ai.to_string();
-        }
-        if let Some(pin) = raw
-            .get("pinUserPeer")
-            .or_else(|| raw.get("pinPeerName"))
-            .and_then(|v| v.as_bool())
-        {
-            config.pin_user_peer = pin;
-        }
-        if let Some(map) = raw.get("userPeerAliases").and_then(|v| v.as_object()) {
-            config.user_peer_aliases = map
-                .iter()
-                .filter_map(|(key, value)| {
-                    let alias = value.as_str()?.trim();
-                    if key.trim().is_empty() || alias.is_empty() {
-                        None
-                    } else {
-                        Some((key.trim().to_string(), alias.to_string()))
-                    }
-                })
-                .collect();
-        }
-        if let Some(prefix) = raw.get("runtimePeerPrefix").and_then(|v| v.as_str()) {
-            config.runtime_peer_prefix = prefix.trim().to_string();
         }
         if let Some(timeout) = raw
             .get("timeout")
@@ -602,10 +569,7 @@ fn honcho_oauth_refresh_lock() -> &'static Mutex<()> {
 }
 
 fn seed_oauth_cache(path: &Path, host: &str, credential: &HonchoOAuthCredential) {
-    honcho_oauth_expiry_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(
+    honcho_oauth_expiry_cache().lock().insert(
             oauth_cache_key(path, host),
             (credential.expires_at, credential.access_token.clone()),
         );
@@ -793,10 +757,11 @@ fn unlock_file(_file: &File) -> Result<(), String> {
 // HonchoMemoryPlugin
 // ---------------------------------------------------------------------------
 
-/// Honcho AI-native memory with dialectic Q&A and persistent user modeling.
+/// Honcho AI-native memory with a single opaque peer per authenticated subject.
 pub struct HonchoMemoryPlugin {
     config: Mutex<Option<HonchoConfig>>,
-    session_key: Mutex<String>,
+    bound_subject: Mutex<Option<MemorySubject>>,
+    bound_filter: Mutex<Option<MemorySubjectStorageKey>>,
     prefetch_result: Arc<Mutex<String>>,
     turn_count: Mutex<u32>,
     recall_mode: Mutex<String>,
@@ -806,19 +771,28 @@ impl HonchoMemoryPlugin {
     pub fn new() -> Self {
         Self {
             config: Mutex::new(None),
-            session_key: Mutex::new(String::new()),
+            bound_subject: Mutex::new(None),
+            bound_filter: Mutex::new(None),
             prefetch_result: Arc::new(Mutex::new(String::new())),
             turn_count: Mutex::new(0),
             recall_mode: Mutex::new("hybrid".to_string()),
         }
     }
 
-    fn config_snapshot(&self) -> Result<HonchoConfig, String> {
+    fn config_snapshot(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<HonchoConfig, String> {
+        if self.bound_subject.lock().as_ref() != Some(subject)
+            || self.bound_filter.lock().as_ref() != Some(filter)
+        {
+            return Err("Honcho request subject does not match initialized subject".into());
+        }
         self.config
             .lock()
-            .unwrap()
             .clone()
-            .ok_or_else(|| "Honcho is not active for this session.".to_string())
+            .ok_or_else(|| "Honcho is not active for this subject.".to_string())
     }
 
     fn build_url(config: &HonchoConfig, path: &str) -> String {
@@ -835,66 +809,11 @@ impl HonchoMemoryPlugin {
             .replace("{session_id}", session_id)
     }
 
-    fn extract_peer(config: &HonchoConfig, args: &Value) -> String {
-        match args.get("peer").and_then(|v| v.as_str()).unwrap_or("user") {
-            "ai" => config.ai_peer.clone(),
-            "user" => {
-                let runtime_ids = runtime_user_ids_from_args(args)
-                    .into_iter()
-                    .chain(runtime_user_ids_from_env())
-                    .collect::<Vec<_>>();
-                Self::resolve_user_peer_id(config, "", &runtime_ids)
-            }
-            other => sanitize_id(other),
-        }
-    }
-
-    fn resolve_user_peer_id(
-        config: &HonchoConfig,
-        session_key: &str,
-        runtime_ids: &[String],
-    ) -> String {
-        if config.pin_user_peer {
-            if let Some(peer) = config.peer_name.as_deref() {
-                if !peer.trim().is_empty() {
-                    return sanitize_id(peer.trim());
-                }
-            }
-        }
-
-        for runtime_id in unique_nonempty(runtime_ids) {
-            if let Some(alias) = config.user_peer_aliases.get(&runtime_id) {
-                if !alias.trim().is_empty() {
-                    return sanitize_id(alias.trim());
-                }
-            }
-        }
-
-        if let Some(primary_runtime_id) = unique_nonempty(runtime_ids).into_iter().next() {
-            if !config.runtime_peer_prefix.is_empty() {
-                return generated_runtime_peer_id(
-                    config,
-                    &config.runtime_peer_prefix,
-                    &primary_runtime_id,
-                );
-            }
-            return sanitize_id(&primary_runtime_id);
-        }
-
-        if let Some(peer) = config.peer_name.as_deref() {
-            if !peer.trim().is_empty() {
-                return sanitize_id(peer.trim());
-            }
-        }
-
-        session_key_fallback_peer_id(session_key)
-    }
-
     fn client(config: &HonchoConfig) -> Result<reqwest::blocking::Client, String> {
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs_f64(config.timeout_secs))
             .build()
-            .map_err(|e| format!("Honcho HTTP client build failed: {e}"))
+            .map_err(|error| format!("Honcho HTTP client build failed: {error}"))
     }
 
     fn send_json(
@@ -906,89 +825,507 @@ impl HonchoMemoryPlugin {
     ) -> Result<Value, String> {
         let mut effective_config = config.clone();
         effective_config.refresh_oauth_if_needed()?;
-        let client = Self::client(&effective_config)?;
         let url = Self::build_url(&effective_config, path);
-        let mut req = client
+        let mut request = Self::client(&effective_config)?
             .request(method.clone(), &url)
             .header("Content-Type", "application/json");
         if !effective_config.api_key.is_empty() {
-            req = req
+            request = request
                 .header(
                     "Authorization",
                     format!("Bearer {}", effective_config.api_key),
                 )
                 .header("X-API-Key", &effective_config.api_key);
         }
-        if let Some(items) = query {
-            req = req.query(items);
+        if let Some(query) = query {
+            request = request.query(query);
         }
-        if let Some(payload) = body {
-            req = req.json(payload);
+        if let Some(body) = body {
+            request = request.json(body);
         }
-        let resp = req
+        let response = request
             .send()
-            .map_err(|e| format!("Honcho request {} {} failed: {e}", method, url))?;
-        let status = resp.status();
-        let body_text = resp.text().unwrap_or_default();
+            .map_err(|error| format!("Honcho request {method} {url} failed: {error}"))?;
+        let status = response.status();
+        let text = response.text().unwrap_or_default();
         if !status.is_success() {
-            return Err(format!(
-                "Honcho request {} {} returned {}: {}",
-                method, url, status, body_text
-            ));
+            return Err(format!("Honcho request {method} {url} returned {status}: {text}"));
         }
-        if body_text.trim().is_empty() {
-            return Ok(json!({}));
+        if text.trim().is_empty() {
+            Ok(json!({}))
+        } else {
+            serde_json::from_str(&text)
+                .map_err(|error| format!("Honcho response parse error: {error}"))
         }
-        serde_json::from_str::<Value>(&body_text)
-            .map_err(|e| format!("Honcho response parse error: {e}; body={body_text}"))
     }
 
-    fn extract_text_result(v: &Value) -> Option<String> {
-        if let Some(s) = v.get("result").and_then(|v| v.as_str()) {
-            return Some(s.to_string());
-        }
-        if let Some(s) = v.get("context").and_then(|v| v.as_str()) {
-            return Some(s.to_string());
-        }
-        if let Some(s) = v.get("answer").and_then(|v| v.as_str()) {
-            return Some(s.to_string());
-        }
-        if let Some(arr) = v.get("results").and_then(|v| v.as_array()) {
-            let lines: Vec<String> = arr
-                .iter()
-                .filter_map(|item| {
-                    item.get("memory")
-                        .or_else(|| item.get("content"))
-                        .or_else(|| item.get("text"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.trim().to_string())
-                })
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !lines.is_empty() {
-                return Some(lines.join("\n"));
+    fn extract_text_result(value: &Value) -> Option<String> {
+        for key in ["result", "context", "answer"] {
+            if let Some(text) = value.get(key).and_then(Value::as_str) {
+                return Some(text.to_string());
             }
         }
-        None
+        let records = value.get("results").and_then(Value::as_array)?;
+        let lines = records
+            .iter()
+            .filter_map(|record| {
+                record
+                    .get("memory")
+                    .or_else(|| record.get("content"))
+                    .or_else(|| record.get("text"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .map(ToString::to_string)
+            })
+            .collect::<Vec<_>>();
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }
+}
 
-    fn context_query(
-        config: &HonchoConfig,
-        session_id: &str,
-        query: &str,
-        max_tokens: usize,
-        peer: &str,
-    ) -> Result<Value, String> {
-        let path = config.endpoint("context", "/v1/context/query");
-        let payload = json!({
-            "workspace_id": config.workspace_id,
-            "session_id": session_id,
-            "peer": peer,
-            "query": query,
-            "max_tokens": max_tokens,
-        });
-        Self::send_json(config, Method::POST, &path, Some(&payload), None)
+fn honcho_visibility_label(visibility: MemoryVisibility) -> &'static str {
+    match visibility {
+        MemoryVisibility::Private => "private",
+        MemoryVisibility::Team => "team",
     }
+}
+
+fn honcho_scope(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Value {
+    let key = filter.as_str();
+    json!({
+        "opaque_key": key,
+        "tenant_filter": key,
+        "principal_filter": key,
+        "team_filter": subject.team_id().map(|_| key),
+        "session_filter": key,
+        "surface": subject.surface().as_str(),
+        "visibility": honcho_visibility_label(subject.visibility()),
+    })
+}
+
+fn honcho_scoped_body(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    mut body: Value,
+) -> Result<Value, String> {
+    let map = body
+        .as_object_mut()
+        .ok_or_else(|| "Honcho request body must be an object".to_string())?;
+    let key = filter.as_str();
+    map.insert("subject".to_string(), honcho_scope(subject, filter));
+    map.insert("workspace_id".to_string(), json!(key));
+    map.insert("peer".to_string(), json!(key));
+    map.insert("subject_key".to_string(), json!(key));
+    map.insert("tenant_id".to_string(), json!(key));
+    map.insert("principal_id".to_string(), json!(key));
+    map.insert(
+        "team_id".to_string(),
+        subject.team_id().map(|_| json!(key)).unwrap_or(Value::Null),
+    );
+    map.insert("session_id".to_string(), json!(key));
+    Ok(body)
+}
+
+fn honcho_scope_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
+    let key = filter.as_str().to_string();
+    vec![
+        ("workspace_id", key.clone()),
+        ("peer", key.clone()),
+        ("subject_key", key.clone()),
+        ("tenant_id", key.clone()),
+        ("principal_id", key.clone()),
+        (
+            "team_id",
+            subject.team_id().map(|_| key.clone()).unwrap_or_default(),
+        ),
+        ("session_id", key.clone()),
+        ("surface", subject.surface().as_str().to_string()),
+        (
+            "visibility",
+            honcho_visibility_label(subject.visibility()).to_string(),
+        ),
+    ]
+}
+
+fn reject_honcho_subject_override(args: &Value) -> Result<(), String> {
+    const FORBIDDEN: &[&str] = &[
+        "peer",
+        "user_id",
+        "userId",
+        "runtime_user_id",
+        "runtimeUserId",
+        "runtime_id",
+        "runtimeId",
+        "tenant_id",
+        "tenantId",
+        "principal_id",
+        "principalId",
+        "team_id",
+        "teamId",
+        "session_id",
+        "sessionId",
+        "subject_key",
+        "subjectKey",
+    ];
+    if FORBIDDEN.iter().any(|key| args.get(*key).is_some()) {
+        return Err("authenticated Honcho subject cannot be overridden by tool arguments".into());
+    }
+    Ok(())
+}
+
+fn honcho_records(value: Value) -> Vec<Value> {
+    if let Some(records) = value.as_array() {
+        return records.clone();
+    }
+    for key in ["results", "records", "items", "data"] {
+        if let Some(records) = value.get(key).and_then(Value::as_array) {
+            return records.clone();
+        }
+    }
+    Vec::new()
+}
+
+fn honcho_record_id(record: &Value) -> Option<&str> {
+    record
+        .get("id")
+        .or_else(|| record.get("conclusion_id"))
+        .or_else(|| record.get("memory_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+}
+
+fn honcho_retention_candidates(
+    records: &[Value],
+    policy: &MemoryRetentionPolicy,
+) -> Vec<String> {
+    let mut selected = std::collections::HashSet::new();
+    if let Some(max_records) = policy.max_records {
+        for record in records.iter().skip(max_records as usize) {
+            if let Some(id) = honcho_record_id(record) {
+                selected.insert(id.to_string());
+            }
+        }
+    }
+    if let Some(max_age_days) = policy.max_age_days {
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
+        for record in records {
+            let created = record
+                .get("created_at")
+                .or_else(|| record.get("createdAt"))
+                .and_then(Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            if created.is_some_and(|created| created < cutoff) {
+                if let Some(id) = honcho_record_id(record) {
+                    selected.insert(id.to_string());
+                }
+            }
+        }
+    }
+    selected.into_iter().collect()
+}
+
+fn honcho_context_query(
+    config: &HonchoConfig,
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    query: &str,
+    max_tokens: usize,
+) -> Result<Value, String> {
+    let body = honcho_scoped_body(
+        subject,
+        filter,
+        json!({"query": query, "max_tokens": max_tokens.clamp(64, 2000)}),
+    )?;
+    HonchoMemoryPlugin::send_json(
+        config,
+        Method::POST,
+        &config.endpoint("context", "/v1/context/query"),
+        Some(&body),
+        None,
+    )
+}
+
+fn honcho_search_records(
+    config: &HonchoConfig,
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    query: &str,
+) -> Result<Vec<Value>, String> {
+    let body = honcho_scoped_body(
+        subject,
+        filter,
+        json!({"query": query, "max_tokens": 2000u32}),
+    )?;
+    HonchoMemoryPlugin::send_json(
+        config,
+        Method::POST,
+        &config.endpoint("search", "/v1/context/search"),
+        Some(&body),
+        None,
+    )
+    .map(honcho_records)
+}
+
+fn honcho_export_marker(response: &Value, keys: &[&str]) -> Option<String> {
+    [
+        Some(response),
+        response.get("meta"),
+        response.get("metadata"),
+        response.get("pagination"),
+        response.get("data"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|scope| {
+        keys.iter().find_map(|key| {
+            let value = scope.get(*key)?;
+            value
+                .as_str()
+                .or_else(|| value.get("id").and_then(Value::as_str))
+                .or_else(|| value.get("token").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+    })
+}
+
+fn honcho_export_has_more(response: &Value) -> Option<bool> {
+    [Some(response), response.get("meta"), response.get("pagination")]
+        .into_iter()
+        .flatten()
+        .find_map(|scope| {
+            scope
+                .get("has_more")
+                .or_else(|| scope.get("hasMore"))
+                .and_then(Value::as_bool)
+        })
+}
+
+fn stable_honcho_export_page(
+    config: &HonchoConfig,
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    snapshot: Option<&str>,
+    revision: Option<&str>,
+    cursor: Option<&str>,
+) -> Result<HonchoStablePage, HonchoExportError> {
+    let mut body = honcho_scoped_body(
+        subject,
+        filter,
+        json!({
+            "query": "*",
+            "max_tokens": 2000u32,
+            "limit": EXPORT_PAGE_SIZE,
+            "page_size": EXPORT_PAGE_SIZE,
+            "export_snapshot": true,
+            "consistent_snapshot": true,
+        }),
+    )
+    .map_err(|_| HonchoExportError::Failed("unable to build stable export request"))?;
+    if let Some(snapshot) = snapshot {
+        body["snapshot"] = json!(snapshot);
+        body["snapshot_id"] = json!(snapshot);
+    }
+    if let Some(revision) = revision {
+        body["revision"] = json!(revision);
+    }
+    if let Some(cursor) = cursor {
+        body["cursor"] = json!(cursor);
+    }
+    let response = HonchoMemoryPlugin::send_json(
+        config,
+        Method::POST,
+        &config.endpoint("search", "/v1/context/search"),
+        Some(&body),
+        None,
+    )
+    .map_err(|_| HonchoExportError::Failed("stable export listing is unavailable"))?;
+    let snapshot = honcho_export_marker(&response, &["snapshot_id", "snapshotId", "snapshot"])
+        .ok_or(HonchoExportError::Unsupported)?;
+    let revision = honcho_export_marker(
+        &response,
+        &["revision_id", "revisionId", "revision", "version"],
+    )
+    .ok_or(HonchoExportError::Unsupported)?;
+    let next_cursor = honcho_export_marker(
+        &response,
+        &[
+            "next_cursor",
+            "nextCursor",
+            "next_page_token",
+            "nextPageToken",
+        ],
+    );
+    if honcho_export_has_more(&response) == Some(true) && next_cursor.is_none() {
+        return Err(HonchoExportError::Failed(
+            "stable export page declared more records without a cursor",
+        ));
+    }
+    Ok(HonchoStablePage {
+        snapshot,
+        revision,
+        next_cursor,
+        records: honcho_records(response),
+    })
+}
+
+fn stream_honcho_export(
+    config: &HonchoConfig,
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    sink: &mut dyn MemoryExportSink,
+) -> Result<(MemoryExportSnapshot, u64, u64), HonchoExportError> {
+    let result = (|| {
+        let first = stable_honcho_export_page(config, subject, filter, None, None, None)?;
+        let snapshot_raw = first.snapshot.clone();
+        let revision_raw = first.revision.clone();
+        let snapshot = MemoryExportSnapshot::new(
+            MemoryExportEvidenceDigest::sha256_bytes(snapshot_raw.as_bytes()),
+            MemoryExportEvidenceDigest::sha256_bytes(revision_raw.as_bytes()),
+            None,
+        );
+        sink.begin_provider(snapshot.clone())
+            .map_err(|_| HonchoExportError::Failed("export sink rejected provider snapshot"))?;
+
+        let mut current_cursor: Option<String> = None;
+        let mut page = first;
+        let mut seen_next_cursors = HashSet::new();
+        let mut exported_records = 0_u64;
+        let mut page_count = 0_u64;
+        loop {
+            let HonchoStablePage {
+                snapshot: received_snapshot,
+                revision: received_revision,
+                next_cursor,
+                records,
+            } = page;
+            if received_snapshot != snapshot_raw || received_revision != revision_raw {
+                return Err(HonchoExportError::Failed(
+                    "stable export snapshot changed while paging",
+                ));
+            }
+            if let Some(next_cursor) = next_cursor.as_ref() {
+                if !seen_next_cursors.insert(next_cursor.clone()) {
+                    return Err(HonchoExportError::Failed(
+                        "stable export cursor repeated while paging",
+                    ));
+                }
+            }
+            let record_ids = records
+                .iter()
+                .map(|record| {
+                    honcho_record_id(record)
+                        .map(|id| MemoryExportEvidenceDigest::sha256_bytes(id.as_bytes()))
+                        .ok_or(HonchoExportError::Failed(
+                            "stable export record has no stable identifier",
+                        ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let record_count = records.len() as u64;
+            sink.append_page(
+                MemoryExportPage::new(
+                    current_cursor
+                        .as_deref()
+                        .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
+                    next_cursor
+                        .as_deref()
+                        .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
+                    record_ids,
+                    records,
+                )
+                .map_err(|_| HonchoExportError::Failed("export page evidence is invalid"))?,
+            )
+            .map_err(|_| HonchoExportError::Failed("export sink rejected provider page"))?;
+            exported_records = exported_records
+                .checked_add(record_count)
+                .ok_or(HonchoExportError::Failed("stable export record count overflow"))?;
+            page_count = page_count
+                .checked_add(1)
+                .ok_or(HonchoExportError::Failed("stable export page count overflow"))?;
+
+            let Some(next_cursor) = next_cursor else {
+                break;
+            };
+            current_cursor = Some(next_cursor);
+            page = stable_honcho_export_page(
+                config,
+                subject,
+                filter,
+                Some(&snapshot_raw),
+                Some(&revision_raw),
+                current_cursor.as_deref(),
+            )?;
+        }
+        sink.finish_provider(MemoryExportCompletion::exhausted(
+            exported_records,
+            page_count,
+        ))
+        .map_err(|_| HonchoExportError::Failed("export sink rejected provider completion"))?;
+        Ok((snapshot, exported_records, page_count))
+    })();
+    if result.is_err() {
+        sink.abort();
+    }
+    result
+}
+
+fn honcho_delete_record(
+    config: &HonchoConfig,
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+    id: &str,
+) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() || id.contains('/') || id.contains('?') || id.contains('#') {
+        return Err("Honcho record id must be exact".into());
+    }
+    let path = format!(
+        "{}/{}",
+        config.endpoint("conclude", "/v1/conclusions").trim_end_matches('/'),
+        id
+    );
+    let body = honcho_scoped_body(subject, filter, json!({"id": id}))?;
+    HonchoMemoryPlugin::send_json(
+        config,
+        Method::DELETE,
+        &path,
+        Some(&body),
+        Some(&honcho_scope_query(subject, filter)),
+    )
+    .map(|_| ())
+}
+
+fn honcho_governance_failure(
+    provider: &str,
+    operation: MemoryGovernanceOperation,
+    filter: &MemorySubjectStorageKey,
+    actor: Option<&MemoryAuditActor>,
+    error: &str,
+) -> MemoryProviderGovernanceError {
+    if let Some(actor) = actor {
+        tracing::warn!(
+            provider,
+            operation = operation.as_str(),
+            subject_key = filter.as_str(),
+            actor = actor.opaque_id().as_str(),
+            error = %redact_sensitive_text(error),
+            "subject-scoped memory governance failed"
+        );
+    } else {
+        tracing::warn!(
+            provider,
+            operation = operation.as_str(),
+            subject_key = filter.as_str(),
+            error = %redact_sensitive_text(error),
+            "subject-scoped memory governance failed"
+        );
+    }
+    MemoryProviderGovernanceError::failed(provider, operation)
 }
 
 impl MemoryProviderPlugin for HonchoMemoryPlugin {
@@ -1004,388 +1341,369 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
 
     fn is_available(&self) -> bool {
         let hermes_home = config_io::default_hermes_home();
-        let config = HonchoConfig::from_config_file(&hermes_home.to_string_lossy());
-        config.enabled
+        HonchoConfig::from_config_file(&hermes_home.to_string_lossy()).enabled
     }
 
-    fn initialize(&self, session_id: &str, hermes_home: &str) {
+    fn initialize(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        hermes_home: &str,
+    ) -> Result<(), String> {
         let config = HonchoConfig::from_config_file(hermes_home);
         if !config.enabled {
-            tracing::debug!("Honcho not configured — plugin inactive");
-            return;
+            *self.config.lock() = None;
+            *self.bound_subject.lock() = None;
+            *self.bound_filter.lock() = None;
+            return Ok(());
         }
-
-        *self.recall_mode.lock().unwrap() = config.recall_mode.clone();
-        *self.session_key.lock().unwrap() = session_id.to_string();
-        *self.config.lock().unwrap() = Some(config);
-        *self.prefetch_result.lock().unwrap() = String::new();
-
-        tracing::info!(
-            "Honcho memory plugin initialized for session {}",
-            session_id
-        );
+        *self.recall_mode.lock() = config.recall_mode.clone();
+        *self.bound_subject.lock() = Some(subject.clone());
+        *self.bound_filter.lock() = Some(filter.clone());
+        *self.config.lock() = Some(config);
+        *self.prefetch_result.lock() = String::new();
+        *self.turn_count.lock() = 0;
+        Ok(())
     }
 
     fn system_prompt_block(&self) -> String {
-        let mode = self.recall_mode.lock().unwrap().clone();
-        match mode.as_str() {
-            "context" => {
-                "# Honcho Memory\n\
-                 Active (context-injection mode). Relevant user context is automatically \
-                 injected before each turn. No memory tools are available."
-                    .to_string()
-            }
-            "tools" => {
-                "# Honcho Memory\n\
-                 Active (tools-only mode). Use honcho_profile for a quick factual snapshot, \
-                 honcho_search for raw excerpts, honcho_context for synthesized answers, \
-                 honcho_conclude to save facts about the user."
-                    .to_string()
-            }
-            _ => {
-                "# Honcho Memory\n\
-                 Active (hybrid mode). Relevant context is auto-injected AND memory tools are available. \
-                 Use honcho_profile, honcho_search, honcho_context, honcho_conclude."
-                    .to_string()
-            }
+        match self.recall_mode.lock().as_str() {
+            "context" => "# Honcho Memory\nActive (context-injection mode) for the authenticated memory subject."
+                .to_string(),
+            "tools" => "# Honcho Memory\nActive (tools-only mode) for the authenticated memory subject."
+                .to_string(),
+            _ => "# Honcho Memory\nActive (hybrid mode) for the authenticated memory subject."
+                .to_string(),
         }
     }
 
-    fn prefetch(&self, _query: &str, _session_id: &str) -> String {
-        let mode = self.recall_mode.lock().unwrap().clone();
-        if mode == "tools" {
+    fn prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _query: &str,
+    ) -> String {
+        if self.config_snapshot(subject, filter).is_err() || self.recall_mode.lock().as_str() == "tools" {
             return String::new();
         }
-
-        let result = {
-            let mut lock = self.prefetch_result.lock().unwrap();
-            let value = lock.clone();
-            lock.clear();
-            value
-        };
+        let result = std::mem::take(&mut *self.prefetch_result.lock());
         if result.is_empty() {
-            return String::new();
+            String::new()
+        } else {
+            format!("## Honcho Context\n{result}")
         }
-        format!("## Honcho Context\n{}", result)
     }
 
-    fn queue_prefetch(&self, query: &str, _session_id: &str) {
-        let mode = self.recall_mode.lock().unwrap().clone();
-        if mode == "tools" {
+    fn queue_prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        query: &str,
+    ) {
+        if self.recall_mode.lock().as_str() == "tools" || query.trim().is_empty() {
             return;
         }
-        let trimmed = query.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let config = match self.config_snapshot() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::debug!("Honcho prefetch skipped: {}", e);
-                return;
-            }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
         };
-        let session_id = self.session_key.lock().unwrap().clone();
+        let subject = subject.clone();
+        let filter = filter.clone();
+        let query = query.trim().to_string();
+        let max_tokens = config.context_tokens.unwrap_or(800).clamp(64, 2000);
         let out = Arc::clone(&self.prefetch_result);
-        let query = trimmed.to_string();
-        let max_tokens = config.context_tokens.unwrap_or(800).min(2000).max(64);
-        let peer = Self::resolve_user_peer_id(&config, &session_id, &runtime_user_ids_from_env());
         std::thread::spawn(move || {
-            match Self::context_query(&config, &session_id, &query, max_tokens, &peer) {
-                Ok(v) => {
-                    if let Some(text) = Self::extract_text_result(&v) {
-                        if !text.trim().is_empty() {
-                            *out.lock().unwrap() = text;
-                        }
+            if let Ok(value) =
+                honcho_context_query(&config, &subject, &filter, &query, max_tokens)
+            {
+                if let Some(text) = HonchoMemoryPlugin::extract_text_result(&value) {
+                    if !text.trim().is_empty() {
+                        *out.lock() = text;
                     }
                 }
-                Err(e) => tracing::debug!("Honcho prefetch failed: {}", e),
             }
         });
     }
 
-    fn sync_turn(&self, user_content: &str, assistant_content: &str, _session_id: &str) {
-        if self.config.lock().unwrap().is_none() {
-            return;
-        }
+    fn sync_turn(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        user_content: &str,
+        assistant_content: &str,
+    ) {
         let user_content = user_content.trim();
         let assistant_content = assistant_content.trim();
         if user_content.is_empty() || assistant_content.is_empty() {
             return;
         }
-        let config = match self.config_snapshot() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::debug!("Honcho sync skipped: {}", e);
-                return;
-            }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
         };
-        let session_id = self.session_key.lock().unwrap().clone();
-        let path = config.endpoint("messages", "/v1/sessions/{session}/messages");
-        let payload = json!({
-            "workspace_id": config.workspace_id,
-            "session_id": session_id,
-            "messages": [
-                {"role":"user", "content": user_content.chars().take(8000).collect::<String>()},
-                {"role":"assistant", "content": assistant_content.chars().take(8000).collect::<String>()}
-            ]
-        });
-        let rendered_path = Self::apply_template(&path, "user", &session_id);
+        let path = HonchoMemoryPlugin::apply_template(
+            &config.endpoint("messages", "/v1/sessions/{session}/messages"),
+            filter.as_str(),
+            filter.as_str(),
+        );
+        let payload = match honcho_scoped_body(
+            subject,
+            filter,
+            json!({
+                "messages": [
+                    {"role":"user","content":redact_sensitive_text(&user_content.chars().take(8000).collect::<String>())},
+                    {"role":"assistant","content":redact_sensitive_text(&assistant_content.chars().take(8000).collect::<String>())}
+                ]
+            }),
+        ) {
+            Ok(payload) => payload,
+            Err(_) => return,
+        };
         std::thread::spawn(move || {
-            if let Err(e) =
-                Self::send_json(&config, Method::POST, &rendered_path, Some(&payload), None)
-            {
-                tracing::debug!("Honcho sync_turn failed: {}", e);
-            }
+            let _ = HonchoMemoryPlugin::send_json(&config, Method::POST, &path, Some(&payload), None);
         });
     }
 
     fn get_tool_schemas(&self) -> Vec<Value> {
-        let mode = self.recall_mode.lock().unwrap().clone();
-        if mode == "context" {
-            return Vec::new();
+        if self.recall_mode.lock().as_str() == "context" {
+            Vec::new()
+        } else {
+            vec![
+                profile_schema(),
+                search_schema(),
+                context_schema(),
+                conclude_schema(),
+            ]
         }
-        vec![
-            profile_schema(),
-            search_schema(),
-            context_schema(),
-            conclude_schema(),
-        ]
     }
 
-    fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
-        let config = match self.config_snapshot() {
-            Ok(c) => c,
-            Err(e) => return json!({"error": e}).to_string(),
+    fn handle_tool_call(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        tool_name: &str,
+        args: &Value,
+    ) -> String {
+        if let Err(error) = reject_honcho_subject_override(args) {
+            return json!({"error": error}).to_string();
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(error) => return json!({"error": error}).to_string(),
         };
-        let session_id = self.session_key.lock().unwrap().clone();
-        let peer = Self::extract_peer(&config, args);
-
-        match tool_name {
+        let peer = filter.as_str();
+        let result = match tool_name {
             "honcho_profile" => {
-                let template = config.endpoint("profile", "/v1/peers/{peer}/card");
-                let path = Self::apply_template(&template, &peer, &session_id);
-                let maybe_card = args.get("card").and_then(|v| v.as_array()).cloned();
-                let result = if let Some(card) = maybe_card {
-                    let body = json!({
-                        "workspace_id": config.workspace_id,
-                        "session_id": session_id,
-                        "peer": peer,
-                        "card": card
-                    });
-                    Self::send_json(&config, Method::POST, &path, Some(&body), None)
+                let path = HonchoMemoryPlugin::apply_template(
+                    &config.endpoint("profile", "/v1/peers/{peer}/card"),
+                    peer,
+                    peer,
+                );
+                if let Some(card) = args.get("card").and_then(Value::as_array) {
+                    honcho_scoped_body(subject, filter, json!({"card": card}))
+                        .and_then(|body| {
+                            HonchoMemoryPlugin::send_json(
+                                &config,
+                                Method::POST,
+                                &path,
+                                Some(&body),
+                                None,
+                            )
+                        })
                 } else {
-                    let query = vec![
-                        ("workspace_id", config.workspace_id.clone()),
-                        ("session_id", session_id.clone()),
-                        ("peer", peer.clone()),
-                    ];
-                    Self::send_json(&config, Method::GET, &path, None, Some(&query))
-                };
-                match result {
-                    Ok(v) => {
-                        if let Some(card) = v
-                            .get("card")
-                            .or_else(|| v.get("result"))
-                            .and_then(|c| c.as_array())
-                        {
-                            if card.is_empty() {
-                                return json!({
-                                    "result": card,
-                                    "count": 0,
-                                    "hint": honcho_empty_profile_hint(&peer)
-                                })
-                                .to_string();
-                            }
-                            return json!({"result": card, "count": card.len()}).to_string();
-                        }
-                        json!({"result": v}).to_string()
-                    }
-                    Err(e) => json!({"error": format!("Honcho profile failed: {e}")}).to_string(),
+                    HonchoMemoryPlugin::send_json(
+                        &config,
+                        Method::GET,
+                        &path,
+                        None,
+                        Some(&honcho_scope_query(subject, filter)),
+                    )
                 }
             }
             "honcho_search" => {
-                let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                if query_text.is_empty() {
-                    return json!({"error": "Missing required parameter: query"}).to_string();
-                }
-                let max_tokens = args
-                    .get("max_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(800)
-                    .clamp(64, 2000) as usize;
-                let path = config.endpoint("search", "/v1/context/search");
-                let body = json!({
-                    "workspace_id": config.workspace_id,
-                    "session_id": session_id,
-                    "peer": peer,
-                    "query": query_text,
-                    "max_tokens": max_tokens
-                });
-                match Self::send_json(&config, Method::POST, &path, Some(&body), None) {
-                    Ok(v) => {
-                        let text = Self::extract_text_result(&v).unwrap_or_default();
-                        if text.is_empty() {
-                            return json!({"result": "No relevant context found.", "raw": v})
-                                .to_string();
-                        }
-                        json!({"result": text, "raw": v}).to_string()
-                    }
-                    Err(e) => json!({"error": format!("Honcho search failed: {e}")}).to_string(),
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                if query.is_empty() {
+                    Err("query is required".to_string())
+                } else {
+                    let max_tokens = args
+                        .get("max_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(800)
+                        .clamp(64, 2000);
+                    honcho_scoped_body(
+                        subject,
+                        filter,
+                        json!({"query": query, "max_tokens": max_tokens}),
+                    )
+                    .and_then(|body| {
+                        HonchoMemoryPlugin::send_json(
+                            &config,
+                            Method::POST,
+                            &config.endpoint("search", "/v1/context/search"),
+                            Some(&body),
+                            None,
+                        )
+                    })
                 }
             }
             "honcho_context" => {
-                let query_text = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                if query_text.is_empty() {
-                    return json!({"error": "Missing required parameter: query"}).to_string();
-                }
-                let max_tokens = config.context_tokens.unwrap_or(800).min(2000).max(64);
-                match Self::context_query(&config, &session_id, query_text, max_tokens, &peer) {
-                    Ok(v) => {
-                        let text = Self::extract_text_result(&v).unwrap_or_default();
-                        if text.is_empty() {
-                            return json!({"result": "No result from Honcho.", "raw": v})
-                                .to_string();
-                        }
-                        json!({"result": text, "raw": v}).to_string()
-                    }
-                    Err(e) => json!({"error": format!("Honcho context failed: {e}")}).to_string(),
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                if query.is_empty() {
+                    Err("query is required".to_string())
+                } else {
+                    honcho_context_query(
+                        &config,
+                        subject,
+                        filter,
+                        query,
+                        config.context_tokens.unwrap_or(800).clamp(64, 2000),
+                    )
                 }
             }
             "honcho_conclude" => {
                 let conclusion = args
                     .get("conclusion")
-                    .and_then(|v| v.as_str())
+                    .and_then(Value::as_str)
                     .unwrap_or("")
                     .trim();
                 let delete_id = args
                     .get("delete_id")
-                    .and_then(|v| v.as_str())
+                    .and_then(Value::as_str)
                     .unwrap_or("")
                     .trim();
-                if conclusion.is_empty() && delete_id.is_empty() {
-                    return json!({"error": "Provide conclusion or delete_id"}).to_string();
-                }
-                if !conclusion.is_empty() && !delete_id.is_empty() {
-                    return json!({"error": "Provide either conclusion or delete_id, not both"})
-                        .to_string();
-                }
-                let template = config.endpoint("conclude", "/v1/conclusions");
-                if !delete_id.is_empty() {
-                    let delete_path = format!("{}/{}", template.trim_end_matches('/'), delete_id);
-                    let query = vec![
-                        ("workspace_id", config.workspace_id.clone()),
-                        ("session_id", session_id.clone()),
-                        ("peer", peer.clone()),
-                    ];
-                    return match Self::send_json(
-                        &config,
-                        Method::DELETE,
-                        &delete_path,
-                        None,
-                        Some(&query),
-                    ) {
-                        Ok(v) => json!({"result":"Conclusion deleted", "raw": v}).to_string(),
-                        Err(e) => {
-                            json!({"error": format!("Honcho delete failed: {e}")}).to_string()
-                        }
-                    };
-                }
-                let body = json!({
-                    "workspace_id": config.workspace_id,
-                    "session_id": session_id,
-                    "peer": peer,
-                    "conclusion": conclusion
-                });
-                match Self::send_json(&config, Method::POST, &template, Some(&body), None) {
-                    Ok(v) => json!({"result": "Conclusion saved.", "raw": v}).to_string(),
-                    Err(e) => json!({"error": format!("Honcho conclude failed: {e}")}).to_string(),
+                if conclusion.is_empty() == delete_id.is_empty() {
+                    Err("provide exactly one of conclusion or delete_id".to_string())
+                } else if !delete_id.is_empty() {
+                    honcho_delete_record(&config, subject, filter, delete_id)
+                        .map(|_| json!({"result":"Conclusion deleted"}))
+                } else {
+                    honcho_scoped_body(
+                        subject,
+                        filter,
+                        json!({"conclusion": redact_sensitive_text(conclusion)}),
+                    )
+                    .and_then(|body| {
+                        HonchoMemoryPlugin::send_json(
+                            &config,
+                            Method::POST,
+                            &config.endpoint("conclude", "/v1/conclusions"),
+                            Some(&body),
+                            None,
+                        )
+                    })
                 }
             }
-            _ => json!({"error": format!("Unknown tool: {}", tool_name)}).to_string(),
+            _ => Err(format!("Unknown tool: {tool_name}")),
+        };
+        match result {
+            Ok(value) => value.to_string(),
+            Err(error) => json!({"error": error}).to_string(),
         }
     }
 
-    fn on_turn_start(&self, turn_number: u32, _message: &str) {
-        *self.turn_count.lock().unwrap() = turn_number;
+    fn on_turn_start(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        turn_number: u32,
+        _message: &str,
+    ) {
+        if self.bound_subject.lock().as_ref() == Some(subject)
+            && self.bound_filter.lock().as_ref() == Some(filter)
+        {
+            *self.turn_count.lock() = turn_number;
+        }
     }
 
-    fn on_session_end(&self, _messages: &[Value]) {
-        let config = match self.config_snapshot() {
-            Ok(c) => c,
+    fn on_session_end(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _messages: &[Value],
+    ) {
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
             Err(_) => return,
         };
-        let session_id = self.session_key.lock().unwrap().clone();
-        let template = config.endpoint("flush", "/v1/sessions/{session}/flush");
-        let path = Self::apply_template(&template, "user", &session_id);
-        let body = json!({
-            "workspace_id": config.workspace_id,
-            "session_id": session_id
-        });
-        if let Err(e) = Self::send_json(&config, Method::POST, &path, Some(&body), None) {
-            tracing::debug!("Honcho session end flush failed: {}", e);
-        }
-    }
-
-    fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
-        let new_session_id = new_session_id.trim();
-        if new_session_id.is_empty() {
-            return;
-        }
-        *self.session_key.lock().unwrap() = new_session_id.to_string();
-        *self.turn_count.lock().unwrap() = 0;
-        *self.prefetch_result.lock().unwrap() = String::new();
-        tracing::debug!(
-            "Honcho session switch: new_session={} parent={} reset={}",
-            new_session_id,
-            parent_session_id,
-            reset
+        let path = HonchoMemoryPlugin::apply_template(
+            &config.endpoint("flush", "/v1/sessions/{session}/flush"),
+            filter.as_str(),
+            filter.as_str(),
         );
+        let body = match honcho_scoped_body(subject, filter, json!({})) {
+            Ok(body) => body,
+            Err(_) => return,
+        };
+        let _ = HonchoMemoryPlugin::send_json(&config, Method::POST, &path, Some(&body), None);
     }
 
-    fn on_memory_write(&self, action: &str, target: &str, content: &str) {
+    fn on_session_switch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _reset: bool,
+    ) {
+        if self.bound_subject.lock().as_ref() == Some(subject)
+            && self.bound_filter.lock().as_ref() == Some(filter)
+        {
+            *self.turn_count.lock() = 0;
+            *self.prefetch_result.lock() = String::new();
+        }
+    }
+
+    fn on_memory_write(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        action: &str,
+        target: &str,
+        content: &str,
+    ) {
         if action != "add" || target != "user" || content.trim().is_empty() {
             return;
         }
-        let config = match self.config_snapshot() {
-            Ok(c) => c,
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
             Err(_) => return,
         };
-        let session_id = self.session_key.lock().unwrap().clone();
-        let peer = Self::resolve_user_peer_id(&config, &session_id, &runtime_user_ids_from_env());
-        let template = config.endpoint("conclude", "/v1/conclusions");
-        let body = json!({
-            "workspace_id": config.workspace_id,
-            "session_id": session_id,
-            "peer": peer,
-            "conclusion": content.trim(),
-            "source": "memory_write_hook"
-        });
+        let body = match honcho_scoped_body(
+            subject,
+            filter,
+            json!({"conclusion": redact_sensitive_text(content.trim()), "source":"memory_write_hook"}),
+        ) {
+            Ok(body) => body,
+            Err(_) => return,
+        };
         std::thread::spawn(move || {
-            if let Err(e) = Self::send_json(&config, Method::POST, &template, Some(&body), None) {
-                tracing::debug!("Honcho memory mirror failed: {}", e);
-            }
+            let _ = HonchoMemoryPlugin::send_json(
+                &config,
+                Method::POST,
+                &config.endpoint("conclude", "/v1/conclusions"),
+                Some(&body),
+                None,
+            );
         });
     }
 
     fn shutdown(&self) {
-        tracing::debug!("Honcho memory plugin shutdown");
+        *self.config.lock() = None;
+        *self.bound_subject.lock() = None;
+        *self.bound_filter.lock() = None;
+        *self.prefetch_result.lock() = String::new();
     }
 
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
-            {"key": "api_key", "description": "Honcho API key or OAuth access token", "secret": true, "env_var": "HONCHO_API_KEY", "url": "https://app.honcho.dev"},
-            {"key": "oauth", "description": "Honcho OAuth grant metadata stored under hosts.<profile>.oauth", "secret": true},
-            {"key": "baseUrl", "description": "Honcho base URL (for self-hosted)"},
-            {"key": "timeout", "description": "HTTP timeout seconds", "default": DEFAULT_TIMEOUT_SECS},
-            {"key": "pinUserPeer", "description": "Pin gateway runtime users to peerName", "default": false},
-            {"key": "userPeerAliases", "description": "Runtime user ID to Honcho peer ID map"},
-            {"key": "runtimePeerPrefix", "description": "Prefix for unknown gateway runtime user peers", "default": ""},
-            {"key": "endpoints", "description": "Optional endpoint path overrides"}
+            {"key":"api_key","description":"Honcho API key or OAuth access token","secret":true,"env_var":"HONCHO_API_KEY","url":"https://app.honcho.dev"},
+            {"key":"oauth","description":"Honcho OAuth grant metadata","secret":true},
+            {"key":"baseUrl","description":"Honcho base URL"},
+            {"key":"timeout","description":"HTTP timeout seconds","default":DEFAULT_TIMEOUT_SECS},
+            {"key":"endpoints","description":"Optional endpoint path overrides"}
         ]))
     }
 
     fn save_config(&self, config: &Value) -> Result<(), String> {
+        reject_honcho_subject_override(config)?;
         let mut normalized = config
             .as_object()
             .cloned()
@@ -1398,99 +1716,104 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             &Value::Object(normalized),
         )
     }
-}
 
-fn sanitize_id(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                ch
-            } else {
-                '-'
+    fn export_subject(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        actor: &MemoryAuditActor,
+        sink: &mut dyn MemoryExportSink,
+    ) -> Result<MemoryExportReceipt, MemoryProviderGovernanceError> {
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(error) => {
+                sink.abort();
+                return Err(honcho_governance_failure(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                    filter,
+                    Some(actor),
+                    &error,
+                ));
             }
-        })
-        .collect()
-}
-
-fn unique_nonempty(values: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
-    for value in values {
-        let candidate = value.trim();
-        if !candidate.is_empty() && !out.iter().any(|existing| existing == candidate) {
-            out.push(candidate.to_string());
-        }
-    }
-    out
-}
-
-fn runtime_user_ids_from_args(args: &Value) -> Vec<String> {
-    [
-        "runtime_user_id",
-        "runtimeUserId",
-        "runtime_id",
-        "runtimeId",
-        "user_id",
-        "userId",
-        "runtime_user_id_alt",
-        "runtimeUserIdAlt",
-        "username",
-    ]
-    .into_iter()
-    .filter_map(|key| args.get(key).and_then(Value::as_str))
-    .map(ToString::to_string)
-    .collect()
-}
-
-fn runtime_user_ids_from_env() -> Vec<String> {
-    [
-        "HERMES_RUNTIME_USER_ID",
-        "HERMES_GATEWAY_USER_ID",
-        "HERMES_SESSION_USER_ID",
-        "HERMES_USER_ID",
-        "HERMES_USER",
-    ]
-    .into_iter()
-    .filter_map(|key| std::env::var(key).ok())
-    .collect()
-}
-
-fn session_key_fallback_peer_id(key: &str) -> String {
-    let (channel, chat_id) = key.split_once(':').unwrap_or(("default", key));
-    sanitize_id(&format!("user-{channel}-{chat_id}"))
-}
-
-fn explicit_user_peer_ids(config: &HonchoConfig) -> Vec<String> {
-    let mut explicit = Vec::new();
-    if let Some(peer) = config.peer_name.as_deref() {
-        if !peer.trim().is_empty() {
-            explicit.push(sanitize_id(peer.trim()));
-        }
-    }
-    for alias in config.user_peer_aliases.values() {
-        if !alias.trim().is_empty() {
-            explicit.push(sanitize_id(alias.trim()));
-        }
-    }
-    unique_nonempty(&explicit)
-}
-
-fn generated_runtime_peer_id(config: &HonchoConfig, prefix: &str, runtime_id: &str) -> String {
-    let raw_peer_id = format!("{prefix}{runtime_id}");
-    let sanitized_peer_id = sanitize_id(&raw_peer_id);
-    let explicit_ids = explicit_user_peer_ids(config);
-    if sanitized_peer_id != raw_peer_id || explicit_ids.contains(&sanitized_peer_id) {
-        let digest = Sha256::digest(raw_peer_id.as_bytes());
-        let hex = format!("{digest:x}");
-        for len in PEER_ID_HASH_ESCALATION_LENGTHS {
-            let candidate = format!("{sanitized_peer_id}-{}", &hex[..*len]);
-            if !explicit_ids.contains(&candidate) {
-                return candidate;
+        };
+        match stream_honcho_export(&config, subject, filter, sink) {
+            Ok((snapshot, exported_records, page_count)) => {
+                tracing::info!(
+                    provider = self.name(),
+                    operation = MemoryGovernanceOperation::Export.as_str(),
+                    subject_key = filter.as_str(),
+                    actor = actor.opaque_id().as_str(),
+                    exported_records,
+                    page_count,
+                    "subject-scoped memory export exhausted"
+                );
+                Ok(MemoryExportReceipt::exhausted(
+                    self.name(),
+                    filter.clone(),
+                    snapshot,
+                    exported_records,
+                    page_count,
+                ))
             }
+            Err(HonchoExportError::Unsupported) => {
+                sink.abort();
+                Err(MemoryProviderGovernanceError::unsupported(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                ))
+            }
+            Err(HonchoExportError::Failed(error)) => Err(honcho_governance_failure(
+                self.name(),
+                MemoryGovernanceOperation::Export,
+                filter,
+                Some(actor),
+                error,
+            )),
         }
-        return format!("{sanitized_peer_id}-{hex}");
     }
-    sanitized_peer_id
+
+    // Honcho's context search is semantic rather than a documented stable,
+    // subject-scoped inventory. It cannot certify delete-all coverage.
+    fn forget_subject(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryForgetReceipt, MemoryProviderGovernanceError> {
+        Err(MemoryProviderGovernanceError::unsupported(
+            self.name(),
+            MemoryGovernanceOperation::Forget,
+        ))
+    }
+
+    // The search endpoint has no exhaustive order or durable age contract, so
+    // it cannot serve as a retention inventory.
+    fn retention_sweep(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _policy: &MemoryRetentionPolicy,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryRetentionReceipt, MemoryProviderGovernanceError> {
+        Err(MemoryProviderGovernanceError::unsupported(
+            self.name(),
+            MemoryGovernanceOperation::RetentionSweep,
+        ))
+    }
+
+    // A semantic context-search miss is not an absence proof.
+    fn verify_subject_absent(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+    ) -> Result<MemoryReadbackReceipt, MemoryProviderGovernanceError> {
+        Err(MemoryProviderGovernanceError::unsupported(
+            self.name(),
+            MemoryGovernanceOperation::Readback,
+        ))
+    }
 }
+
 
 include!("honcho/profile_tests.rs");

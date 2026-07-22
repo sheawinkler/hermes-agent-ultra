@@ -51,6 +51,12 @@ impl ToolHandler for DelegateTaskHandler {
             .get("task")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'task' parameter".into()))?;
+        if params.get("background").and_then(Value::as_bool) == Some(true) {
+            return Err(ToolError::InvalidParams(
+                "background delegation requires durable scheduling and governed completion delivery"
+                    .into(),
+            ));
+        }
 
         let context = params.get("context").and_then(|v| v.as_str());
         let toolset = params.get("toolset").and_then(|v| v.as_str());
@@ -66,7 +72,6 @@ impl ToolHandler for DelegateTaskHandler {
         let parent_budget_remaining_usd = params
             .get("parent_budget_remaining_usd")
             .and_then(|v| v.as_f64());
-        let background = params.get("background").and_then(|v| v.as_bool());
 
         self.backend
             .delegate(
@@ -77,7 +82,7 @@ impl ToolHandler for DelegateTaskHandler {
                 child_depth,
                 max_depth,
                 parent_budget_remaining_usd,
-                background,
+                None,
             )
             .await
     }
@@ -126,13 +131,6 @@ impl ToolHandler for DelegateTaskHandler {
                 "description": "Remaining parent budget in USD to propagate to child orchestration"
             }),
         );
-        props.insert(
-            "background".into(),
-            json!({
-                "type": "boolean",
-                "description": "Run the delegated sub-agent asynchronously and return a handle immediately (default: false)"
-            }),
-        );
 
         tool_schema(
             "delegate_task",
@@ -173,7 +171,7 @@ mod tests {
         assert!(rendered.contains("current session"));
         assert!(rendered.contains("enabled parent tools"));
         assert!(!rendered.contains("\"toolset\""));
-        assert!(rendered.contains("background"));
+        assert!(!rendered.contains("background"));
     }
 
     #[tokio::test]
@@ -184,5 +182,15 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("Research AI trends"));
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_rejects_background_execution() {
+        let handler = DelegateTaskHandler::new(Arc::new(MockDelegationBackend));
+        let error = handler
+            .execute(json!({"task": "Research AI trends", "background": true}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("durable scheduling"));
     }
 }

@@ -80,24 +80,49 @@ impl AgentLoop {
             .map(|(_, cfg)| cfg)
     }
 
+    #[cfg(test)]
     fn resolve_runtime_api_key(
         &self,
         provider: &str,
         api_key_env_override: Option<&str>,
         explicit_api_key: Option<&str>,
     ) -> Option<String> {
+        self.resolve_runtime_api_key_checked(provider, api_key_env_override, explicit_api_key)
+            .ok()
+            .flatten()
+    }
+
+    fn resolve_runtime_api_key_checked(
+        &self,
+        provider: &str,
+        api_key_env_override: Option<&str>,
+        explicit_api_key: Option<&str>,
+    ) -> Result<Option<String>, AgentError> {
         if provider == "copilot-acp" {
-            return Some("copilot-acp".to_string());
+            return Ok(Some("copilot-acp".to_string()));
         }
         if matches!(
             provider,
             "bedrock" | "aws" | "aws-bedrock" | "amazon-bedrock" | "amazon"
         ) {
-            return Some(BEDROCK_AUTH_MARKER.to_string());
+            return Ok(Some(BEDROCK_AUTH_MARKER.to_string()));
         }
-        if let Some(token) = self.resolve_oauth_store_api_key(provider) {
-            return Some(token);
+        if let Some(token) = self.resolve_oauth_store_api_key(provider)? {
+            return Ok(Some(token));
         }
+        Ok(self.resolve_non_oauth_runtime_api_key(
+            provider,
+            api_key_env_override,
+            explicit_api_key,
+        ))
+    }
+
+    fn resolve_non_oauth_runtime_api_key(
+        &self,
+        provider: &str,
+        api_key_env_override: Option<&str>,
+        explicit_api_key: Option<&str>,
+    ) -> Option<String> {
         if let Some(key) = explicit_api_key.map(str::trim).filter(|s| !s.is_empty()) {
             return Some(key.to_string());
         }
@@ -400,105 +425,46 @@ impl AgentLoop {
             })
     }
 
-    fn resolve_oauth_store_api_key(&self, provider: &str) -> Option<String> {
-        let provider_key = match provider {
-            "openai" => "openai",
-            "openai-codex" | "codex" => "openai-codex",
-            "nous" => "nous",
-            "qwen-oauth" => "qwen-oauth",
-            "anthropic" | "claude" | "claude-code" => "anthropic",
-            "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => "google-gemini-cli",
-            _ => return None,
-        };
-        let path = self.auth_tokens_path();
-        let raw = std::fs::read_to_string(path).ok()?;
-        let entries: HashMap<String, OAuthStoreCredential> = serde_json::from_str(&raw).ok()?;
-        let cred = entries.get(provider_key)?;
-        if cred.access_token.trim().is_empty() {
-            return None;
+    fn oauth_store_provider_key(provider: &str) -> Option<&'static str> {
+        match provider {
+            "openai" => Some("openai"),
+            "openai-codex" | "codex" => Some("openai-codex"),
+            "nous" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => Some("nous"),
+            "qwen" | "qwen-oauth" => Some("qwen-oauth"),
+            "anthropic" | "claude" | "claude-code" => Some("anthropic"),
+            "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => Some("google-gemini-cli"),
+            _ => None,
         }
-        if cred
-            .expires_at
-            .map(|exp| exp <= Utc::now())
-            .unwrap_or(false)
-        {
-            return None;
-        }
-        Some(cred.access_token.clone())
     }
 
-    async fn refresh_oauth_store_tokens_if_needed(&self) {
-        // Keep this list explicit so behavior is deterministic and parity-scoped.
-        self.refresh_single_oauth_store_token_if_needed("openai")
-            .await;
-        self.refresh_single_oauth_store_token_if_needed("openai-codex")
-            .await;
-        self.refresh_single_oauth_store_token_if_needed("nous")
-            .await;
-        self.refresh_single_oauth_store_token_if_needed("qwen-oauth")
-            .await;
-        self.refresh_single_oauth_store_token_if_needed("anthropic")
-            .await;
+    pub(crate) fn oauth_refresh_provider_for_provider(provider: &str) -> Option<String> {
+        let normalized = provider.trim().to_ascii_lowercase();
+        Self::oauth_store_provider_key(&normalized).map(str::to_string)
     }
 
-    async fn refresh_single_oauth_store_token_if_needed(&self, provider_key: &str) {
-        if !self.can_attempt_oauth_refresh(provider_key) {
-            return;
+    fn resolve_oauth_store_api_key(&self, provider: &str) -> Result<Option<String>, AgentError> {
+        let Some(provider_key) = Self::oauth_store_provider_key(provider) else {
+            return Ok(None);
+        };
+        let store = hermes_auth::FileTokenStore::open_read_only(self.auth_tokens_path())
+            .map_err(AgentError::from)?;
+        match store.credential_status(provider_key, 0) {
+            hermes_auth::CredentialStatus::Missing => Ok(None),
+            hermes_auth::CredentialStatus::Current { .. } => store
+                .get_sync(provider_key)
+                .map(|credential| Some(credential.access_token))
+                .ok_or_else(|| {
+                    AgentError::AuthFailed(format!(
+                        "OAuth credential unavailable for provider '{provider_key}'; run `hermes auth login {provider_key}`"
+                    ))
+                }),
+            hermes_auth::CredentialStatus::Expired { .. } => Err(AgentError::AuthFailed(format!(
+                "OAuth credential unavailable for provider '{provider_key}': the stored access token is expired; run `hermes auth refresh {provider_key}` or `hermes auth login {provider_key}`"
+            ))),
+            hermes_auth::CredentialStatus::Unusable => Err(AgentError::AuthFailed(format!(
+                "OAuth credential unavailable for provider '{provider_key}': the stored access token is unusable; run `hermes auth login {provider_key}`"
+            ))),
         }
-        let path = self.auth_tokens_path();
-        let raw = match tokio::fs::read_to_string(&path).await {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let mut entries: HashMap<String, OAuthStoreCredential> = match serde_json::from_str(&raw) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let Some(current) = entries.get(provider_key).cloned() else {
-            return;
-        };
-        let Some(expires_at) = current.expires_at else {
-            return;
-        };
-        if expires_at > Utc::now() {
-            return;
-        }
-        let Some(refresh_token) = current.refresh_token.clone() else {
-            return;
-        };
-        let Some((token_url, client_id)) = self.oauth_refresh_config(provider_key) else {
-            return;
-        };
-        let refreshed = match self
-            .exchange_oauth_refresh_token(
-                provider_key,
-                token_url.as_str(),
-                client_id.as_str(),
-                refresh_token.as_str(),
-            )
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                self.mark_oauth_refresh_failure(provider_key);
-                tracing::warn!(
-                    provider = provider_key,
-                    error = %e,
-                    "oauth token refresh failed for runtime provider"
-                );
-                return;
-            }
-        };
-        entries.insert(provider_key.to_string(), refreshed);
-        let Ok(content) = serde_json::to_string_pretty(&entries) else {
-            self.mark_oauth_refresh_success(provider_key);
-            return;
-        };
-        if let Some(parent) = path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        let _ = tokio::fs::write(path, content).await;
-        self.mark_oauth_refresh_success(provider_key);
     }
 
     fn oauth_refresh_config(&self, provider_key: &str) -> Option<(String, String)> {
@@ -584,56 +550,81 @@ impl AgentLoop {
         Some((token_url, client_id))
     }
 
-    async fn exchange_oauth_refresh_token(
-        &self,
-        provider_key: &str,
-        token_url: &str,
-        client_id: &str,
-        refresh_token: &str,
-    ) -> Result<OAuthStoreCredential, AgentError> {
-        let endpoints = OAuth2Endpoints {
+    fn oauth_refresh_endpoints(&self, provider_key: &str) -> Option<OAuth2Endpoints> {
+        let (token_url, client_id) = self.oauth_refresh_config(provider_key)?;
+        Some(OAuth2Endpoints {
             authorize_url: "http://127.0.0.1/oauth/authorize-unused".to_string(),
-            token_url: token_url.to_string(),
-            client_id: client_id.to_string(),
-            redirect_uri: "http://127.0.0.1/unused".to_string(),
-            scopes: vec![],
+            token_url,
+            client_id,
+            redirect_uri: "http://127.0.0.1/oauth/callback-unused".to_string(),
+            scopes: Vec::new(),
             client_secret: None,
             client_auth_method: hermes_auth::OAuth2ClientAuthMethod::default(),
-        };
-        let cred = exchange_refresh_token(provider_key, &endpoints, refresh_token)
-            .await
-            .map_err(|e| AgentError::AuthFailed(e.to_string()))?;
-        Ok(OAuthStoreCredential {
-            provider: Some(provider_key.to_string()),
-            access_token: cred.access_token,
-            refresh_token: cred
-                .refresh_token
-                .or_else(|| Some(refresh_token.to_string())),
-            token_type: Some(cred.token_type),
-            scope: cred.scope,
-            expires_at: cred.expires_at,
         })
     }
 
-    fn can_attempt_oauth_refresh(&self, provider_key: &str) -> bool {
-        let Ok(guard) = self.oauth_refresh_backoff.lock() else {
-            return true;
-        };
-        let Some(last_fail) = guard.get(provider_key) else {
-            return true;
-        };
-        last_fail.elapsed().as_secs() >= OAUTH_REFRESH_BACKOFF_SECS
-    }
-
-    fn mark_oauth_refresh_failure(&self, provider_key: &str) {
-        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
-            guard.insert(provider_key.to_string(), Instant::now());
+    fn oauth_refresh_result(status: &str, expires_at: Option<DateTime<Utc>>) -> Value {
+        let mut result = serde_json::Map::new();
+        result.insert("status".to_string(), Value::String(status.to_string()));
+        if let Some(expires_at) = expires_at {
+            result.insert(
+                "expires_at".to_string(),
+                Value::String(expires_at.to_rfc3339()),
+            );
         }
+        Value::Object(result)
     }
 
-    fn mark_oauth_refresh_success(&self, provider_key: &str) {
-        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
-            guard.remove(provider_key);
+    /// Performs the credential-store part of a governed ActiveRun refresh.
+    /// Callers must wrap this in the durable one-shot effect boundary; this
+    /// method itself never runs from ordinary provider resolution.
+    pub(crate) async fn refresh_runtime_oauth_credential_for_active_run(
+        &self,
+        provider: &str,
+    ) -> Result<Value, AgentError> {
+        let Some(provider_key) = Self::oauth_store_provider_key(provider) else {
+            return Ok(Self::oauth_refresh_result("not_configured", None));
+        };
+        let path = self.auth_tokens_path();
+        let readonly = hermes_auth::FileTokenStore::open_read_only(&path)
+            .map_err(AgentError::from)?;
+        match readonly.credential_status(provider_key, 30) {
+            hermes_auth::CredentialStatus::Missing => {
+                Ok(Self::oauth_refresh_result("not_configured", None))
+            }
+            hermes_auth::CredentialStatus::Current { expires_at } => {
+                Ok(Self::oauth_refresh_result("current", expires_at))
+            }
+            hermes_auth::CredentialStatus::Unusable => Err(AgentError::AuthFailed(format!(
+                "OAuth credential unavailable for provider '{provider_key}': the stored access token is unusable; run `hermes auth login {provider_key}`"
+            ))),
+            hermes_auth::CredentialStatus::Expired { .. } => {
+                let writable = hermes_auth::FileTokenStore::open(
+                    &path,
+                    hermes_auth::TokenStoreOpenMode::ReadWrite,
+                )
+                .map_err(AgentError::from)?;
+                let manager = hermes_auth::AuthManager::new(writable);
+                let endpoints = self.oauth_refresh_endpoints(provider_key).ok_or_else(|| {
+                    AgentError::AuthFailed(format!(
+                        "OAuth refresh handler is not configured for provider '{provider_key}'; configure its OAuth endpoints or run `hermes auth login {provider_key}`"
+                    ))
+                })?;
+                manager
+                    .register_oauth2_refresh_handler(provider_key, endpoints)
+                    .await;
+                match manager.refresh_expired_credential(provider_key).await? {
+                    hermes_auth::RefreshResolution::NotConfigured => {
+                        Ok(Self::oauth_refresh_result("not_configured", None))
+                    }
+                    hermes_auth::RefreshResolution::Current => {
+                        Ok(Self::oauth_refresh_result("current", None))
+                    }
+                    hermes_auth::RefreshResolution::Refreshed { expires_at } => {
+                        Ok(Self::oauth_refresh_result("refreshed", expires_at))
+                    }
+                }
+            }
         }
     }
 
@@ -649,150 +640,6 @@ impl AgentLoop {
         hermes_home.join("auth").join("tokens.json")
     }
 
-    fn objective_runtime_ledger_path(&self) -> PathBuf {
-        let hermes_home = self
-            .config
-            .hermes_home
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
-            .unwrap_or_else(|| PathBuf::from(".hermes"));
-        hermes_home
-            .join("alpha")
-            .join("objective_runtime_ledger.jsonl")
-    }
-
-    fn objective_eval_trend_path(&self) -> PathBuf {
-        let hermes_home = self
-            .config
-            .hermes_home
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
-            .unwrap_or_else(|| PathBuf::from(".hermes"));
-        hermes_home.join("alpha").join("objective_eval_trend.json")
-    }
-
-    fn append_objective_eval_sample(
-        &self,
-        objective_id: &str,
-        objective_state: &str,
-        note: &str,
-    ) -> Result<(), AgentError> {
-        let path = self.objective_eval_trend_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AgentError::Io(format!("create {} failed: {}", parent.display(), e))
-            })?;
-        }
-        let mut root: serde_json::Value = if path.exists() {
-            std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .unwrap_or_else(
-                    || serde_json::json!({"updated_at": Utc::now().to_rfc3339(), "samples": []}),
-                )
-        } else {
-            serde_json::json!({"updated_at": Utc::now().to_rfc3339(), "samples": []})
-        };
-        let Some(samples) = root.get_mut("samples").and_then(|v| v.as_array_mut()) else {
-            root = serde_json::json!({"updated_at": Utc::now().to_rfc3339(), "samples": []});
-            let samples = root
-                .get_mut("samples")
-                .and_then(|v| v.as_array_mut())
-                .ok_or_else(|| {
-                    AgentError::Config("objective_eval_trend samples field missing".to_string())
-                })?;
-            samples.push(serde_json::json!({
-                "recorded_at": Utc::now().to_rfc3339(),
-                "objective_id": objective_id,
-                "objective_state": objective_state,
-                "score": objective_eval_score(objective_state),
-                "note": note,
-            }));
-            root["updated_at"] = serde_json::json!(Utc::now().to_rfc3339());
-            let payload = serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".to_string());
-            std::fs::write(&path, payload)
-                .map_err(|e| AgentError::Io(format!("write {} failed: {}", path.display(), e)))?;
-            return Ok(());
-        };
-        samples.push(serde_json::json!({
-            "recorded_at": Utc::now().to_rfc3339(),
-            "objective_id": objective_id,
-            "objective_state": objective_state,
-            "score": objective_eval_score(objective_state),
-            "note": note,
-        }));
-        if samples.len() > 512 {
-            let drain = samples.len().saturating_sub(512);
-            samples.drain(0..drain);
-        }
-        root["updated_at"] = serde_json::json!(Utc::now().to_rfc3339());
-        let payload = serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".to_string());
-        std::fs::write(&path, payload)
-            .map_err(|e| AgentError::Io(format!("write {} failed: {}", path.display(), e)))?;
-        Ok(())
-    }
-
-    fn append_objective_runtime_ledger(
-        &self,
-        messages: &[Message],
-        assistant_text: &str,
-        total_turns: u32,
-    ) -> Result<(), AgentError> {
-        let Some(objective) = extract_session_objective(messages) else {
-            return Ok(());
-        };
-        if objective.trim().is_empty() {
-            return Ok(());
-        }
-        let objective_id = short_sha256_hex(&format!("objective:{}", objective))
-            .chars()
-            .take(12)
-            .collect::<String>();
-        let objective_state = extract_objective_state_marker(assistant_text);
-        let evidence_files = extract_marker_values(assistant_text, "path=", 12);
-        let evidence_commands = extract_marker_values(assistant_text, "cmd=", 12);
-        let decision = if objective_state == "advancing" {
-            "promote"
-        } else if objective_state == "regressing" {
-            "investigate"
-        } else if objective_state == "unproven" {
-            "collect-more-evidence"
-        } else {
-            "monitor"
-        };
-        let entry = serde_json::json!({
-            "recorded_at": Utc::now().to_rfc3339(),
-            "objective_id": format!("obj-{}", objective_id),
-            "objective_state": objective_state,
-            "decision": decision,
-            "turns": total_turns,
-            "evidence_files": evidence_files,
-            "evidence_commands": evidence_commands,
-        });
-        let path = self.objective_runtime_ledger_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AgentError::Io(format!("create {} failed: {}", parent.display(), e))
-            })?;
-        }
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| AgentError::Io(format!("open {} failed: {}", path.display(), e)))?;
-        writeln!(file, "{}", entry)
-            .map_err(|e| AgentError::Io(format!("append {} failed: {}", path.display(), e)))?;
-        self.append_objective_eval_sample(
-            &format!("obj-{}", objective_id),
-            &objective_state,
-            &format!("decision={decision} turns={total_turns}"),
-        )?;
-        Ok(())
-    }
 
     fn resolve_runtime_command_args(
         &self,
@@ -870,7 +717,11 @@ impl AgentLoop {
     ) -> Result<Arc<dyn LlmProvider>, AgentError> {
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
         let api_key =
-            match self.resolve_runtime_api_key(provider, api_key_env_override, explicit_api_key) {
+            match self.resolve_runtime_api_key_checked(
+                provider,
+                api_key_env_override,
+                explicit_api_key,
+            )? {
                 Some(api_key) => api_key,
                 None if runtime_provider_allows_no_api_key(provider, base_url.as_deref()) => {
                     "local-no-key".to_string()

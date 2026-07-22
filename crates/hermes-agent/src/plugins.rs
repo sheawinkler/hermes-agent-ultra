@@ -1,26 +1,29 @@
-//! Plugin system for extending Hermes with custom functionality.
+//! Secure `plugin.yaml` bundle discovery.
 //!
-//! Plugins can provide:
-//! - Custom memory providers
-//! - Additional tools
-//! - Custom hooks (pre/post LLM call, tool call, API request, session lifecycle)
-//! - Additional LLM providers
-//! - CLI commands
+//! Hermes validates plugin package evidence through the v2 skill trust
+//! verifier, but deliberately does not load third-party implementation code.
+//! Verified bundles are diagnostic metadata until a loader can bind executable
+//! bytes to that evidence and hand execution to the policy sandbox.
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use hermes_core::{AgentError, ToolHandler, ToolResult, ToolSchema};
+use hermes_core::ToolResult;
+use hermes_skills::{
+    load_lock_for_migration, load_revocations, skill_lock_path, SkillAdmission,
+    SkillAdmissionDecision, SkillLockLoad, SkillPackageIdentityV2, SkillPackageManifestV2,
+    SkillPackageSource, SkillPermission, SkillQuarantine, SkillQuarantineReason,
+    SkillTrustAuthorityPaths, SkillTrustError, SkillTrustPolicy, SkillTrustVerifier,
+};
 
 // ---------------------------------------------------------------------------
 // HookType
 // ---------------------------------------------------------------------------
 
-/// Valid lifecycle hooks that plugins can register.
+/// Lifecycle hook names reserved for a future loader-bound plugin system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HookType {
     PreToolCall,
@@ -84,30 +87,6 @@ pub enum HookResult {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
-pub struct ToolRequestMiddlewareContext {
-    pub tool_name: String,
-    pub args: Value,
-    pub original_args: Value,
-    pub turn: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolRequestMiddlewareUpdate {
-    pub args: Value,
-    pub source: Option<String>,
-    pub reason: Option<String>,
-}
-
-impl ToolRequestMiddlewareUpdate {
-    pub fn new(args: Value) -> Self {
-        Self {
-            args,
-            source: None,
-            reason: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ToolRequestMiddlewareResult {
@@ -126,23 +105,16 @@ pub struct ToolExecutionMiddlewareContext {
     pub turn: u32,
 }
 
-pub type ToolRequestMiddleware =
-    Arc<dyn Fn(&ToolRequestMiddlewareContext) -> Option<ToolRequestMiddlewareUpdate> + Send + Sync>;
-
-pub type ToolExecutionMiddleware = Arc<
-    dyn Fn(
-            &ToolExecutionMiddlewareContext,
-            &mut dyn FnMut(Option<Value>) -> ToolResult,
-        ) -> ToolResult
-        + Send
-        + Sync,
->;
 
 // ---------------------------------------------------------------------------
 // PluginManifest
 // ---------------------------------------------------------------------------
 
 /// Plugin manifest loaded from `plugin.yaml`.
+///
+/// This is descriptive metadata only until the bundle is admitted through the
+/// v2 package verifier. In particular, a manifest's name, version, source
+/// label, or permissions must never be treated as a trust decision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub name: String,
@@ -154,11 +126,37 @@ pub struct PluginManifest {
     pub author: Option<String>,
     #[serde(default)]
     pub homepage: Option<String>,
+    /// Requested plugin capabilities. They must exactly match the signed
+    /// package manifest; no current discovery result can activate them.
     #[serde(default)]
-    pub dependencies: Vec<String>,
+    pub permissions: Vec<String>,
+    /// Dependencies declared by this plugin bundle. Only exact dependency
+    /// declarations are accepted for verified diagnostic metadata; legacy
+    /// strings are retained solely so they can be reported diagnostically.
+    #[serde(default)]
+    pub dependencies: Vec<PluginDependency>,
 }
 
-/// Plugin source used during discovery.
+/// A dependency declaration from `plugin.yaml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PluginDependency {
+    /// A dependency pinned to an exact package version.
+    Exact { name: String, version: String },
+    /// Historical unscoped syntax. It is never effect-capable.
+    Legacy(String),
+}
+
+impl PluginDependency {
+    fn exact(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Exact { name, version } => Some((name, version)),
+            Self::Legacy(_) => None,
+        }
+    }
+}
+
+/// Plugin discovery location. This is diagnostic provenance, never trust.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginDiscoverySource {
     User,
@@ -174,391 +172,178 @@ impl PluginDiscoverySource {
     }
 }
 
-/// A discovered plugin bundle with source metadata.
+/// Plugin-specific reason that an on-disk bundle cannot become effect-capable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginQuarantineReason {
+    Core(SkillQuarantineReason),
+    InvalidPluginManifest,
+    MissingPackageManifest,
+    UnsupportedPackageSource,
+    ForceOnlyAdmission,
+    EffectsNotAllowed,
+    ManifestIdentityMismatch,
+    PermissionMismatch,
+    UnscopedDependency,
+    DependencyDeclarationMismatch,
+    MissingDependency,
+    AmbiguousDependency,
+    DependencyCycle,
+    DuplicatePackageIdentity,
+    Disabled,
+}
+
+/// Typed diagnostic evidence for a plugin bundle which is not executable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginQuarantine {
+    pub path: PathBuf,
+    pub source: PluginDiscoverySource,
+    pub identity: Option<SkillPackageIdentityV2>,
+    pub reason: PluginQuarantineReason,
+    pub detail: String,
+}
+
+/// Result of a no-execution plugin discovery pass.
+#[derive(Debug, Clone, Default)]
+pub struct PluginDiscoveryReport {
+    /// Bundles whose package evidence passed strict verification. They are
+    /// diagnostic metadata only and cannot execute without a loader-bound
+    /// implementation artifact.
+    pub admitted: Vec<DiscoveredPlugin>,
+    /// Every rejected candidate is retained as typed diagnostic evidence.
+    pub quarantined: Vec<PluginQuarantine>,
+}
+
+/// A strictly verified plugin bundle used for diagnostics and future loader
+/// input. It is not executable and cannot create a registration binding.
 #[derive(Debug, Clone)]
 pub struct DiscoveredPlugin {
     pub manifest: PluginManifest,
-    pub path: std::path::PathBuf,
+    pub path: PathBuf,
     pub source: PluginDiscoverySource,
+    package_manifest: SkillPackageManifestV2,
+    admission: SkillAdmission,
 }
 
-// ---------------------------------------------------------------------------
-// PluginCliCommand
-// ---------------------------------------------------------------------------
-
-/// A CLI command contributed by a plugin.
-#[derive(Debug, Clone)]
-pub struct PluginCliCommand {
-    pub name: String,
-    pub description: String,
-    pub plugin_name: String,
-}
-
-// ---------------------------------------------------------------------------
-// ContextEngine trait (for plugins that want to inject context)
-// ---------------------------------------------------------------------------
-
-/// Trait for context engines that plugins can provide.
-pub trait ContextEngine: Send + Sync {
-    fn inject(&self, query: &str) -> Option<String>;
-}
-
-// ---------------------------------------------------------------------------
-// PluginContext
-// ---------------------------------------------------------------------------
-
-/// Plugin context provided to plugins during registration.
-/// Plugins use this to register hooks, tools, and CLI commands.
-pub struct PluginContext {
-    hooks: HashMap<HookType, Vec<Arc<dyn Fn(&Value) -> HookResult + Send + Sync>>>,
-    tool_request_middleware: Vec<ToolRequestMiddleware>,
-    tool_execution_middleware: Vec<ToolExecutionMiddleware>,
-    tools: Vec<(ToolSchema, Arc<dyn ToolHandler>)>,
-    cli_commands: Vec<PluginCliCommand>,
-    context_engine: Option<Arc<dyn ContextEngine>>,
-    injected_messages: Vec<String>,
-}
-
-impl PluginContext {
-    pub fn new() -> Self {
-        Self {
-            hooks: HashMap::new(),
-            tool_request_middleware: Vec::new(),
-            tool_execution_middleware: Vec::new(),
-            tools: Vec::new(),
-            cli_commands: Vec::new(),
-            context_engine: None,
-            injected_messages: Vec::new(),
-        }
+impl DiscoveredPlugin {
+    pub fn identity(&self) -> &SkillPackageIdentityV2 {
+        &self.admission.identity
     }
 
-    /// Register a hook callback for a specific lifecycle event.
-    pub fn on(
-        &mut self,
-        hook: HookType,
-        callback: Arc<dyn Fn(&Value) -> HookResult + Send + Sync>,
-    ) {
-        self.hooks.entry(hook).or_default().push(callback);
-    }
-
-    /// Register middleware that can rewrite tool arguments before execution.
-    pub fn on_tool_request(&mut self, callback: ToolRequestMiddleware) {
-        self.tool_request_middleware.push(callback);
-    }
-
-    /// Register middleware that can wrap or replace tool execution.
-    pub fn on_tool_execution(&mut self, callback: ToolExecutionMiddleware) {
-        self.tool_execution_middleware.push(callback);
-    }
-
-    /// Register a tool provided by the plugin.
-    pub fn register_tool(&mut self, schema: ToolSchema, handler: Arc<dyn ToolHandler>) {
-        self.tools.push((schema, handler));
-    }
-
-    /// Register a CLI command provided by the plugin.
-    pub fn register_cli_command(&mut self, cmd: PluginCliCommand) {
-        self.cli_commands.push(cmd);
-    }
-
-    /// Set a context engine for this plugin.
-    pub fn set_context_engine(&mut self, engine: Arc<dyn ContextEngine>) {
-        self.context_engine = Some(engine);
-    }
-
-    /// Inject a system message into the conversation.
-    pub fn inject_message(&mut self, message: String) {
-        self.injected_messages.push(message);
-    }
-
-    pub fn drain_injected_messages(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.injected_messages)
+    pub fn admission(&self) -> &SkillAdmission {
+        &self.admission
     }
 }
 
-impl Default for PluginContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
-// ---------------------------------------------------------------------------
-// PluginMeta
-// ---------------------------------------------------------------------------
 
-/// Plugin metadata.
-#[derive(Debug, Clone)]
-pub struct PluginMeta {
-    pub name: String,
-    pub version: String,
-    pub description: String,
-    pub author: Option<String>,
-}
-
-impl From<PluginManifest> for PluginMeta {
-    fn from(m: PluginManifest) -> Self {
-        Self {
-            name: m.name,
-            version: m.version,
-            description: m.description,
-            author: m.author,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Plugin trait
-// ---------------------------------------------------------------------------
-
-/// Trait for Hermes plugins.
-#[async_trait::async_trait]
-pub trait Plugin: Send + Sync {
-    fn meta(&self) -> PluginMeta;
-    async fn initialize(&self) -> Result<(), AgentError>;
-    async fn shutdown(&self) -> Result<(), AgentError>;
-    fn tools(&self) -> Vec<(ToolSchema, Arc<dyn ToolHandler>)> {
-        Vec::new()
-    }
-
-    /// Called during registration to let the plugin register hooks, tools, etc.
-    fn register(&self, _ctx: &mut PluginContext) {}
-}
-
-// ---------------------------------------------------------------------------
-// PluginManager
-// ---------------------------------------------------------------------------
-
-/// Plugin manager — central registry for all loaded plugins.
-pub struct PluginManager {
-    plugins: HashMap<String, Arc<dyn Plugin>>,
-    context: PluginContext,
-}
+/// Plugin manager — a diagnostic bundle-discovery surface.
+///
+/// Third-party effect execution is unavailable until an implementation loader
+/// can cryptographically bind executable bytes to a verified package identity.
+pub struct PluginManager;
 
 impl PluginManager {
     pub fn new() -> Self {
-        Self {
-            plugins: HashMap::new(),
-            context: PluginContext::new(),
-        }
+        Self
     }
 
-    pub fn register(&mut self, plugin: Arc<dyn Plugin>) {
-        let meta = plugin.meta();
-        tracing::info!("Registered plugin: {} v{}", meta.name, meta.version);
-        plugin.register(&mut self.context);
-        self.plugins.insert(meta.name.clone(), plugin);
+    pub(crate) fn has_effect_capable_callbacks(&mut self) -> bool {
+        false
     }
 
-    pub async fn initialize_all(&self) -> Result<(), AgentError> {
-        for (name, plugin) in &self.plugins {
-            tracing::info!("Initializing plugin: {}", name);
-            plugin.initialize().await?;
-        }
-        Ok(())
+    pub(crate) fn has_tool_execution_middleware(&mut self) -> bool {
+        false
     }
 
-    pub async fn shutdown_all(&self) -> Result<(), AgentError> {
-        for (name, plugin) in &self.plugins {
-            tracing::info!("Shutting down plugin: {}", name);
-            if let Err(e) = plugin.shutdown().await {
-                tracing::warn!("Plugin {} shutdown error: {}", name, e);
-            }
-        }
-        Ok(())
+    /// No plugin hooks can run without a loader-bound implementation.
+    pub fn invoke_hook(&mut self, _hook: HookType, _context: &Value) -> Vec<HookResult> {
+        Vec::new()
     }
 
-    pub fn all_tools(&self) -> Vec<(ToolSchema, Arc<dyn ToolHandler>)> {
-        let mut tools: Vec<_> = self.plugins.values().flat_map(|p| p.tools()).collect();
-        tools.extend(self.context.tools.iter().cloned());
-        tools
-    }
-
-    pub fn list_plugins(&self) -> Vec<PluginMeta> {
-        self.plugins.values().map(|p| p.meta()).collect()
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Arc<dyn Plugin>> {
-        self.plugins.get(name)
-    }
-
-    /// Invoke all registered hooks for the given lifecycle event.
-    pub fn invoke_hook(&self, hook: HookType, context: &Value) -> Vec<HookResult> {
-        let Some(callbacks) = self.context.hooks.get(&hook) else {
-            return Vec::new();
-        };
-        callbacks
-            .iter()
-            .filter_map(|cb| {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cb(context))) {
-                    Ok(result) => Some(result),
-                    Err(_) => {
-                        tracing::warn!(hook = hook.as_str(), "Plugin hook panicked");
-                        None
-                    }
-                }
-            })
-            .collect()
-    }
-
+    /// No plugin middleware can change tool request arguments.
     pub fn apply_tool_request_middleware(
-        &self,
-        tool_name: &str,
+        &mut self,
+        _tool_name: &str,
         args: Value,
-        turn: u32,
+        _turn: u32,
     ) -> ToolRequestMiddlewareResult {
-        let original_args = args.clone();
-        let mut current_args = args;
-        let mut trace = Vec::new();
-
-        for callback in &self.context.tool_request_middleware {
-            let ctx = ToolRequestMiddlewareContext {
-                tool_name: tool_name.to_string(),
-                args: current_args.clone(),
-                original_args: original_args.clone(),
-                turn,
-            };
-            let Ok(result) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&ctx)))
-            else {
-                tracing::warn!(tool = tool_name, "Plugin tool request middleware panicked");
-                continue;
-            };
-            let Some(update) = result else {
-                continue;
-            };
-            current_args = update.args;
-            trace.push(serde_json::json!({
-                "source": update.source.unwrap_or_else(|| "plugin".to_string()),
-                "reason": update.reason,
-            }));
-        }
-
         ToolRequestMiddlewareResult {
-            changed: current_args != original_args,
-            args: current_args,
-            original_args,
-            trace,
+            original_args: args.clone(),
+            args,
+            changed: false,
+            trace: Vec::new(),
         }
     }
 
+    /// No plugin middleware can wrap tool execution.
     pub fn run_tool_execution_middleware<F>(
-        &self,
-        ctx: ToolExecutionMiddlewareContext,
+        &mut self,
+        context: ToolExecutionMiddlewareContext,
         mut terminal_call: F,
     ) -> ToolResult
     where
         F: FnMut(Value) -> ToolResult,
     {
-        fn call_at<F>(
-            callbacks: &[ToolExecutionMiddleware],
-            index: usize,
-            base_ctx: &ToolExecutionMiddlewareContext,
-            payload: Value,
-            terminal_call: &mut F,
-        ) -> ToolResult
-        where
-            F: FnMut(Value) -> ToolResult,
-        {
-            if index >= callbacks.len() {
-                return terminal_call(payload);
-            }
+        terminal_call(context.args)
+    }
 
-            let callback = callbacks[index].clone();
-            let mut call_ctx = base_ctx.clone();
-            call_ctx.args = payload.clone();
-            let mut next_called = false;
-            let mut next_result: Option<ToolResult> = None;
-            let result = {
-                let mut next_call = |next_payload: Option<Value>| -> ToolResult {
-                    if next_called {
-                        return ToolResult::err(
-                            &call_ctx.tool_call_id,
-                            "Middleware next_call may only be called once.",
-                        );
-                    }
-                    next_called = true;
-                    let result = call_at(
-                        callbacks,
-                        index + 1,
-                        base_ctx,
-                        next_payload.unwrap_or_else(|| call_ctx.args.clone()),
-                        terminal_call,
-                    );
-                    next_result = Some(result.clone());
-                    result
+
+    /// Verify bundle metadata under the supplied core verifier. Verification
+    /// does not load or execute a plugin implementation.
+    pub fn discover_plugins(
+        hermes_dir: &Path,
+        verifier: &SkillTrustVerifier,
+    ) -> PluginDiscoveryReport {
+        Self::discover_plugins_with_options(hermes_dir, None, false, verifier)
+    }
+
+    /// Build the anchored verifier used for diagnostic discovery. Failure to
+    /// load authority becomes typed quarantine; this API never falls back to a
+    /// local keyring or trust-on-first-use.
+    pub fn discover_plugins_with_authority_paths(
+        hermes_dir: &Path,
+        cwd: Option<&Path>,
+        enable_project_plugins: bool,
+        authority: &SkillTrustAuthorityPaths,
+        policy: SkillTrustPolicy,
+        embedded_manifest_digests: BTreeMap<String, String>,
+    ) -> PluginDiscoveryReport {
+        let verifier = match authority.build_verifier(policy, embedded_manifest_digests) {
+            Ok(verifier) => verifier,
+            Err(error) => {
+                return PluginDiscoveryReport {
+                    admitted: Vec::new(),
+                    quarantined: vec![quarantine_from_trust_error(
+                        &hermes_dir.join("plugins"),
+                        PluginDiscoverySource::User,
+                        error,
+                    )],
                 };
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    callback(&call_ctx, &mut next_call)
-                }))
-            };
-
-            match result {
-                Ok(result) => result,
-                Err(_) => {
-                    tracing::warn!(
-                        tool = call_ctx.tool_name,
-                        "Plugin tool execution middleware panicked"
-                    );
-                    if let Some(result) = next_result {
-                        result
-                    } else {
-                        call_at(callbacks, index + 1, base_ctx, payload, terminal_call)
-                    }
-                }
             }
-        }
-
-        call_at(
-            &self.context.tool_execution_middleware,
-            0,
-            &ctx,
-            ctx.args.clone(),
-            &mut terminal_call,
+        };
+        Self::discover_plugins_with_options(
+            hermes_dir,
+            cwd,
+            enable_project_plugins,
+            &verifier,
         )
     }
 
-    /// Get all tools registered via plugin contexts.
-    pub fn get_plugin_tools(&self) -> Vec<(ToolSchema, Arc<dyn ToolHandler>)> {
-        self.context.tools.clone()
-    }
-
-    /// Get all CLI commands registered via plugin contexts.
-    pub fn get_plugin_cli_commands(&self) -> Vec<PluginCliCommand> {
-        self.context.cli_commands.clone()
-    }
-
-    /// Check if a plugin is disabled.
-    pub fn is_disabled(&self, name: &str, disabled_list: &[String]) -> bool {
-        disabled_list.iter().any(|d| d == name)
-    }
-
-    /// Discover plugins in the given Hermes directory by scanning `plugins/`.
-    ///
-    /// Backwards-compatible wrapper that preserves the historical return type
-    /// and only scans the user plugin directory.
-    pub fn discover_plugins(hermes_dir: &Path) -> Vec<(PluginManifest, std::path::PathBuf)> {
-        Self::discover_plugins_with_options(hermes_dir, None, false)
-            .into_iter()
-            .map(|entry| (entry.manifest, entry.path))
-            .collect()
-    }
-
-    /// Discover plugins with explicit source controls.
-    ///
-    /// - Always scans user plugins at `<hermes_dir>/plugins`.
-    /// - Optionally scans project plugins at `<cwd>/.hermes/plugins` when
-    ///   `enable_project_plugins` is true.
+    /// Discover user and (when explicitly selected) project bundle metadata
+    /// without loading or executing any plugin code.
     pub fn discover_plugins_with_options(
         hermes_dir: &Path,
         cwd: Option<&Path>,
         enable_project_plugins: bool,
-    ) -> Vec<DiscoveredPlugin> {
-        let mut discovered = Vec::new();
+        verifier: &SkillTrustVerifier,
+    ) -> PluginDiscoveryReport {
+        let mut report = PluginDiscoveryReport::default();
         let user_plugins_dir = hermes_dir.join("plugins");
         scan_plugin_root(
             &user_plugins_dir,
             PluginDiscoverySource::User,
-            &mut discovered,
+            verifier,
+            &mut report,
         );
 
         if enable_project_plugins {
@@ -567,124 +352,644 @@ impl PluginManager {
                 scan_plugin_root(
                     &project_plugins_dir,
                     PluginDiscoverySource::Project,
-                    &mut discovered,
+                    verifier,
+                    &mut report,
                 );
             }
         }
 
-        discovered
+        enforce_plugin_dependency_graph(&mut report.admitted, &mut report.quarantined);
+        report
     }
 
-    /// Discover plugins using runtime defaults.
-    ///
-    /// Project-local plugins are included when
-    /// `HERMES_ENABLE_PROJECT_PLUGINS` is enabled.
-    pub fn discover_plugins_runtime_default(hermes_dir: &Path) -> Vec<DiscoveredPlugin> {
+    /// Discover using runtime path selection and an externally anchored
+    /// authority. The environment selects only the project root; it never
+    /// grants a trust bypass or supplies trust material.
+    pub fn discover_plugins_runtime_default(
+        hermes_dir: &Path,
+        authority: &SkillTrustAuthorityPaths,
+        policy: SkillTrustPolicy,
+        embedded_manifest_digests: BTreeMap<String, String>,
+    ) -> PluginDiscoveryReport {
         let enable_project_plugins = std::env::var("HERMES_ENABLE_PROJECT_PLUGINS")
             .ok()
-            .is_some_and(|v| {
+            .is_some_and(|value| {
                 matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
+                    value.trim().to_ascii_lowercase().as_str(),
                     "1" | "true" | "yes" | "on"
                 )
             });
         let cwd = std::env::current_dir().ok();
-        Self::discover_plugins_with_options(hermes_dir, cwd.as_deref(), enable_project_plugins)
+        Self::discover_plugins_with_authority_paths(
+            hermes_dir,
+            cwd.as_deref(),
+            enable_project_plugins,
+            authority,
+            policy,
+            embedded_manifest_digests,
+        )
     }
+
 }
+
 
 fn scan_plugin_root(
     plugins_dir: &Path,
     source: PluginDiscoverySource,
-    discovered: &mut Vec<DiscoveredPlugin>,
+    verifier: &SkillTrustVerifier,
+    report: &mut PluginDiscoveryReport,
 ) {
-    if !plugins_dir.exists() {
-        return;
-    }
-
-    let Ok(entries) = std::fs::read_dir(plugins_dir) else {
-        return;
+    let entries = match std::fs::read_dir(plugins_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            report.quarantined.push(plugin_quarantine(
+                plugins_dir,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+                error.to_string(),
+            ));
+            return;
+        }
     };
 
-    for entry in entries.filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let manifest_path = path.join("plugin.yaml");
-        if !manifest_path.exists() {
-            continue;
-        }
-
-        let disabled_marker = path.join(".disabled");
-        if disabled_marker.exists() {
-            tracing::debug!("Skipping disabled plugin: {}", path.display());
-            continue;
-        }
-
-        match std::fs::read_to_string(&manifest_path) {
-            Ok(content) => match serde_yaml::from_str::<PluginManifest>(&content) {
-                Ok(mut manifest) => {
-                    // If the manifest doesn't explicitly declare a plugin kind,
-                    // detect Python memory-provider plugins and auto-coerce them
-                    // to `exclusive` so they can be routed away from generic
-                    // plugin loading.
-                    let explicit_kind = manifest
-                        .kind
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty());
-                    if explicit_kind.is_none() {
-                        let init_file = path.join("__init__.py");
-                        if let Ok(source_text) = std::fs::read_to_string(&init_file) {
-                            let probe = if source_text.len() > 8192 {
-                                &source_text[..8192]
-                            } else {
-                                source_text.as_str()
-                            };
-                            if probe.contains("register_memory_provider")
-                                || probe.contains("MemoryProvider")
-                            {
-                                manifest.kind = Some("exclusive".to_string());
-                                tracing::debug!(
-                                    "Plugin {} auto-coerced to kind=exclusive (memory provider heuristic)",
-                                    manifest.name
-                                );
-                            }
-                        }
-                    }
-                    tracing::debug!(
-                        "Discovered plugin: {} v{} at {} (source={})",
-                        manifest.name,
-                        manifest.version,
-                        path.display(),
-                        source.as_str()
-                    );
-                    discovered.push(DiscoveredPlugin {
-                        manifest,
-                        path,
-                        source,
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to parse plugin.yaml at {}: {}",
-                        manifest_path.display(),
-                        e
-                    );
-                }
-            },
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to read plugin.yaml at {}: {}",
-                    manifest_path.display(),
-                    e
-                );
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) => {
+                report.quarantined.push(plugin_quarantine(
+                    plugins_dir,
+                    source,
+                    None,
+                    PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+                    error.to_string(),
+                ));
+                continue;
             }
+        };
+        let path = entry.path();
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                report.quarantined.push(plugin_quarantine(
+                    &path,
+                    source,
+                    None,
+                    PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+                    error.to_string(),
+                ));
+                continue;
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            report.quarantined.push(plugin_quarantine(
+                &path,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+                "plugin root must be a non-symlink directory",
+            ));
+            continue;
+        }
+        if !metadata.is_dir() {
+            continue;
+        }
+        let manifest_path = path.join("plugin.yaml");
+        if let Err(error) = std::fs::symlink_metadata(&manifest_path) {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                continue;
+            }
+            report.quarantined.push(plugin_quarantine(
+                &path,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+                error.to_string(),
+            ));
+            continue;
+        }
+
+        match verify_plugin_bundle(&path, source, verifier) {
+            Ok(bundle) => report.admitted.push(bundle),
+            Err(quarantine) => report.quarantined.push(quarantine),
         }
     }
 }
+
+fn verify_plugin_bundle(
+    root: &Path,
+    source: PluginDiscoverySource,
+    verifier: &SkillTrustVerifier,
+) -> Result<DiscoveredPlugin, PluginQuarantine> {
+    let manifest = read_plugin_manifest(root, source)?;
+    if root.join(".disabled").exists() {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            None,
+            PluginQuarantineReason::Disabled,
+            "plugin bundle is disabled by its local marker",
+        ));
+    }
+
+    let lock_path = skill_lock_path(root);
+    let lock = match load_lock_for_migration(root) {
+        Ok(SkillLockLoad::V2(lock)) if lock_path.exists() => lock,
+        Ok(SkillLockLoad::V2(_)) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::MissingLock),
+                "plugin bundle has no v2 lock under its actual root",
+            ))
+        }
+        Ok(SkillLockLoad::Legacy { .. }) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::LegacyLock),
+                "legacy plugin lock cannot be upgraded into trust",
+            ))
+        }
+        Err(error) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                None,
+                PluginQuarantineReason::Core(SkillQuarantineReason::MalformedLock),
+                error.to_string(),
+            ))
+        }
+    };
+    if lock.packages.len() != 1 {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            None,
+            PluginQuarantineReason::MissingPackageManifest,
+            "a plugin root must contain exactly one v2 package manifest",
+        ));
+    }
+    let entry = &lock.packages[0];
+    if entry.install_path != "." {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(entry.manifest.identity.clone()),
+            PluginQuarantineReason::MissingPackageManifest,
+            "plugin package must be locked at the actual bundle root",
+        ));
+    }
+    let revocations = match load_revocations(root) {
+        Ok(revocations) => revocations,
+        Err(error) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(entry.manifest.identity.clone()),
+                PluginQuarantineReason::Core(SkillQuarantineReason::InvalidRevocationList),
+                error.to_string(),
+            ))
+        }
+    };
+    let admission = match verifier.verify_lock(root, &lock, &revocations, false) {
+        Ok(mut admissions) if admissions.len() == 1 => admissions.remove(0),
+        Ok(_) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(entry.manifest.identity.clone()),
+                PluginQuarantineReason::Core(SkillQuarantineReason::MalformedLock),
+                "verifier did not return exactly one package admission",
+            ))
+        }
+        Err(error) => return Err(quarantine_from_trust_error(root, source, error)),
+    };
+    if admission.decision == SkillAdmissionDecision::AllowWithForce {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(admission.identity),
+            PluginQuarantineReason::ForceOnlyAdmission,
+            "plugin discovery never enables force-only package admission",
+        ));
+    }
+    if admission.decision != SkillAdmissionDecision::Allow {
+        let quarantine = admission.quarantine.unwrap_or(SkillQuarantine {
+            reason: SkillQuarantineReason::ScanMismatch,
+            detail: "package was not strictly admitted".to_string(),
+        });
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(admission.identity),
+            PluginQuarantineReason::Core(quarantine.reason),
+            quarantine.detail,
+        ));
+    }
+    if !admission.effects_allowed {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(admission.identity),
+            PluginQuarantineReason::EffectsNotAllowed,
+            "the package admission does not permit effects",
+        ));
+    }
+    if !matches!(
+        entry.manifest.source,
+        SkillPackageSource::Remote | SkillPackageSource::EmbeddedBuiltin
+    ) {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(admission.identity),
+            PluginQuarantineReason::UnsupportedPackageSource,
+            "only signed remote and verified embedded plugin packages may pass v2 verification",
+        ));
+    }
+
+    validate_plugin_manifest(&manifest, &entry.manifest, root, source)?;
+    Ok(DiscoveredPlugin {
+        manifest,
+        path: root.to_path_buf(),
+        source,
+        package_manifest: entry.manifest.clone(),
+        admission,
+    })
+}
+
+fn read_plugin_manifest(
+    root: &Path,
+    source: PluginDiscoverySource,
+) -> Result<PluginManifest, PluginQuarantine> {
+    let manifest_path = root.join("plugin.yaml");
+    let metadata = match std::fs::symlink_metadata(&manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                None,
+                PluginQuarantineReason::InvalidPluginManifest,
+                error.to_string(),
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            None,
+            PluginQuarantineReason::Core(SkillQuarantineReason::FilesystemViolation),
+            "plugin.yaml must be a regular non-symlink file",
+        ));
+    }
+    let content = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        plugin_quarantine(
+            root,
+            source,
+            None,
+            PluginQuarantineReason::InvalidPluginManifest,
+            error.to_string(),
+        )
+    })?;
+    serde_yaml::from_str::<PluginManifest>(&content).map_err(|error| {
+        plugin_quarantine(
+            root,
+            source,
+            None,
+            PluginQuarantineReason::InvalidPluginManifest,
+            error.to_string(),
+        )
+    })
+}
+
+fn validate_plugin_manifest(
+    plugin_manifest: &PluginManifest,
+    package_manifest: &SkillPackageManifestV2,
+    root: &Path,
+    source: PluginDiscoverySource,
+) -> Result<(), PluginQuarantine> {
+    let identity = &package_manifest.identity;
+    if plugin_manifest.name != identity.name || plugin_manifest.version != identity.version {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(identity.clone()),
+            PluginQuarantineReason::ManifestIdentityMismatch,
+            "plugin.yaml name/version does not match the immutable package identity",
+        ));
+    }
+
+    let declared_permissions = plugin_permissions(plugin_manifest, root, source, identity)?;
+    if declared_permissions != package_manifest.permissions.requested {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(identity.clone()),
+            PluginQuarantineReason::PermissionMismatch,
+            "plugin.yaml permissions do not exactly match the signed package manifest",
+        ));
+    }
+    if !declared_permissions.contains(&SkillPermission::PluginRegistration) {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(identity.clone()),
+            PluginQuarantineReason::PermissionMismatch,
+            "future effect-capable plugins must explicitly declare plugin_registration",
+        ));
+    }
+
+    let declared_dependencies = plugin_dependencies(plugin_manifest, root, source, identity)?;
+    let trusted_dependencies = package_manifest
+        .dependencies
+        .iter()
+        .map(|dependency| (dependency.name.clone(), dependency.version.clone()))
+        .collect::<BTreeSet<_>>();
+    if declared_dependencies != trusted_dependencies {
+        return Err(plugin_quarantine(
+            root,
+            source,
+            Some(identity.clone()),
+            PluginQuarantineReason::DependencyDeclarationMismatch,
+            "plugin.yaml dependencies do not exactly match the signed package manifest",
+        ));
+    }
+    Ok(())
+}
+
+fn plugin_permissions(
+    manifest: &PluginManifest,
+    root: &Path,
+    source: PluginDiscoverySource,
+    identity: &SkillPackageIdentityV2,
+) -> Result<BTreeSet<SkillPermission>, PluginQuarantine> {
+    let mut permissions = BTreeSet::new();
+    for permission in &manifest.permissions {
+        let Some(permission) = parse_plugin_permission(permission) else {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(identity.clone()),
+                PluginQuarantineReason::PermissionMismatch,
+                "plugin.yaml declares an unknown permission",
+            ));
+        };
+        if !permissions.insert(permission) {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(identity.clone()),
+                PluginQuarantineReason::PermissionMismatch,
+                "plugin.yaml declares a permission more than once",
+            ));
+        }
+    }
+    Ok(permissions)
+}
+
+fn parse_plugin_permission(value: &str) -> Option<SkillPermission> {
+    match value.trim() {
+        "prompt" => Some(SkillPermission::Prompt),
+        "tool" => Some(SkillPermission::Tool),
+        "network" => Some(SkillPermission::Network),
+        "filesystem_read" => Some(SkillPermission::FilesystemRead),
+        "filesystem_write" => Some(SkillPermission::FilesystemWrite),
+        "process" => Some(SkillPermission::Process),
+        "plugin_registration" => Some(SkillPermission::PluginRegistration),
+        _ => None,
+    }
+}
+
+fn plugin_dependencies(
+    manifest: &PluginManifest,
+    root: &Path,
+    source: PluginDiscoverySource,
+    identity: &SkillPackageIdentityV2,
+) -> Result<BTreeSet<(String, String)>, PluginQuarantine> {
+    let mut dependencies = BTreeSet::new();
+    for dependency in &manifest.dependencies {
+        let Some((name, version)) = dependency.exact() else {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(identity.clone()),
+                PluginQuarantineReason::UnscopedDependency,
+                "plugin.yaml dependencies must declare an exact name and version",
+            ));
+        };
+        if name.trim().is_empty() || version.trim().is_empty() {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(identity.clone()),
+                PluginQuarantineReason::UnscopedDependency,
+                "plugin.yaml dependency name and version must be non-empty",
+            ));
+        }
+        if !dependencies.insert((name.to_string(), version.to_string())) {
+            return Err(plugin_quarantine(
+                root,
+                source,
+                Some(identity.clone()),
+                PluginQuarantineReason::DependencyDeclarationMismatch,
+                "plugin.yaml declares a dependency more than once",
+            ));
+        }
+    }
+    Ok(dependencies)
+}
+
+fn enforce_plugin_dependency_graph(
+    bundles: &mut Vec<DiscoveredPlugin>,
+    quarantined: &mut Vec<PluginQuarantine>,
+) {
+    let mut reasons = vec![None::<(PluginQuarantineReason, String)>; bundles.len()];
+    let mut edges = vec![Vec::<usize>::new(); bundles.len()];
+
+    for left in 0..bundles.len() {
+        for right in 0..left {
+            if bundles[left].admission.identity == bundles[right].admission.identity {
+                let detail = "discovery contains the same immutable package identity more than once"
+                    .to_string();
+                reasons[left] = Some((PluginQuarantineReason::DuplicatePackageIdentity, detail.clone()));
+                reasons[right] = Some((PluginQuarantineReason::DuplicatePackageIdentity, detail));
+            }
+        }
+    }
+
+    for (index, bundle) in bundles.iter().enumerate() {
+        for dependency in &bundle.package_manifest.dependencies {
+            let matches = bundles
+                .iter()
+                .enumerate()
+                .filter_map(|(candidate_index, candidate)| {
+                    (candidate.admission.identity.name == dependency.name
+                        && candidate.admission.identity.version == dependency.version)
+                        .then_some(candidate_index)
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [] => {
+                    reasons[index] = Some((
+                        PluginQuarantineReason::MissingDependency,
+                        format!(
+                            "missing exact plugin dependency {}@{}",
+                            dependency.name, dependency.version
+                        ),
+                    ));
+                }
+                [dependency_index] => edges[index].push(*dependency_index),
+                _ => {
+                    reasons[index] = Some((
+                        PluginQuarantineReason::AmbiguousDependency,
+                        format!(
+                            "multiple plugin bundles satisfy {}@{}",
+                            dependency.name, dependency.version
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut states = vec![0u8; bundles.len()];
+    let mut stack = Vec::new();
+    let mut cyclic = BTreeSet::new();
+    for index in 0..bundles.len() {
+        mark_plugin_dependency_cycles(
+            index,
+            &edges,
+            &reasons,
+            &mut states,
+            &mut stack,
+            &mut cyclic,
+        );
+    }
+    for index in cyclic {
+        reasons[index] = Some((
+            PluginQuarantineReason::DependencyCycle,
+            "plugin dependency graph contains a cycle".to_string(),
+        ));
+    }
+
+    loop {
+        let mut changed = false;
+        for index in 0..bundles.len() {
+            if reasons[index].is_some() {
+                continue;
+            }
+            if let Some(dependency_index) = edges[index]
+                .iter()
+                .copied()
+                .find(|dependency_index| reasons[*dependency_index].is_some())
+            {
+                reasons[index] = Some((
+                    PluginQuarantineReason::MissingDependency,
+                    format!(
+                        "dependency {}@{} is not admitted",
+                        bundles[dependency_index].admission.identity.name,
+                        bundles[dependency_index].admission.identity.version
+                    ),
+                ));
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut admitted = Vec::with_capacity(bundles.len());
+    for (index, bundle) in std::mem::take(bundles).into_iter().enumerate() {
+        if let Some((reason, detail)) = reasons[index].take() {
+            quarantined.push(plugin_quarantine(
+                &bundle.path,
+                bundle.source,
+                Some(bundle.admission.identity),
+                reason,
+                detail,
+            ));
+        } else {
+            admitted.push(bundle);
+        }
+    }
+    *bundles = admitted;
+}
+
+fn mark_plugin_dependency_cycles(
+    index: usize,
+    edges: &[Vec<usize>],
+    reasons: &[Option<(PluginQuarantineReason, String)>],
+    states: &mut [u8],
+    stack: &mut Vec<usize>,
+    cyclic: &mut BTreeSet<usize>,
+) {
+    if reasons[index].is_some() || states[index] == 2 {
+        return;
+    }
+    if states[index] == 1 {
+        if let Some(start) = stack.iter().position(|item| *item == index) {
+            cyclic.extend(stack[start..].iter().copied());
+        }
+        return;
+    }
+    states[index] = 1;
+    stack.push(index);
+    for dependency in &edges[index] {
+        mark_plugin_dependency_cycles(*dependency, edges, reasons, states, stack, cyclic);
+    }
+    stack.pop();
+    states[index] = 2;
+}
+
+fn plugin_quarantine(
+    path: &Path,
+    source: PluginDiscoverySource,
+    identity: Option<SkillPackageIdentityV2>,
+    reason: PluginQuarantineReason,
+    detail: impl Into<String>,
+) -> PluginQuarantine {
+    PluginQuarantine {
+        path: path.to_path_buf(),
+        source,
+        identity,
+        reason,
+        detail: detail.into(),
+    }
+}
+
+fn quarantine_from_trust_error(
+    root: &Path,
+    source: PluginDiscoverySource,
+    error: SkillTrustError,
+) -> PluginQuarantine {
+    let reason = match &error {
+        SkillTrustError::LegacyLock => SkillQuarantineReason::LegacyLock,
+        SkillTrustError::Io(_) => SkillQuarantineReason::FilesystemViolation,
+        SkillTrustError::Serialization(_)
+        | SkillTrustError::Malformed(_)
+        | SkillTrustError::MalformedKeyring(_) => SkillQuarantineReason::MalformedLock,
+        SkillTrustError::InvalidTrustRoot(_) => SkillQuarantineReason::InvalidTrustRoot,
+        SkillTrustError::KeyringRollback(_) => SkillQuarantineReason::KeyringRollback,
+        SkillTrustError::UnprovisionedAuthority(_) => {
+            SkillQuarantineReason::UnprovisionedAuthority
+        }
+    };
+    plugin_quarantine(
+        root,
+        source,
+        None,
+        PluginQuarantineReason::Core(reason),
+        error.to_string(),
+    )
+}
+
 
 impl Default for PluginManager {
     fn default() -> Self {
@@ -692,467 +997,3 @@ impl Default for PluginManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct TestPlugin;
-
-    #[async_trait::async_trait]
-    impl Plugin for TestPlugin {
-        fn meta(&self) -> PluginMeta {
-            PluginMeta {
-                name: "test".to_string(),
-                version: "0.1.0".to_string(),
-                description: "Test plugin".to_string(),
-                author: None,
-            }
-        }
-        async fn initialize(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-        async fn shutdown(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-    }
-
-    struct HookPlugin;
-
-    #[async_trait::async_trait]
-    impl Plugin for HookPlugin {
-        fn meta(&self) -> PluginMeta {
-            PluginMeta {
-                name: "hook_test".to_string(),
-                version: "0.1.0".to_string(),
-                description: "Hook test plugin".to_string(),
-                author: None,
-            }
-        }
-        async fn initialize(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-        async fn shutdown(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-        fn register(&self, ctx: &mut PluginContext) {
-            ctx.on(
-                HookType::PreLlmCall,
-                Arc::new(|_ctx| HookResult::InjectContext("injected by hook".to_string())),
-            );
-        }
-    }
-
-    struct PanicHookPlugin;
-
-    #[async_trait::async_trait]
-    impl Plugin for PanicHookPlugin {
-        fn meta(&self) -> PluginMeta {
-            PluginMeta {
-                name: "panic_hook_test".to_string(),
-                version: "0.1.0".to_string(),
-                description: "Panic hook test plugin".to_string(),
-                author: None,
-            }
-        }
-        async fn initialize(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-        async fn shutdown(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-        fn register(&self, ctx: &mut PluginContext) {
-            ctx.on(
-                HookType::OnSessionFinalize,
-                Arc::new(|_ctx| panic!("hook failed")),
-            );
-        }
-    }
-
-    #[test]
-    fn test_plugin_register() {
-        let mut mgr = PluginManager::new();
-        mgr.register(Arc::new(TestPlugin));
-        assert_eq!(mgr.list_plugins().len(), 1);
-        assert_eq!(mgr.list_plugins()[0].name, "test");
-    }
-
-    #[test]
-    fn test_hook_invocation() {
-        let mut mgr = PluginManager::new();
-        mgr.register(Arc::new(HookPlugin));
-        let results = mgr.invoke_hook(HookType::PreLlmCall, &serde_json::json!({}));
-        assert_eq!(results.len(), 1);
-        assert!(matches!(results[0], HookResult::InjectContext(_)));
-    }
-
-    #[test]
-    fn test_tool_request_middleware_rewrites_args_with_original_snapshot() {
-        let mut ctx = PluginContext::new();
-        ctx.on_tool_request(Arc::new(|request| {
-            assert_eq!(request.tool_name, "terminal");
-            assert_eq!(request.original_args["cmd"], "pwd");
-            let mut args = request.args.clone();
-            args["cmd"] = Value::String("ls".to_string());
-            let mut update = ToolRequestMiddlewareUpdate::new(args);
-            update.source = Some("test".to_string());
-            update.reason = Some(format!("turn {}", request.turn));
-            Some(update)
-        }));
-        let mgr = PluginManager {
-            plugins: HashMap::new(),
-            context: ctx,
-        };
-
-        let result =
-            mgr.apply_tool_request_middleware("terminal", serde_json::json!({"cmd": "pwd"}), 7);
-
-        assert!(result.changed);
-        assert_eq!(result.args["cmd"], "ls");
-        assert_eq!(result.original_args["cmd"], "pwd");
-        assert_eq!(result.trace[0]["source"], "test");
-    }
-
-    #[test]
-    fn test_tool_execution_middleware_can_wrap_next_call() {
-        let mut ctx = PluginContext::new();
-        ctx.on_tool_execution(Arc::new(|request, next_call| {
-            let mut args = request.args.clone();
-            args["cmd"] = Value::String("rewritten".to_string());
-            let mut result = next_call(Some(args));
-            result.content = format!("wrapped: {}", result.content);
-            result
-        }));
-        let mgr = PluginManager {
-            plugins: HashMap::new(),
-            context: ctx,
-        };
-        let middleware_ctx = ToolExecutionMiddlewareContext {
-            tool_name: "terminal".to_string(),
-            tool_call_id: "tc1".to_string(),
-            args: serde_json::json!({"cmd": "original"}),
-            original_args: serde_json::json!({"cmd": "original"}),
-            turn: 1,
-        };
-
-        let result = mgr.run_tool_execution_middleware(middleware_ctx, |args| {
-            ToolResult::ok("tc1", format!("ran {}", args["cmd"].as_str().unwrap()))
-        });
-
-        assert!(!result.is_error);
-        assert_eq!(result.content, "wrapped: ran rewritten");
-    }
-
-    #[test]
-    fn test_tool_execution_next_call_is_single_use() {
-        let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let mut ctx = PluginContext::new();
-        ctx.on_tool_execution(Arc::new(|_request, next_call| {
-            let first = next_call(None);
-            assert_eq!(first.content, "terminal result");
-            next_call(None)
-        }));
-        let mgr = PluginManager {
-            plugins: HashMap::new(),
-            context: ctx,
-        };
-        let middleware_ctx = ToolExecutionMiddlewareContext {
-            tool_name: "terminal".to_string(),
-            tool_call_id: "tc1".to_string(),
-            args: serde_json::json!({}),
-            original_args: serde_json::json!({}),
-            turn: 1,
-        };
-        let calls_for_terminal = calls.clone();
-
-        let result = mgr.run_tool_execution_middleware(middleware_ctx, move |_args| {
-            calls_for_terminal.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            ToolResult::ok("tc1", "terminal result")
-        });
-
-        assert!(result.is_error);
-        assert!(result.content.contains("next_call may only be called once"));
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn test_tool_execution_middleware_preserves_downstream_failure_after_panic() {
-        let mut ctx = PluginContext::new();
-        ctx.on_tool_execution(Arc::new(|_request, next_call| {
-            let _ = next_call(None);
-            panic!("middleware post-processing failed");
-        }));
-        let mgr = PluginManager {
-            plugins: HashMap::new(),
-            context: ctx,
-        };
-        let middleware_ctx = ToolExecutionMiddlewareContext {
-            tool_name: "terminal".to_string(),
-            tool_call_id: "tc1".to_string(),
-            args: serde_json::json!({}),
-            original_args: serde_json::json!({}),
-            turn: 1,
-        };
-
-        let result = mgr.run_tool_execution_middleware(middleware_ctx, |_args| {
-            ToolResult::err("tc1", "downstream failed")
-        });
-
-        assert!(result.is_error);
-        assert_eq!(result.content, "downstream failed");
-    }
-
-    #[test]
-    fn test_invoke_hook_no_handlers() {
-        let mgr = PluginManager::new();
-        let results = mgr.invoke_hook(HookType::OnSessionStart, &serde_json::json!({}));
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_invoke_hook_contains_panics() {
-        let mut mgr = PluginManager::new();
-        mgr.register(Arc::new(PanicHookPlugin));
-        let results = mgr.invoke_hook(
-            HookType::OnSessionFinalize,
-            &serde_json::json!({"session_id": "test", "platform": "cli"}),
-        );
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_is_disabled() {
-        let mgr = PluginManager::new();
-        let disabled = vec!["foo".to_string(), "bar".to_string()];
-        assert!(mgr.is_disabled("foo", &disabled));
-        assert!(!mgr.is_disabled("baz", &disabled));
-    }
-
-    #[test]
-    fn test_plugin_context_inject_message() {
-        let mut ctx = PluginContext::new();
-        ctx.inject_message("hello".to_string());
-        ctx.inject_message("world".to_string());
-        let msgs = ctx.drain_injected_messages();
-        assert_eq!(msgs.len(), 2);
-        assert!(ctx.drain_injected_messages().is_empty());
-    }
-
-    #[test]
-    fn test_hook_type_as_str() {
-        assert_eq!(HookType::PreToolCall.as_str(), "pre_tool_call");
-        assert_eq!(HookType::OnSessionEnd.as_str(), "on_session_end");
-        assert_eq!(HookType::OnSessionFinalize.as_str(), "on_session_finalize");
-        assert_eq!(HookType::OnSessionReset.as_str(), "on_session_reset");
-        assert!(HookType::all().contains(&HookType::OnSessionFinalize));
-        assert!(HookType::all().contains(&HookType::OnSessionReset));
-    }
-
-    #[test]
-    fn test_manifest_from_yaml() {
-        let yaml = r#"
-name: test-plugin
-version: "1.0.0"
-description: A test plugin
-author: Test Author
-dependencies:
-  - dep-a
-  - dep-b
-"#;
-        let manifest: PluginManifest = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(manifest.name, "test-plugin");
-        assert_eq!(manifest.dependencies.len(), 2);
-    }
-
-    #[test]
-    fn test_plugin_meta_from_manifest() {
-        let manifest = PluginManifest {
-            name: "test".to_string(),
-            version: "1.0.0".to_string(),
-            description: "desc".to_string(),
-            kind: None,
-            author: Some("me".to_string()),
-            homepage: None,
-            dependencies: vec![],
-        };
-        let meta: PluginMeta = manifest.into();
-        assert_eq!(meta.name, "test");
-        assert_eq!(meta.author.unwrap(), "me");
-    }
-
-    #[test]
-    fn test_discover_plugins_auto_coerces_memory_provider_kind() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin_dir = tmp.path().join("plugins").join("mempalace");
-        std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(
-            plugin_dir.join("plugin.yaml"),
-            "name: mempalace\nversion: \"0.1.0\"\ndescription: Test\n",
-        )
-        .unwrap();
-        std::fs::write(
-            plugin_dir.join("__init__.py"),
-            "class MemPalaceProvider: pass\n\ndef register(ctx):\n    ctx.register_memory_provider('mempalace', MemPalaceProvider)\n",
-        )
-        .unwrap();
-
-        let discovered = PluginManager::discover_plugins(tmp.path());
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].0.kind.as_deref(), Some("exclusive"));
-    }
-
-    #[test]
-    fn test_discover_plugins_explicit_standalone_not_overridden() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin_dir = tmp.path().join("plugins").join("not_memory");
-        std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(
-            plugin_dir.join("plugin.yaml"),
-            "name: not_memory\nversion: \"0.1.0\"\ndescription: Test\nkind: standalone\n",
-        )
-        .unwrap();
-        std::fs::write(
-            plugin_dir.join("__init__.py"),
-            "# MemoryProvider mentioned for docs only\n",
-        )
-        .unwrap();
-
-        let discovered = PluginManager::discover_plugins(tmp.path());
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].0.kind.as_deref(), Some("standalone"));
-    }
-
-    #[test]
-    fn test_discover_plugins_preserves_model_provider_kind() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin_dir = tmp.path().join("plugins").join("test-model-provider");
-        std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(
-            plugin_dir.join("plugin.yaml"),
-            "name: test-model-provider\nversion: \"0.1.0\"\ndescription: Test\nkind: model-provider\n",
-        )
-        .unwrap();
-        std::fs::write(
-            plugin_dir.join("__init__.py"),
-            "raise AssertionError('model-provider plugins are profile manifests, not generic runtime plugins')\n",
-        )
-        .unwrap();
-
-        let discovered = PluginManager::discover_plugins(tmp.path());
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].0.kind.as_deref(), Some("model-provider"));
-    }
-
-    #[test]
-    fn test_discover_plugins_with_options_includes_project_when_enabled() {
-        let home = tempfile::tempdir().unwrap();
-        let cwd = tempfile::tempdir().unwrap();
-
-        let user_plugin = home.path().join("plugins").join("user_bundle");
-        std::fs::create_dir_all(&user_plugin).unwrap();
-        std::fs::write(
-            user_plugin.join("plugin.yaml"),
-            "name: user_bundle\nversion: \"0.1.0\"\ndescription: User plugin\n",
-        )
-        .unwrap();
-
-        let project_plugin = cwd
-            .path()
-            .join(".hermes")
-            .join("plugins")
-            .join("project_bundle");
-        std::fs::create_dir_all(&project_plugin).unwrap();
-        std::fs::write(
-            project_plugin.join("plugin.yaml"),
-            "name: project_bundle\nversion: \"0.1.0\"\ndescription: Project plugin\n",
-        )
-        .unwrap();
-
-        let discovered =
-            PluginManager::discover_plugins_with_options(home.path(), Some(cwd.path()), true);
-        assert_eq!(discovered.len(), 2);
-        assert!(discovered
-            .iter()
-            .any(|d| d.manifest.name == "user_bundle" && d.source == PluginDiscoverySource::User));
-        assert!(discovered
-            .iter()
-            .any(|d| d.manifest.name == "project_bundle"
-                && d.source == PluginDiscoverySource::Project));
-    }
-
-    #[test]
-    fn test_discover_plugins_with_options_excludes_project_when_disabled() {
-        let home = tempfile::tempdir().unwrap();
-        let cwd = tempfile::tempdir().unwrap();
-
-        let user_plugin = home.path().join("plugins").join("user_bundle");
-        std::fs::create_dir_all(&user_plugin).unwrap();
-        std::fs::write(
-            user_plugin.join("plugin.yaml"),
-            "name: user_bundle\nversion: \"0.1.0\"\ndescription: User plugin\n",
-        )
-        .unwrap();
-
-        let project_plugin = cwd
-            .path()
-            .join(".hermes")
-            .join("plugins")
-            .join("project_bundle");
-        std::fs::create_dir_all(&project_plugin).unwrap();
-        std::fs::write(
-            project_plugin.join("plugin.yaml"),
-            "name: project_bundle\nversion: \"0.1.0\"\ndescription: Project plugin\n",
-        )
-        .unwrap();
-
-        let discovered =
-            PluginManager::discover_plugins_with_options(home.path(), Some(cwd.path()), false);
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].manifest.name, "user_bundle");
-        assert_eq!(discovered[0].source, PluginDiscoverySource::User);
-    }
-
-    #[test]
-    fn test_dashboard_plugin_backend_files_are_not_imported_by_discovery() {
-        let home = tempfile::tempdir().unwrap();
-        let cwd = tempfile::tempdir().unwrap();
-        let user_plugin = home.path().join("plugins").join("user_dashboard");
-        let project_plugin = cwd
-            .path()
-            .join(".hermes")
-            .join("plugins")
-            .join("project_dashboard");
-
-        for (plugin, name) in [
-            (&user_plugin, "user_dashboard"),
-            (&project_plugin, "project_dashboard"),
-        ] {
-            std::fs::create_dir_all(plugin.join("dashboard")).unwrap();
-            std::fs::write(
-                plugin.join("plugin.yaml"),
-                format!("name: {name}\nversion: \"0.1.0\"\ndescription: Dashboard plugin\n"),
-            )
-            .unwrap();
-            std::fs::write(
-                plugin.join("dashboard").join("manifest.json"),
-                r#"{"name":"dashboard-test","api":"api.py","entry":"dist/index.js"}"#,
-            )
-            .unwrap();
-            std::fs::write(
-                plugin.join("dashboard").join("api.py"),
-                "raise AssertionError('Rust discovery must not import Python dashboard APIs')\n",
-            )
-            .unwrap();
-        }
-
-        let discovered =
-            PluginManager::discover_plugins_with_options(home.path(), Some(cwd.path()), true);
-        assert_eq!(discovered.len(), 2);
-        assert!(discovered.iter().any(
-            |d| d.manifest.name == "user_dashboard" && d.source == PluginDiscoverySource::User
-        ));
-        assert!(discovered
-            .iter()
-            .any(|d| d.manifest.name == "project_dashboard"
-                && d.source == PluginDiscoverySource::Project));
-    }
-}

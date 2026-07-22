@@ -16,201 +16,8 @@ fn discord_connect_policy_matches_members_intent_and_sync_opt_out() {
         DiscordClientReentryAction::ClosePreviousClient
     );
 
-    assert!(!DiscordSlashSyncPolicy::Off.should_register(true));
-    assert!(!DiscordSlashSyncPolicy::Bulk.should_register(false));
-    assert!(DiscordSlashSyncPolicy::parse(Some("bulk")).should_register(true));
-    assert_eq!(
-        DiscordSlashSyncPolicy::parse(Some("unknown")),
-        DiscordSlashSyncPolicy::Diff
-    );
 }
 
-#[test]
-fn discord_command_sync_plans_diffs_recreates_and_deletes() {
-    let desired = vec![
-        serde_json::json!({
-            "name": "status",
-            "description": "Show Hermes status",
-            "type": 1,
-            "options": [],
-            "nsfw": false,
-            "dm_permission": true,
-            "default_member_permissions": null,
-        }),
-        serde_json::json!({
-            "name": "help",
-            "description": "Show available commands",
-            "type": 1,
-            "options": [],
-            "nsfw": false,
-            "dm_permission": true,
-        }),
-        serde_json::json!({
-            "name": "metricas",
-            "description": "Metrics dashboard",
-            "type": 1,
-            "options": [],
-        }),
-        serde_json::json!({
-            "name": "admin",
-            "description": "Admin-only command",
-            "type": 1,
-            "options": [],
-            "nsfw": true,
-            "dm_permission": false,
-            "default_member_permissions": "8",
-        }),
-        serde_json::json!({
-            "name": "contexts",
-            "description": "Context drift check",
-            "type": 1,
-            "options": [],
-            "contexts": [0, 1, 2],
-            "integration_types": [0, 1],
-        }),
-    ];
-    let existing = vec![
-        serde_json::json!({
-            "id": 11,
-            "application_id": 999,
-            "name": "status",
-            "description": "Show Hermes status",
-            "type": 1,
-            "options": [],
-            "nsfw": false,
-            "dm_permission": true,
-            "default_member_permissions": null,
-            "name_localizations": {},
-            "description_localizations": {},
-        }),
-        serde_json::json!({
-            "id": 12,
-            "application_id": 999,
-            "name": "help",
-            "description": "Old help text",
-            "type": 1,
-            "options": [],
-            "nsfw": false,
-            "dm_permission": true,
-        }),
-        serde_json::json!({
-            "id": 13,
-            "name": "old-command",
-            "description": "To be deleted",
-            "type": 1,
-            "options": [],
-        }),
-        serde_json::json!({
-            "id": 14,
-            "name": "admin",
-            "description": "Admin-only command",
-            "type": 1,
-            "options": [],
-            "nsfw": true,
-            "dm_permission": false,
-        }),
-        serde_json::json!({
-            "id": 15,
-            "name": "contexts",
-            "description": "Context drift check",
-            "type": 1,
-            "options": [],
-            "contexts": [0],
-            "integration_types": [0],
-        }),
-    ];
-
-    let summary = plan_discord_command_sync(&desired, &existing);
-
-    assert_eq!(summary.total, 5);
-    assert_eq!(summary.unchanged, 1);
-    assert_eq!(summary.updated, 1);
-    assert_eq!(summary.recreated, 2);
-    assert_eq!(summary.created, 1);
-    assert_eq!(summary.deleted, 1);
-    assert_eq!(
-        summary.mutations.first(),
-        Some(&DiscordCommandSyncMutation::Delete {
-            name: "old-command".into()
-        })
-    );
-    let delete_index = summary
-        .mutations
-        .iter()
-        .position(|mutation| {
-            mutation
-                == &DiscordCommandSyncMutation::Delete {
-                    name: "old-command".into(),
-                }
-        })
-        .expect("obsolete command delete mutation");
-    let create_index = summary
-        .mutations
-        .iter()
-        .position(|mutation| {
-            mutation
-                == &DiscordCommandSyncMutation::Create {
-                    name: "metricas".into(),
-                }
-        })
-        .expect("new command create mutation");
-    assert!(delete_index < create_index);
-    assert!(summary
-        .mutations
-        .contains(&DiscordCommandSyncMutation::Update {
-            name: "help".into()
-        }));
-    assert!(summary
-        .mutations
-        .contains(&DiscordCommandSyncMutation::Recreate {
-            name: "admin".into()
-        }));
-    assert!(summary
-        .mutations
-        .contains(&DiscordCommandSyncMutation::Recreate {
-            name: "contexts".into()
-        }));
-    assert!(summary
-        .mutations
-        .contains(&DiscordCommandSyncMutation::Create {
-            name: "metricas".into()
-        }));
-    assert!(summary
-        .mutations
-        .contains(&DiscordCommandSyncMutation::Delete {
-            name: "old-command".into()
-        }));
-}
-
-#[test]
-fn discord_command_sync_state_skips_same_fingerprint_and_honors_retry_after() {
-    let commands = vec![serde_json::json!({
-        "name": "status",
-        "description": "Show Hermes status",
-        "type": 1,
-        "options": [],
-    })];
-    let fingerprint = discord_command_fingerprint(&commands);
-    let mut state = DiscordCommandSyncStateEntry::default();
-
-    assert!(state.should_attempt(&fingerprint, 10));
-    state.record_attempt(10);
-    state.record_success(fingerprint.clone(), 11);
-    assert!(!state.should_attempt(&fingerprint, 12));
-
-    let changed = discord_command_fingerprint(&[serde_json::json!({
-        "name": "status",
-        "description": "Show current Hermes status",
-        "type": 1,
-        "options": [],
-    })]);
-    assert!(state.should_attempt(&changed, 13));
-    state.record_rate_limit(123, 20);
-    assert!(!state.should_attempt(&changed, 100));
-    assert!(state.should_attempt(&changed, 144));
-    assert_eq!(state.retry_after, Some(123));
-    assert_eq!(state.retry_after_until, Some(143));
-}
 
 #[test]
 fn discord_channel_prompt_and_model_picker_contracts_match_python_order() {
@@ -315,88 +122,6 @@ fn discord_attachment_document_opus_and_voice_contracts_match_upstream_cases() {
     );
 }
 
-#[test]
-fn discord_auto_registration_skips_conflicts_and_dispatches_args() {
-    let gateway = vec![
-        DiscordSlashRegistrationSpec::new(
-            "debug",
-            "Generate a debug report",
-            None::<String>,
-            "/debug",
-        ),
-        DiscordSlashRegistrationSpec::new(
-            "branch",
-            "Show or switch branch",
-            Some("[name]"),
-            "/branch",
-        ),
-    ];
-    let plugins = vec![
-        DiscordSlashRegistrationSpec::new(
-            "status",
-            "Plugin status",
-            None::<String>,
-            "/status-plugin",
-        ),
-        DiscordSlashRegistrationSpec::new(
-            "metricas",
-            "Metrics dashboard",
-            Some("dias:7 formato:json"),
-            "/metricas",
-        ),
-    ];
-
-    let registered = discord_auto_registered_commands(["status", "thread"], gateway, plugins);
-    let names = registered
-        .iter()
-        .map(|spec| spec.name.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(names, vec!["debug", "branch", "metricas"]);
-    assert_eq!(registered[0].dispatch_text(None), "/debug");
-    assert_eq!(
-        registered[1].dispatch_text(Some("my-branch")),
-        "/branch my-branch"
-    );
-    assert_eq!(
-        registered[2].dispatch_text(Some("dias:7 formato:json")),
-        "/metricas dias:7 formato:json"
-    );
-
-    let slash = registered[1].to_slash_command();
-    assert_eq!(slash.name, "branch");
-    assert_eq!(slash.options.as_ref().map(Vec::len), Some(1));
-}
-
-#[test]
-fn discord_auto_registration_caps_at_discord_command_limit() {
-    let gateway = (0..120)
-        .map(|idx| {
-            DiscordSlashRegistrationSpec::new(
-                format!("gateway-{idx}"),
-                format!("Gateway command {idx}"),
-                None::<String>,
-                format!("/gateway-{idx}"),
-            )
-        })
-        .collect::<Vec<_>>();
-    let plugins = vec![DiscordSlashRegistrationSpec::new(
-        "plugin-extra",
-        "Plugin command",
-        None::<String>,
-        "/plugin-extra",
-    )];
-
-    let registered = discord_auto_registered_commands(["status", "thread"], gateway, plugins);
-    let names = registered
-        .iter()
-        .map(|spec| spec.name.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(registered.len(), DISCORD_APPLICATION_COMMAND_LIMIT - 2);
-    assert_eq!(names.first().copied(), Some("gateway-0"));
-    assert_eq!(names.last().copied(), Some("gateway-97"));
-    assert!(!names.contains(&"plugin-extra"));
-}
 
 #[test]
 fn discord_channel_skill_bindings_resolve_exact_parent_and_deduped_skills() {
@@ -436,6 +161,59 @@ fn discord_adapter_resolves_configured_channel_skills() {
         Some(vec!["skill-a".into(), "skill-b".into()])
     );
     assert_eq!(adapter.resolve_channel_skills("101", None), None);
+}
+
+#[test]
+fn discord_adapter_explicit_state_root_isolates_both_trackers_from_global_home() {
+    let state = tempfile::tempdir().expect("isolated selected state root");
+    let mut cfg = test_config();
+    cfg.application_id = Some(format!("state-root-{}", uuid::Uuid::new_v4()));
+    let scope = DiscordAdapter::state_scope_for_config(&cfg);
+    let state_root = state.path().join("discord").join(&scope);
+    let global_thread_path = hermes_config::hermes_home().join(format!("{scope}_threads.json"));
+    let global_message_path = hermes_config::hermes_home()
+        .join("gateway")
+        .join(format!("{scope}_discord_nonconversational_messages.json"));
+
+    let adapter = DiscordAdapter::new_with_state_root(cfg, &state_root)
+        .expect("adapter with explicit tracker state root");
+    let thread_path = adapter
+        .thread_participation
+        .lock()
+        .expect("thread tracker lock")
+        .path()
+        .to_path_buf();
+    let message_path = adapter
+        .non_conversational_messages
+        .lock()
+        .expect("message tracker lock")
+        .path
+        .to_path_buf();
+
+    adapter
+        .thread_participation
+        .lock()
+        .expect("thread tracker lock")
+        .mark("thread-private")
+        .expect("persist thread tracker");
+    adapter
+        .non_conversational_messages
+        .lock()
+        .expect("message tracker lock")
+        .mark_many(["message-private"])
+        .expect("persist message tracker");
+
+    assert_eq!(thread_path, state_root.join("threads.json"));
+    assert_eq!(
+        message_path,
+        state_root.join("discord_nonconversational_messages.json")
+    );
+    assert!(thread_path.exists());
+    assert!(message_path.exists());
+    assert!(
+        !global_thread_path.exists() && !global_message_path.exists(),
+        "explicit state root must never write profile-scoped IDs under global hermes_home"
+    );
 }
 
 #[test]
@@ -497,4 +275,165 @@ fn discord_non_conversational_tracker_persists_and_keeps_newest() {
 
     let reloaded = DiscordNonConversationalMessageTracker::from_path(&path, 3);
     assert_eq!(reloaded.entries(), vec!["2", "3", "4"]);
+}
+
+#[test]
+fn discord_trackers_replace_existing_state_files_without_removing_them() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let thread_path = tmp.path().join("threads.json");
+    std::fs::write(&thread_path, r#"["old-thread"]"#).unwrap();
+    let mut threads = DiscordThreadParticipationTracker::from_path(&thread_path, 4);
+    assert!(threads.mark("new-thread").unwrap());
+    assert_eq!(
+        std::fs::read_to_string(&thread_path).unwrap(),
+        r#"["old-thread","new-thread"]"#
+    );
+
+    let message_path = tmp.path().join("messages.json");
+    std::fs::write(&message_path, r#"["old-message"]"#).unwrap();
+    let mut messages = DiscordNonConversationalMessageTracker::from_path(&message_path, 4);
+    assert!(messages.mark_many(["new-message"]).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(&message_path).unwrap(),
+        r#"["old-message","new-message"]"#
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn discord_tracker_atomic_writes_keep_existing_and_new_state_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempfile::tempdir().expect("isolated tracker state");
+    let existing_thread_path = tmp.path().join("threads.json");
+    std::fs::write(&existing_thread_path, r#"["old-thread"]"#)
+        .expect("write existing thread state");
+    std::fs::set_permissions(&existing_thread_path, std::fs::Permissions::from_mode(0o600))
+        .expect("make existing thread state private");
+    let mut threads = DiscordThreadParticipationTracker::from_path(&existing_thread_path, 4);
+    threads.mark("new-thread").expect("replace private thread state");
+
+    let new_message_path = tmp.path().join("messages.json");
+    let mut messages = DiscordNonConversationalMessageTracker::from_path(&new_message_path, 4);
+    messages
+        .mark_many(["new-message"])
+        .expect("create private message state");
+
+    assert_eq!(
+        std::fs::metadata(&existing_thread_path)
+            .expect("existing thread metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600,
+        "atomic replacement must retain private Unix mode"
+    );
+    assert_eq!(
+        std::fs::metadata(&new_message_path)
+            .expect("new message metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600,
+        "new tracker state must not inherit a group/world-readable umask mode"
+    );
+}
+
+#[test]
+fn discord_tracker_parent_sync_failure_is_reported_and_successful_reopen_is_durable() {
+    let tmp = tempfile::tempdir().expect("isolated tracker state");
+    let path = tmp.path().join("threads.json");
+    let mut tracker = DiscordThreadParticipationTracker::from_path(&path, 4);
+
+    tracker.fail_next_parent_sync_for_test();
+    assert!(
+        tracker.mark("unacknowledged-after-rename").is_err(),
+        "a failed directory sync must not be reported as a durable save"
+    );
+    assert!(
+        !tracker.contains("unacknowledged-after-rename"),
+        "the caller's in-memory state must roll back when durability is unknown"
+    );
+
+    let mut reopened = DiscordThreadParticipationTracker::from_path(&path, 4);
+    assert!(
+        reopened.contains("unacknowledged-after-rename"),
+        "the completed rename remains recoverable even though parent durability was not acknowledged"
+    );
+    reopened
+        .mark("durably-synced")
+        .expect("a successful parent sync persists tracker state");
+    assert!(
+        DiscordThreadParticipationTracker::from_path(&path, 4).contains("durably-synced"),
+        "a successful atomic replacement plus parent sync must reopen with saved state"
+    );
+}
+
+#[test]
+fn discord_tracker_parent_sync_injection_is_instance_scoped_under_concurrent_saves() {
+    let tmp = tempfile::tempdir().expect("isolated tracker state");
+    let mut targeted =
+        DiscordThreadParticipationTracker::from_path(tmp.path().join("targeted.json"), 4);
+    let mut unaffected = DiscordNonConversationalMessageTracker::from_path(
+        tmp.path().join("unaffected.json"),
+        4,
+    );
+    targeted.fail_next_parent_sync_for_test();
+
+    std::thread::scope(|scope| {
+        let targeted_save = scope.spawn(|| targeted.mark("targeted"));
+        let unaffected_save = scope.spawn(|| unaffected.mark_many(["unaffected"]));
+        assert!(
+            targeted_save
+                .join()
+                .expect("targeted save thread completes")
+                .is_err(),
+            "only the targeted tracker consumes its injected parent-sync failure"
+        );
+        assert!(
+            unaffected_save
+                .join()
+                .expect("unaffected save thread completes")
+                .expect("unaffected tracker save succeeds"),
+            "a concurrent tracker must not consume another instance's injection"
+        );
+    });
+
+    assert!(!targeted.contains("targeted"));
+    assert!(unaffected.contains("unaffected"));
+}
+
+#[test]
+fn discord_trackers_retry_persistence_after_a_transient_write_failure() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let thread_path = tmp.path().join("threads.json");
+    let mut threads = DiscordThreadParticipationTracker::from_path(&thread_path, 4);
+    threads.fail_next_save_for_test();
+    assert!(threads.mark("thread-retry").is_err());
+    assert!(
+        !threads.contains("thread-retry"),
+        "a failed save must roll back in-memory participation"
+    );
+    assert!(threads.mark("thread-retry").unwrap());
+    assert!(
+        DiscordThreadParticipationTracker::from_path(&thread_path, 4).contains("thread-retry"),
+        "a later mark must retry persistence rather than being hidden by stale memory"
+    );
+
+    let message_path = tmp.path().join("messages.json");
+    let mut messages = DiscordNonConversationalMessageTracker::from_path(&message_path, 4);
+    messages.fail_next_save_for_test();
+    assert!(messages.mark_many(["message-retry"]).is_err());
+    assert!(
+        !messages.contains("message-retry"),
+        "a failed save must roll back in-memory message state"
+    );
+    assert!(messages.mark_many(["message-retry"]).unwrap());
+    assert!(
+        DiscordNonConversationalMessageTracker::from_path(&message_path, 4)
+            .contains("message-retry"),
+        "a later mark must persist and reload after the injected failure"
+    );
 }

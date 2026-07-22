@@ -1,35 +1,40 @@
 {
+  "authority": {
+    "capability_promotion_authoritative": false,
+    "production_complete": false
+  },
   "contextlattice_checkpoint_template": {
     "command": "contextlattice_write -p hermes-agent-ultra -t parity/sota -f docs/parity/contextlattice-replay-evidence-index.md --stdin",
     "project": "hermes-agent-ultra",
     "topic": "parity/sota"
   },
-  "generated_at_utc": "2026-07-03T20:16:19.312670+00:00",
+  "generated_at_utc": "2026-07-19T00:53:42.937344+00:00",
   "latest_gate_state": {
     "ci_gate_pass": false,
-    "queue_pending": 0,
-    "release_gate_pass": true,
-    "sota_harness_gate_pass": true,
+    "fixture_reference_gate_pass": true,
+    "production_complete": false,
+    "queue_pending": 1067,
+    "release_gate_pass": false,
     "test_coverage_gate_pass": true
   },
-  "purpose": "Index replay, protocol, and fault-injection evidence so ContextLattice checkpoints can point to exact local artifacts.",
+  "purpose": "Index fixture/reference regression artifacts so ContextLattice checkpoints can locate local references without treating them as capability-promotion evidence.",
   "replay_evidence_groups": [
     {
       "contextlattice_topic": "hermes-agent-ultra/parity/sota/workflow-replay-and-terminal-snapshots",
+      "fixture_reference_categories": [
+        "CLI workflow replay fixture",
+        "normalized stdout snapshot fixture",
+        "non-TTY/PTY diagnostic snapshot fixture",
+        "audited capability-inventory registry snapshot fixture",
+        "release systems snapshot fixture",
+        "provider QoS route-health snapshot fixture",
+        "memory backend status snapshot fixture"
+      ],
       "fixtures": [
         "crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json"
       ],
       "id": "workflow-replay-and-terminal-snapshots",
-      "required_capabilities": [
-        "cli workflow replay",
-        "normalized stdout snapshots",
-        "non-TTY/PTY diagnostic snapshot",
-        "one-true-harness cockpit registry",
-        "release systems proof snapshot",
-        "provider QoS route-health snapshot",
-        "memory backend status snapshot"
-      ],
-      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for workflow-replay-and-terminal-snapshots including fixtures, Rust tests, failures, and queue status",
+      "retrieval_query": "Hermes Agent Ultra fixture/reference regression artifacts for workflow-replay-and-terminal-snapshots including fixture references, Rust tests, failures, and queue status",
       "rust_tests": [
         {
           "file": "crates/hermes-cli/tests/e2e_sota_workflow_replay.rs",
@@ -40,24 +45,24 @@
           "name": "sota_workflow_replay_executes_cli_journey_snapshots"
         }
       ],
-      "status": "covered_by_rust_contracts",
+      "status": "fixture_reference_regression_coverage",
       "title": "User workflow replay and terminal snapshots",
-      "why": "Protects operator journeys by replaying real CLI commands, release-facing proof surfaces, provider QoS snapshots, memory status, and normalized terminal diagnostics."
+      "why": "Indexes fixture/reference regression rows for CLI output and listed Rust tests; it does not establish that each listed journey is implemented as a production capability."
     },
     {
       "contextlattice_topic": "hermes-agent-ultra/parity/sota/protocol-differential-contracts",
-      "fixtures": [
-        "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json"
-      ],
-      "id": "protocol-differential-contracts",
-      "required_capabilities": [
+      "fixture_reference_categories": [
         "ACP method alias normalization",
         "ACP JSON-RPC response serialization",
         "MCP initialize capability envelope",
         "MCP argument coercion",
         "gateway slash-command normalization"
       ],
-      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for protocol-differential-contracts including fixtures, Rust tests, failures, and queue status",
+      "fixtures": [
+        "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json"
+      ],
+      "id": "protocol-differential-contracts",
+      "retrieval_query": "Hermes Agent Ultra fixture/reference regression artifacts for protocol-differential-contracts including fixture references, Rust tests, failures, and queue status",
       "rust_tests": [
         {
           "file": "crates/hermes-protocol-parity-tests/tests/protocol_differential_contracts.rs",
@@ -68,17 +73,13 @@
           "name": "protocol_differential_fixture_matches_runtime_serialization"
         }
       ],
-      "status": "covered_by_rust_contracts",
+      "status": "fixture_reference_regression_coverage",
       "title": "Protocol differential contracts",
-      "why": "Normalizes ACP, MCP, and gateway protocol surfaces against fixture expectations before transport-specific details hide regressions."
+      "why": "Indexes fixture/reference expectations for normalized ACP, MCP, and gateway values; it does not establish executable protocol or client behavior."
     },
     {
       "contextlattice_topic": "hermes-agent-ultra/parity/sota/fault-injection-matrix",
-      "fixtures": [
-        "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
-      ],
-      "id": "fault-injection-matrix",
-      "required_capabilities": [
+      "fixture_reference_categories": [
         "timeout recovery",
         "HTTP 5xx failover",
         "rate limit exhaustion",
@@ -87,7 +88,11 @@
         "malformed tool payload retry without tools",
         "partial stream drop recovery"
       ],
-      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for fault-injection-matrix including fixtures, Rust tests, failures, and queue status",
+      "fixtures": [
+        "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
+      ],
+      "id": "fault-injection-matrix",
+      "retrieval_query": "Hermes Agent Ultra fixture/reference regression artifacts for fault-injection-matrix including fixture references, Rust tests, failures, and queue status",
       "rust_tests": [
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
@@ -119,20 +124,33 @@
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "fault_injection_matrix_covers_required_classes"
+          "name": "fault_injection_fixture_reference_matrix_covers_required_categories"
         }
       ],
-      "status": "covered_by_rust_contracts",
+      "status": "fixture_reference_regression_coverage",
       "title": "Fault-injection matrix",
-      "why": "Exercises retry, failover, fail-closed auth, stream recovery, and malformed tool-payload recovery behavior in the Rust runtime."
+      "why": "Indexes fault-scenario fixture references and selected Rust unit or contract tests; it does not record an executed production client or external chaos run."
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
+  "scope": {
+    "authoritative_for": [
+      "fixture/reference regression coverage",
+      "referenced Rust test existence"
+    ],
+    "coverage_kind": "fixture_reference_regression",
+    "not_evidence_of": [
+      "implemented production capability",
+      "executable protocol behavior",
+      "executable client behavior",
+      "executable chaos behavior"
+    ]
+  },
   "source_artifacts": {
+    "fixture_reference_matrix": "docs/parity/sota-harness-matrix.json",
     "global_parity_proof": "docs/parity/global-parity-proof.json",
     "harness_budget": "docs/parity/harness-budget.json",
     "harness_trend_ledger": "docs/parity/harness-trend-ledger.json",
-    "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
     "test_coverage_audit": "docs/parity/test-coverage-audit.json",
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   }

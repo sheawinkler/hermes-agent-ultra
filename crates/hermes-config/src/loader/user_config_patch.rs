@@ -1,13 +1,10 @@
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications|friendly_tool_labels, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries|preflight_context_compress, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, resource_limits_enabled, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications|friendly_tool_labels, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries|preflight_context_compress, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
-        return "(empty)".to_string();
-    }
-    if s.len() <= 4 {
-        "***".to_string()
+        "(empty)".to_string()
     } else {
-        format!("***{}", &s[s.len() - 4..])
+        "[REDACTED]".to_string()
     }
 }
 
@@ -85,6 +82,12 @@ fn apply_user_config_patch_flat(
                     value
                 ))
             })?;
+        }
+        "execution_mode" => {
+            config.execution_mode = value.into();
+        }
+        "resource_limits_enabled" => {
+            config.resource_limits_enabled = parse_config_bool(key, value)?;
         }
         "system_prompt" => {
             config.system_prompt = Some(value.to_string());
@@ -413,6 +416,115 @@ fn apply_user_config_patch_dotted(
     Ok(())
 }
 
+const SENSITIVE_URL_QUERY_EXACT: &[&str] = &[
+    "access_token",
+    "apikey",
+    "api_key",
+    "auth",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "code",
+    "credential",
+    "id_token",
+    "jwt",
+    "key",
+    "password",
+    "refresh_token",
+    "secret",
+    "sig",
+    "session",
+    "signature",
+    "token",
+    "x_amz_signature",
+    "x_goog_signature",
+];
+const SENSITIVE_URL_QUERY_SUFFIXES: &[&str] = &[
+    "_api_key",
+    "apikey",
+    "_credential",
+    "_password",
+    "_secret",
+    "_signature",
+    "_token",
+];
+
+fn url_query_key_looks_secret(key: &str) -> bool {
+    let normalized = key
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .replace('.', "_");
+    SENSITIVE_URL_QUERY_EXACT.contains(&normalized.as_str())
+        || SENSITIVE_URL_QUERY_SUFFIXES
+            .iter()
+            .any(|suffix| normalized.ends_with(suffix))
+}
+
+fn text_looks_like_url_credentials(raw: &str) -> bool {
+    let has_userinfo = raw.split_once('@').is_some_and(|(before_at, _)| {
+        before_at
+            .rsplit(|ch| matches!(ch, '/' | '?' | '#'))
+            .next()
+            .is_some_and(|userinfo| userinfo.contains(':'))
+    });
+    let has_sensitive_query = raw.split_once('?').is_some_and(|(_, query)| {
+        query.split('&').any(|pair| {
+            pair.split_once('=')
+                .is_some_and(|(key, _)| url_query_key_looks_secret(key))
+        })
+    });
+    has_userinfo || has_sensitive_query
+}
+
+/// Redact URL userinfo and credential-bearing query values for diagnostic output.
+pub fn redact_url_credentials_for_display(raw: &str) -> String {
+    let credential_shape = text_looks_like_url_credentials(raw);
+    let Ok(mut parsed) = url::Url::parse(raw) else {
+        return if credential_shape {
+            "[REDACTED_URL]".to_string()
+        } else {
+            raw.to_string()
+        };
+    };
+    let has_username = !parsed.username().is_empty();
+    let has_password = parsed.password().is_some();
+    let mut changed = has_username || has_password;
+
+    if has_username && parsed.set_username("REDACTED").is_err() {
+        return "[REDACTED_URL]".to_string();
+    }
+    if has_password && parsed.set_password(Some("REDACTED")).is_err() {
+        return "[REDACTED_URL]".to_string();
+    }
+
+    let query_pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(key, value)| {
+            if url_query_key_looks_secret(&key) {
+                changed = true;
+                (key.into_owned(), "REDACTED".to_string())
+            } else {
+                (key.into_owned(), value.into_owned())
+            }
+        })
+        .collect();
+    if changed && parsed.query().is_some() {
+        parsed
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(query_pairs.iter().map(|(key, value)| (key, value)));
+    }
+
+    if changed {
+        parsed.to_string()
+    } else if credential_shape {
+        "[REDACTED_URL]".to_string()
+    } else {
+        raw.to_string()
+    }
+}
+
 /// Display a single config field for `hermes config get` (same keys as [`apply_user_config_patch`]).
 pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<String, ConfigError> {
     if !key.contains('.') {
@@ -421,7 +533,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
                 .model
                 .as_deref()
                 .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
+                .map(redact_url_credentials_for_display)
                 .unwrap_or_else(|| "(not set)".to_string()),
             "personality" => config
                 .personality
@@ -430,6 +542,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(not set)".to_string()),
             "max_turns" => config.max_turns.to_string(),
+            "resource_limits_enabled" => config.resource_limits_enabled.to_string(),
             "system_prompt" => config
                 .system_prompt
                 .as_deref()
@@ -442,6 +555,11 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(not set)".to_string()),
+            "execution_mode" => match &config.execution_mode {
+                ExecutionModeConfigValue::Absent => "(not set)".to_string(),
+                ExecutionModeConfigValue::ExplicitNull => "null".to_string(),
+                ExecutionModeConfigValue::Value(value) => value.clone(),
+            },
             other => {
                 return Err(ConfigError::NotFound(format!(
                     "unknown config key: {} (supported: {})",
@@ -460,14 +578,14 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .as_ref()
             .and_then(|p| p.http_proxy.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["proxy", "socks"] | ["proxy", "socks_proxy"] => Ok(config
             .proxy
             .as_ref()
             .and_then(|p| p.socks_proxy.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["web", "backend"] => Ok(if config.web.backend.trim().is_empty() {
             "(not set)".to_string()
@@ -524,7 +642,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .model
             .as_deref()
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["delegation", "provider"] => Ok(config
             .delegation
@@ -538,7 +656,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .base_url
             .as_deref()
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["delegation", "api_key"] => Ok(config
             .delegation
@@ -568,14 +686,14 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .get(*provider)
             .and_then(|c| c.base_url.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "model"] => Ok(config
             .llm_providers
             .get(*provider)
             .and_then(|c| c.model.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "models"] => Ok(config
             .llm_providers
@@ -625,7 +743,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .get(*provider)
             .and_then(|c| c.oauth_token_url.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "oauth_client_id"] => Ok(config
             .llm_providers
@@ -646,14 +764,14 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .get(*task)
             .map(|c| c.model.trim())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["auxiliary", task, "base_url"] => Ok(config
             .auxiliary
             .get(*task)
             .map(|c| c.base_url.trim())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["auxiliary", task, "api_key"] => Ok(config
             .auxiliary
@@ -687,7 +805,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .as_ref()
             .and_then(|c| c.model.as_deref())
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(redact_url_credentials_for_display)
             .unwrap_or_else(|| "(not set)".to_string())),
         ["smart_model_routing", "cheap_model", "provider"] => Ok(config
             .smart_model_routing

@@ -42,7 +42,7 @@ Pick the row that matches your goal:
 | I want a local or self-hosted model | `hermes-ultra model` → custom endpoint | Verify the endpoint, model name, and context length |
 | I want multi-provider fallback | `hermes-ultra model` first | Add routing and fallback only after the base chat works |
 
-**Rule of thumb:** if Hermes cannot complete a normal chat, do not add more features yet. Get one clean conversation working first, then layer on gateway, cron, skills, voice, or routing.
+**Rule of thumb:** if Hermes cannot complete a normal chat, do not add more features yet. Get one clean conversation working first, then layer on gateway, cron, skills, TTS/transcription, or routing.
 
 ---
 
@@ -239,11 +239,9 @@ hermes-ultra config set terminal.backend docker    # Docker isolation
 hermes-ultra config set terminal.backend ssh       # Remote server
 ```
 
-### Voice mode
+### Voice and TTS
 
-Voice and TTS tools ship with the Rust runtime. Configure the provider you want,
-then run `hermes-ultra doctor` if audio dependencies are missing. In the CLI:
-`/voice on`. Press `Ctrl+B` to record. See [Voice Mode](../user-guide/features/voice-mode.md).
+The Rust runtime ships `text_to_speech` (validated media file gateways may attach on the current turn), a callable `transcription` HTTP tool (OpenAI/Nous-managed, Groq, Mistral — messaging only hints with `[transcription_candidate]`, no auto-STT), and status-only `/voice`. There is no interactive CLI microphone loop, no `/voice on|tts|off` toggles, and no Discord voice-channel join. See [Voice Mode](../user-guide/features/voice-mode.md) and [Voice & TTS](../user-guide/features/tts.md).
 
 ### Skills
 

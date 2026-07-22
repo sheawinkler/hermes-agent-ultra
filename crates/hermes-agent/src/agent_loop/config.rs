@@ -72,20 +72,6 @@ pub struct RuntimeProviderConfig {
     pub oauth_client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OAuthStoreCredential {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    provider: Option<String>,
-    access_token: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    refresh_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    token_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    scope: Option<String>,
-    #[serde(default)]
-    expires_at: Option<DateTime<Utc>>,
-}
 
 const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions. Memory is injected into every turn, so keep it compact and focused on facts that will still matter later. Prioritize what reduces future user steering. Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory.";
 
@@ -94,7 +80,6 @@ const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a
 const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time. When using a skill and finding it outdated or incomplete, patch it immediately with skill_manage(action='patch').";
 
 const CONVERSATIONAL_SUPPORT_GUIDANCE: &str = "# Conversational support protocol\nWhen users share personal stress, emotions, or difficult decisions, start with a brief non-judgmental acknowledgment, ask one clarifying question if context is missing, then offer practical options with trade-offs. Keep factual or technical requests direct and do not force emotional language where it does not fit. Do not present yourself as a therapist or crisis service; when safety risk appears, urge the user to seek immediate professional or emergency help.";
-const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
 const SESSION_OBJECTIVE_PREFIX: &str = "[SESSION_OBJECTIVE] ";
 const OBJECTIVE_PATCH_TAG: &str = "PATCH_VERIFIED:";
 const OBJECTIVE_ANALYTICS_TAG: &str = "ANALYTICS_VERIFIED:";
@@ -116,38 +101,9 @@ const REPO_RESEARCH_MIN_WORKSTREAMS: usize = 3;
 const REPO_RESEARCH_MIN_UNIQUE_FILES: usize = 2;
 const REPO_RESEARCH_MIN_COMMANDS: usize = 2;
 
-// Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
-const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
-Focus on:\n\
-1. Has the user revealed things about themselves — their persona, desires, preferences, or personal details worth remembering?\n\
-2. Has the user expressed expectations about how you should behave, their work style, or ways they want you to operate?\n\n\
-If something stands out, save it using the memory tool. \
-If nothing is worth saving, just say 'Nothing to save.' and stop.";
-
-const SKILL_REVIEW_PROMPT: &str =
-    "Review the conversation above and consider saving or updating a skill if appropriate.\n\n\
-Focus on: was a non-trivial approach used to complete a task that required trial \
-and error, or changing course due to experiential findings along the way, or did \
-the user expect or desire a different method or outcome?\n\n\
-If a relevant skill already exists, update it with what you learned. \
-Otherwise, create a new skill if the approach is reusable.\n\
-If nothing is worth saving, just say 'Nothing to save.' and stop.";
-
-const COMBINED_REVIEW_PROMPT: &str = "Review the conversation above and consider two things:\n\n\
-**Memory**: Has the user revealed things about themselves — their persona, \
-desires, preferences, or personal details? Has the user expressed expectations \
-about how you should behave, their work style, or ways they want you to operate? \
-If so, save using the memory tool.\n\n\
-**Skills**: Was a non-trivial approach used to complete a task that required trial \
-and error, or changing course due to experiential findings along the way, or did \
-the user expect or desire a different method or outcome? If a relevant skill \
-already exists, update it. Otherwise, create a new one if the approach is reusable.\n\n\
-Only act if there's something genuinely worth saving. \
-If nothing stands out, just say 'Nothing to save.' and stop.";
 
 const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nUse tools whenever they are necessary to verify facts, inspect code/files, or execute requested actions. Do not describe an action without making the corresponding tool call in the same response. Do not call tools only to satisfy policy or to emit no-op commands. If the request is fully answerable without tools, return a direct final answer. Avoid repetitive tool loops: if additional tool calls will not add new evidence, stop and provide the best grounded final result.";
 const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present via env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`. Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. Use `contextlattice_write` for checkpoints. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
-const CONTEXTLATTICE_DEFAULT_ORCHESTRATOR_URL: &str = "http://127.0.0.1:8075";
 const CONTEXTLATTICE_COMPACTION_FILE: &str = "notes/hermes-agent-compaction.md";
 
 const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
@@ -188,54 +144,36 @@ fn compaction_governance_mode_runtime() -> CompactionGovernanceMode {
         .unwrap_or(CompactionGovernanceMode::Advisory)
 }
 
-fn contextlattice_orchestrator_url_runtime() -> String {
-    std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
-        .or_else(|_| std::env::var("MEMMCP_ORCHESTRATOR_URL"))
-        .unwrap_or_else(|_| CONTEXTLATTICE_DEFAULT_ORCHESTRATOR_URL.to_string())
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn contextlattice_timeout_runtime() -> Duration {
-    let seconds = std::env::var("HERMES_CONTEXTLATTICE_TIMEOUT_SECS")
-        .or_else(|_| std::env::var("CONTEXTLATTICE_TIMEOUT_SECS"))
-        .ok()
-        .and_then(|raw| raw.parse::<f64>().ok())
-        .unwrap_or(10.0)
-        .clamp(1.0, 60.0);
-    Duration::from_secs_f64(seconds)
+fn compaction_hermes_home(hermes_home: Option<&str>) -> PathBuf {
+    hermes_home
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+        .or_else(|| {
+            std::env::var("HERMES_AGENT_ULTRA_HOME")
+                .ok()
+                .map(PathBuf::from)
+        })
+        .or_else(|| dirs::home_dir().map(|home| home.join(".hermes")))
+        .unwrap_or_else(|| PathBuf::from(".hermes"))
 }
 
 fn write_contextlattice_checkpoint(
+    subject: &hermes_core::MemorySubject,
+    filter: &hermes_core::MemorySubjectStorageKey,
+    hermes_home: Option<&str>,
     topic_path: &str,
     file_name: &str,
     content: &str,
 ) -> Result<(), String> {
-    let url = format!("{}/memory/write", contextlattice_orchestrator_url_runtime());
-    let payload = json!({
-        "projectName": "hermes-agent-ultra",
-        "fileName": file_name,
-        "topicPath": topic_path,
-        "content": content,
-    });
-    let client = reqwest::blocking::Client::builder()
-        .timeout(contextlattice_timeout_runtime())
-        .build()
-        .map_err(|err| err.to_string())?;
-    let mut request = client.post(&url).json(&payload);
-    if let Ok(api_key) = std::env::var("CONTEXTLATTICE_API_KEY") {
-        if !api_key.trim().is_empty() {
-            request = request.bearer_auth(api_key);
-        }
-    }
-    let response = request.send().map_err(|err| err.to_string())?;
-    let status = response.status();
-    if status.is_success() {
-        return Ok(());
-    }
-    let body = response.text().unwrap_or_default();
-    let preview: String = body.chars().take(240).collect();
-    Err(format!("HTTP {status}: {}", preview.trim()))
+    let home = compaction_hermes_home(hermes_home);
+    let home = home
+        .to_str()
+        .ok_or_else(|| "ContextLattice checkpoint home path is not valid UTF-8".to_string())?;
+    crate::memory_plugins::contextlattice::write_subject_scoped_checkpoint(
+        subject, filter, home, topic_path, file_name, content,
+    )
 }
 
 fn should_inject_tool_enforcement_for_model(_model: &str) -> bool {
@@ -362,6 +300,13 @@ pub struct AgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
 
+    /// Typed execution posture resolved at the startup boundary.
+    ///
+    /// This is serialized for runtime diagnostics, but configuration inputs
+    /// cannot deserialize or override its source metadata.
+    #[serde(skip_deserializing, default)]
+    pub execution_mode: hermes_core::ResolvedExecutionMode,
+
     /// Optional allow-list for skill discovery/injection. Empty means allow all.
     #[serde(default)]
     pub enabled_skills: Vec<String>,
@@ -437,8 +382,8 @@ pub struct AgentConfig {
     #[serde(default = "default_skill_creation_nudge_interval")]
     pub skill_creation_nudge_interval: u32,
 
-    /// Run Python-style background memory/skill review after a session (extra LLM calls).
-    /// Python has no master off-switch; matches default-on (`cli-config.yaml` can override via `agent`).
+    /// Request a post-session memory/skill review.
+    /// Governed runs reject this until reviews are scheduled through the durable outbox.
     #[serde(default = "default_background_review_enabled")]
     pub background_review_enabled: bool,
 
@@ -606,7 +551,7 @@ fn default_skill_creation_nudge_interval() -> u32 {
 }
 
 fn default_background_review_enabled() -> bool {
-    true
+    false
 }
 
 fn default_background_review_metrics_enabled() -> bool {
@@ -707,6 +652,7 @@ impl Default for AgentConfig {
             smart_model_routing: SmartModelRoutingConfig::default(),
             provider: None,
             platform: None,
+            execution_mode: hermes_core::ResolvedExecutionMode::default(),
             enabled_skills: Vec::new(),
             disabled_skills: Vec::new(),
             pass_session_id: false,
@@ -747,3 +693,40 @@ impl Default for AgentConfig {
     }
 }
 
+
+#[cfg(test)]
+mod execution_mode_tests {
+    use super::*;
+    use hermes_core::{ExecutionMode, ExecutionModeSource, ResolvedExecutionMode};
+
+    #[test]
+    fn execution_mode_defaults_to_manual_built_in_and_is_not_deserialized() {
+        assert_eq!(
+            AgentConfig::default().execution_mode,
+            ResolvedExecutionMode {
+                mode: ExecutionMode::Manual,
+                source: ExecutionModeSource::BuiltInDefault,
+            }
+        );
+
+        let config: AgentConfig = serde_json::from_value(serde_json::json!({
+            "execution_mode": { "mode": "ci", "source": "cli" }
+        }))
+        .expect("agent config should ignore serialized runtime mode");
+        assert_eq!(config.execution_mode, ResolvedExecutionMode::default());
+    }
+
+    #[test]
+    fn execution_mode_source_is_available_in_runtime_diagnostics() {
+        let config = AgentConfig {
+            execution_mode: ResolvedExecutionMode {
+                mode: ExecutionMode::RemoteWorker,
+                source: ExecutionModeSource::Cli,
+            },
+            ..AgentConfig::default()
+        };
+        let diagnostic = serde_json::to_value(config).expect("serialize runtime config");
+        assert_eq!(diagnostic["execution_mode"]["mode"], "remote_worker");
+        assert_eq!(diagnostic["execution_mode"]["source"], "cli");
+    }
+}

@@ -1,19 +1,11 @@
 impl App {
-    fn push_stream_extra_event(
+    fn push_stream_ui_event(
         shared: &Arc<StdMutex<Option<StreamHandle>>>,
-        payload: serde_json::Value,
+        event: crate::tui::StreamUiEvent,
     ) {
         if let Ok(guard) = shared.lock() {
             if let Some(handle) = guard.clone() {
-                handle.send_chunk(hermes_core::StreamChunk {
-                    delta: Some(hermes_core::StreamDelta {
-                        content: None,
-                        tool_calls: None,
-                        extra: Some(payload),
-                    }),
-                    finish_reason: None,
-                    usage: None,
-                });
+                handle.send_ui_event(event);
             }
         }
     }
@@ -36,18 +28,6 @@ impl App {
         }
     }
 
-    fn set_env_if_changed(key: &str, value: &str) -> bool {
-        let next = value.trim();
-        if next.is_empty() {
-            return false;
-        }
-        let current = std::env::var(key).ok().unwrap_or_default();
-        if current == next {
-            return false;
-        }
-        std::env::set_var(key, next);
-        true
-    }
 
     fn bool_env(key: &str) -> Option<bool> {
         let raw = std::env::var(key).ok()?;

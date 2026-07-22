@@ -11,6 +11,7 @@ mod skill;
 mod store;
 mod sync;
 mod usage;
+mod trust;
 mod version;
 
 pub use guard::{
@@ -29,7 +30,7 @@ pub use provenance::{
     set_current_write_origin, WriteOriginGuard, ASSISTANT_TOOL, BACKGROUND_REVIEW, FOREGROUND,
 };
 pub use skill::{SkillError, SkillManager, MAX_SKILL_CONTENT_CHARS};
-pub use store::{FileSkillStore, SkillStore, MAX_SKILL_NAME_LENGTH};
+pub use store::{FileSkillStore, LocalPackageFile, SkillStore, MAX_SKILL_NAME_LENGTH};
 pub use sync::{
     bundled_skills_opt_out_marker, compute_relative_dest, dir_hash, discover_bundled_skills,
     is_bundled_skills_opt_out, read_manifest, read_skill_name, remove_pristine_bundled_skills,
@@ -43,5 +44,29 @@ pub use usage::{
     is_agent_created, is_protected_skill, list_agent_created_skill_names, load_usage,
     mark_agent_created, restore_skill, save_usage, set_pinned, set_state, usage_file,
     SkillUsageRecord, SkillUsageReportRow, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
+};
+pub use trust::{
+    canonical_bundle_digest, full_skill_scan, install_signed_remote_keyring_from_file,
+    load_keyring, load_local_owner_keyring_file, load_lock, load_lock_for_migration,
+    load_remote_keyring_audit_file, load_remote_trust_root_file, load_revocations,
+    load_signed_remote_keyring, normalize_relative_package_path, parse_package_manifest,
+    provision_remote_trust_root_from_file, skill_keyring_path, skill_lock_path,
+    skill_revocations_path, store_keyring, store_local_owner_keyring_file, store_lock,
+    store_remote_keyring_audit_file, store_remote_trust_root_file, store_revocations,
+    store_signed_remote_keyring,
+    LocalOwnerAttestation, LocalOwnerKeyring, LocalOwnerSigningKey, PendingOwnerAttestation,
+    SignedRemoteSkillKeyring, SignedSkillRevocationList, SkillAdmission, SkillAdmissionDecision,
+    SkillCompatibility, SkillLockEntryV2, SkillLockLoad, SkillLockV2, SkillPackageDependency,
+    SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof, SkillPackageSource,
+    SkillPermission, SkillPermissions, SkillQuarantine, SkillQuarantineReason,
+    SkillRemoteKeyringAudit, SkillRemoteKeyringAuditEntry, SkillRemoteTrustConfig,
+    SkillRemoteTrustRoot, SkillRevocation, SkillScanResultV2, SkillScanVerdictV2,
+    SkillSigningKey, SkillSignature, SkillTrustAuthorityPaths, SkillTrustError,
+    SkillTrustKeyring, SkillTrustLoad, SkillTrustPolicy, SkillTrustRead, SkillTrustRootRotation,
+    SkillTrustStore, SkillTrustVerifier, TrustedLocalOwnerKey, TrustedPublisherSkillKey,
+    TrustedSkillKey, VerifiedSkillPackage, SKILL_LOCK_FILE, SKILL_LOCK_SCHEMA_VERSION,
+    SKILL_PACKAGE_SCHEMA_VERSION, SKILL_REMOTE_KEYRING_AUDIT_SCHEMA_VERSION,
+    SKILL_REMOTE_KEYRING_SCHEMA_VERSION, SKILL_REMOTE_TRUST_ROOT_SCHEMA_VERSION,
+    SKILL_REVOCATIONS_FILE, SKILL_REVOCATION_SCHEMA_VERSION,
 };
 pub use version::{compare_versions, compute_version, track_change, SkillChange, SkillVersion};

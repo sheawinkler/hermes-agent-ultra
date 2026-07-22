@@ -18,6 +18,9 @@ pub mod scheduler;
 pub mod suggestions;
 
 // Re-export primary types
+pub use hermes_agent::{EphemeralRunRuntimeFactory, RunRuntime};
+pub use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
+pub use hermes_environments::ExecutionContainmentContext;
 pub use backend::ScheduledCronjobBackend;
 pub use blueprints::{
     catalog as blueprint_catalog, fill_blueprint, get_blueprint, resolve_blueprint_command,

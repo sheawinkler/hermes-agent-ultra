@@ -486,7 +486,7 @@ Write only the summary body. Do not include any preamble or prefix."
                 }
                 Err(err) => {
                     let err_text = err.to_string();
-                    if retry_on_main_pending {
+                    if retry_on_main_pending && !err.is_unknown_outcome() {
                         retry_on_main_pending = false;
                         self.summary_model_fallen_back = true;
                         if let Some(model) = self.config.summary_model_override.as_ref() {

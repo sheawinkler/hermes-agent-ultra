@@ -1,115 +1,176 @@
 {
-            println!("Checking for skill updates...\n");
+            println!("Checking verified skill packages...\n");
             if !skills_dir.exists() {
                 println!("No skills installed.");
                 return Ok(());
             }
 
-            let apply_updates = extra.as_deref() == Some("--apply");
-            let lock = read_skills_hub_lock(&skills_dir);
-            if lock.installed.is_empty() {
+            let lock = load_v2_skill_lock(&skills_dir)?;
+            if lock.packages.is_empty() {
                 println!(
-                    "No hub-installed skills tracked in {}.",
-                    skills_hub_lock_path(&skills_dir).display()
+                    "No v2 verified skill packages are tracked in {}.",
+                    hermes_skills::skill_lock_path(&skills_dir).display()
                 );
-                println!("Install skills with `hermes skills install <identifier>` to enable source-aware updates.");
                 return Ok(());
             }
 
-            println!(
-                "{:28} {:14} {:14} {:16} Status",
-                "Skill", "Source", "Local Hash", "Upstream Hash"
-            );
-            println!("{}", "-".repeat(98));
-
-            let taps_file = hermes_config::hermes_home().join("skill_taps.json");
-            let subscriptions_file = skills_dir.join("subscriptions.json");
-            let merged_taps = effective_skill_taps(&taps_file, &subscriptions_file);
-            let client = reqwest::Client::new();
-
-            struct PendingUpdate {
-                entry: SkillHubInstalledEntry,
-                files: Vec<(String, Bytes)>,
-                upstream_hash: String,
-            }
-            let mut pending: Vec<PendingUpdate> = Vec::new();
-
-            for entry in lock.installed {
-                let local_hash = if skills_dir.join(&entry.install_path).exists() {
-                    hash_installed_skill_dir(&skills_dir.join(&entry.install_path))
-                        .unwrap_or_else(|_| entry.content_hash.clone())
-                } else {
-                    entry.content_hash.clone()
-                };
-
-                match fetch_bundle_for_lock_entry(&client, &entry, &merged_taps).await {
-                    Ok(files) => {
-                        let upstream_hash = hash_skill_bundle(&files);
-                        let status = if local_hash == upstream_hash {
-                            "✓ up-to-date"
-                        } else {
-                            pending.push(PendingUpdate {
-                                entry: entry.clone(),
-                                files,
-                                upstream_hash: upstream_hash.clone(),
-                            });
-                            "⬆ update available"
-                        };
-                        println!(
-                            "{:28} {:14} {:14} {:16} {}",
-                            entry.name,
-                            entry.source,
-                            &local_hash.chars().take(14).collect::<String>(),
-                            &upstream_hash.chars().take(16).collect::<String>(),
-                            status
-                        );
-                    }
-                    Err(err) => {
-                        println!(
-                            "{:28} {:14} {:14} {:16} unavailable ({})",
-                            entry.name,
-                            entry.source,
-                            &local_hash.chars().take(14).collect::<String>(),
-                            "-",
-                            err
-                        );
-                    }
-                }
-            }
-
-            println!();
-            if pending.is_empty() {
-                println!("All tracked hub skills are up to date.");
+            let requires_remote_trust = lock
+                .packages
+                .iter()
+                .any(|entry| entry.manifest.source == hermes_skills::SkillPackageSource::Remote);
+            let authority = if requires_remote_trust {
+                Some(load_cli_skill_trust_authority_paths(
+                    &skills_dir,
+                    authority_dir.as_deref(),
+                )?)
             } else {
-                println!("{} update(s) available.", pending.len());
-                if apply_updates {
-                    println!("\nApplying updates...");
-                    for update in pending {
-                        let install_name = sanitize_skill_install_name(&update.entry.name);
-                        let target =
-                            install_skill_files(&skills_dir, &install_name, &update.files)?;
-                        let prov = SkillInstallProvenance {
-                            source: update.entry.source.clone(),
-                            identifier: update.entry.identifier.clone(),
-                            trust_level: update.entry.trust_level.clone(),
-                            metadata: update.entry.metadata.clone(),
-                        };
-                        record_skill_install_in_hub_lock(
-                            &skills_dir,
-                            &install_name,
-                            &target,
-                            &update.files,
-                            &prov,
-                        )?;
-                        println!(
-                            "  ✓ {} updated (new hash: {})",
-                            install_name,
-                            &update.upstream_hash.chars().take(16).collect::<String>()
-                        );
-                        maybe_run_skill_bootstrap(&install_name, &target, &update.files).await?;
-                    }
-                } else {
-                    println!("Run `hermes skills update --apply` to install updates.");
+                None
+            };
+            let verifier = load_cli_skill_trust_verifier(
+                &skills_dir,
+                authority_dir.as_deref(),
+                requires_remote_trust,
+            )?;
+            let revocations = load_cli_skill_revocations(&skills_dir)?;
+            let apply_updates = skills_extra_has_flag(extra.as_deref(), "--apply");
+            println!(
+                "{:28} {:14} {:18} {:22} Status",
+                "Skill", "Version", "Revision", "Trust"
+            );
+            println!("{}", "-".repeat(112));
+
+            if !apply_updates {
+                for entry in &lock.packages {
+                    let path = skills_dir.join(&entry.install_path);
+                    let status = match verifier.verify_bundle(
+                        &path,
+                        &entry.manifest,
+                        &revocations,
+                        false,
+                    ) {
+                        Ok(admission) if admission.is_allowed() => {
+                            format!("verified:{}", admission.scan.verdict.as_str())
+                        }
+                        Ok(admission) => admission
+                            .quarantine
+                            .as_ref()
+                            .map(|quarantine| format!("quarantined:{:?}", quarantine.reason))
+                            .unwrap_or_else(|| "not-admitted".to_string()),
+                        Err(error) => format!("verification-error:{error}"),
+                    };
+                    println!(
+                        "{:28} {:14} {:18} {:22} {}",
+                        entry.manifest.identity.name,
+                        entry.manifest.identity.version,
+                        entry.manifest.identity.immutable_source_revision,
+                        skill_package_trust_label(&entry.manifest),
+                        status
+                    );
                 }
+                println!(
+                    "\nNo update was fetched. Re-run with --extra '--apply --manifest <signed-manifest.json>' to stage and verify a signed immutable update."
+                );
+                return Ok(());
             }
+
+            let manifest = load_remote_skill_manifest(extra.as_deref())?;
+            let matching_entry = lock
+                .packages
+                .iter()
+                .find(|entry| entry.manifest.identity.name == manifest.identity.name)
+                .ok_or_else(|| {
+                    AgentError::Config(format!(
+                        "No installed v2 package matches signed update manifest '{}'",
+                        manifest.identity.name
+                    ))
+                })?;
+            if matching_entry.manifest.source != hermes_skills::SkillPackageSource::Remote {
+                return Err(AgentError::Config(
+                    "Only signed Remote packages can be updated from a remote source".to_string(),
+                ));
+            }
+            if manifest.identity.origin != matching_entry.manifest.identity.origin {
+                return Err(AgentError::Config(
+                    "Signed update origin differs from the installed package; refusing provenance switch"
+                        .to_string(),
+                ));
+            }
+            if manifest.identity.publisher_id != matching_entry.manifest.identity.publisher_id {
+                return Err(AgentError::Config(
+                    "Signed update publisher differs from the installed package; refusing provenance switch"
+                        .to_string(),
+                ));
+            }
+
+            let origin = manifest.identity.origin.clone();
+            let rest = origin.strip_prefix("github://").ok_or_else(|| {
+                AgentError::Config(
+                    "Signed update manifest origin is not a GitHub immutable source; refusing update"
+                        .to_string(),
+                )
+            })?;
+            let pieces: Vec<&str> = rest.split('/').filter(|piece| !piece.is_empty()).collect();
+            if pieces.len() < 3 {
+                return Err(AgentError::Config(
+                    "Signed update manifest GitHub origin must include owner/repo/skill-path"
+                        .to_string(),
+                ));
+            }
+            let repo = format!("{}/{}", pieces[0], pieces[1]);
+            let skill_dir = pieces[2..].join("/");
+            let client = reqwest::Client::new();
+            let declared_revision = manifest.identity.immutable_source_revision.clone();
+            let resolved = resolve_github_skill_source(
+                &client,
+                &repo,
+                Some(&declared_revision),
+                &skill_dir,
+            )
+            .await?;
+            let resolved_origin = format!("github://{}/{}", resolved.repo, resolved.skill_dir);
+            validate_remote_manifest_source(
+                &manifest,
+                &resolved_origin,
+                &resolved.immutable_revision,
+            )?;
+
+            if matching_entry.manifest.identity.immutable_source_revision
+                == manifest.identity.immutable_source_revision
+                && matching_entry.manifest.identity.content_digest
+                    == manifest.identity.content_digest
+            {
+                println!(
+                    "{} is already pinned to signed revision {}.",
+                    matching_entry.manifest.identity.name,
+                    manifest.identity.immutable_source_revision
+                );
+                return Ok(());
+            }
+
+            let files = fetch_skill_files_from_github(&client, &resolved).await?;
+            let trust_label = skill_package_trust_label(&manifest);
+            let install_name = manifest.identity.name.clone();
+            let authority = authority.as_ref().ok_or_else(|| {
+                AgentError::Config(
+                    "Signed remote updates require an externally anchored trust authority".to_string(),
+                )
+            })?;
+            let admission = install_verified_skill_material(
+                &skills_dir,
+                SkillInstallMaterial {
+                    install_name: install_name.clone(),
+                    manifest,
+                    files,
+                },
+                authority,
+                bootstrap_requested(extra.as_deref()),
+            )?;
+            println!(
+                "Updated '{}' to immutable revision {} (trust={}, verdict={}, effects_allowed={}).",
+                install_name,
+                admission.identity.immutable_source_revision,
+                trust_label,
+                admission.scan.verdict.as_str(),
+                admission.effects_allowed
+            );
         }

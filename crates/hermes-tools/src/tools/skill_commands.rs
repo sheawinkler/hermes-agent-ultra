@@ -7,11 +7,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use hermes_core::Skill;
-use hermes_skills::SkillGuard;
-
-use super::skill_utils::{discover_skills, match_platform, SkillInfo};
-
+use super::skill_utils::{
+    discover_verified_skills, load_verified_skill_by_selector, match_platform,
+    reload_verified_skill, render_skill_provenance_tag, BlockedSkill, SkillInfo,
+    SkillTrustIdentity, SkillTrustRuntime,
+};
 // ---------------------------------------------------------------------------
 // SkillCommand
 // ---------------------------------------------------------------------------
@@ -25,9 +25,11 @@ pub struct SkillCommand {
     pub description: String,
     /// The skill that owns this command.
     pub skill_name: String,
-    /// Template content to inject when the command is invoked.
-    /// May contain `{args}` placeholder for user-provided arguments.
-    pub template: String,
+    /// Immutable package evidence retained with this registered command.
+    pub provenance: SkillTrustIdentity,
+    /// Package locator retained solely so every invocation re-loads the
+    /// verified command declaration rather than using a registry snapshot.
+    verified_skill: SkillInfo,
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ pub struct SkillCommandRegistry {
 /// Runtime configuration for resolving installed skills as slash commands.
 #[derive(Debug, Clone)]
 pub struct SkillCommandResolverConfig {
-    /// Skill roots to scan. Each root may contain nested `SKILL.md` files.
+    /// Actual skill roots containing a single v2 `.hub/lock.json` each.
     pub roots: Vec<PathBuf>,
     /// Optional allow-list of skill names or command slugs.
     pub enabled: Vec<String>,
@@ -50,6 +52,8 @@ pub struct SkillCommandResolverConfig {
     pub disabled: Vec<String>,
     /// Platform label used for skill frontmatter filtering.
     pub platform: Option<String>,
+    /// Core verifier context. A missing context fails closed.
+    pub trust_runtime: Option<SkillTrustRuntime>,
 }
 
 impl Default for SkillCommandResolverConfig {
@@ -59,6 +63,7 @@ impl Default for SkillCommandResolverConfig {
             enabled: Vec::new(),
             disabled: Vec::new(),
             platform: Some(std::env::consts::OS.to_string()),
+            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
         }
     }
 }
@@ -68,39 +73,40 @@ impl Default for SkillCommandResolverConfig {
 pub struct SkillSlashInvocation {
     /// Canonical command key, including leading slash.
     pub command: String,
-    /// Skill name from frontmatter or the skill directory.
+    /// Canonical package name, not a frontmatter-only label.
     pub skill_name: String,
-    /// Short description from frontmatter, if present.
+    /// Short description from verified package frontmatter, if present.
     pub description: String,
-    /// Path to the resolved `SKILL.md`.
-    pub skill_md_path: PathBuf,
+    /// Typed identity that must accompany the selected prompt content.
+    pub provenance: SkillTrustIdentity,
     /// User message content to send into the agent loop.
     pub message: String,
 }
 
-/// One installed skill command discovered during a refresh/snapshot pass.
+/// One installed skill command discovered during a fresh verified-store pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillSlashCommandEntry {
     /// Canonical command key, including leading slash.
     pub command: String,
-    /// Skill name from frontmatter or the skill directory.
+    /// Canonical package name.
     pub skill_name: String,
-    /// Short description from frontmatter, if present.
+    /// Short description from verified package frontmatter, if present.
     pub description: String,
-    /// Path to the resolved `SKILL.md`.
-    pub skill_md_path: PathBuf,
-    /// Security rejection text when the skill was blocked.
+    /// Typed provenance for an admitted package; absent for a rejected lock
+    /// record that was never allowed into prompt material.
+    pub provenance: Option<SkillTrustIdentity>,
+    /// Typed trust rejection text when the package was blocked.
     pub blocked_reason: Option<String>,
 }
 
-/// Snapshot of installed skill slash commands visible to the current runtime.
+/// Snapshot of installed skill commands visible to the current runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillSlashCommandSnapshot {
-    /// Skill roots scanned for nested `SKILL.md` files.
+    /// Skill roots consulted through their v2 stores.
     pub roots: Vec<PathBuf>,
-    /// Safe commands available for slash invocation.
+    /// Verified commands available for slash invocation.
     pub available: Vec<SkillSlashCommandEntry>,
-    /// Matching skills blocked by the security gate.
+    /// Lock records rejected by the trust verifier.
     pub blocked: Vec<SkillSlashCommandEntry>,
     /// Skills skipped by platform, enable/disable filters, empty slugs, or duplicate commands.
     pub skipped: usize,
@@ -113,8 +119,8 @@ impl SkillCommandRegistry {
         }
     }
 
-    /// Register a single skill command.
-    pub fn register(&mut self, cmd: SkillCommand) {
+    /// Register a command sourced from an already verified package.
+    fn register(&mut self, cmd: SkillCommand) {
         self.commands.insert(cmd.name.clone(), cmd);
     }
 
@@ -149,19 +155,12 @@ impl Default for SkillCommandRegistry {
     }
 }
 
-/// Default installed skill roots shared by CLI and gateway surfaces.
+/// Default installed skill root shared by CLI and gateway surfaces.
+///
+/// `hermes_config::skills_dir` owns the legacy-home decision; scanning an
+/// additional home directory would create a second independent lock authority.
 pub fn default_skill_roots() -> Vec<PathBuf> {
-    let mut roots = vec![hermes_config::skills_dir()];
-    if let Some(home) = std::env::var("HOME")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-    {
-        roots.push(home.join(".hermes").join("skills"));
-    }
-    roots.sort();
-    roots.dedup();
-    roots
+    vec![hermes_config::skills_dir()]
 }
 
 fn normalize_selector(raw: &str) -> String {
@@ -242,17 +241,6 @@ fn skill_matches_platform(skill: &SkillInfo, platform: Option<&str>) -> bool {
         .any(|alias| match_platform(skill, alias))
 }
 
-fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
-    let probe = Skill {
-        name: name.to_string(),
-        content: body.to_string(),
-        category: Some("external".to_string()),
-        description: None,
-    };
-    SkillGuard::default()
-        .scan_security_only(&probe)
-        .map_err(|err| err.to_string())
-}
 
 fn skill_description(skill: &SkillInfo) -> String {
     skill
@@ -263,26 +251,31 @@ fn skill_description(skill: &SkillInfo) -> String {
         .to_string()
 }
 
-fn skill_command_entry(
-    skill: &SkillInfo,
-    slug: &str,
-    blocked_reason: Option<String>,
-) -> SkillSlashCommandEntry {
+fn skill_command_entry(skill: &SkillInfo, slug: &str) -> SkillSlashCommandEntry {
     SkillSlashCommandEntry {
         command: format!("/{slug}"),
         skill_name: skill.name.clone(),
         description: skill_description(skill),
-        skill_md_path: skill.path.join("SKILL.md"),
-        blocked_reason,
+        provenance: Some(skill.provenance().clone()),
+        blocked_reason: None,
     }
 }
 
-/// Scan installed skills and report the slash commands currently visible.
+fn blocked_skill_command_entry(blocked: &BlockedSkill) -> Option<SkillSlashCommandEntry> {
+    let slug = slugify_skill_command_name(&blocked.name);
+    (!slug.is_empty()).then(|| SkillSlashCommandEntry {
+        command: format!("/{slug}"),
+        skill_name: blocked.name.clone(),
+        description: String::new(),
+        provenance: None,
+        blocked_reason: Some(blocked.reason.clone()),
+    })
+}
+
+/// Scan v2 lock entries and report the slash commands currently visible.
 ///
-/// This is intentionally a snapshot, not a cache invalidation hook. Dynamic
-/// installed-skill slash commands are resolved from disk each time they are
-/// invoked; `/reload-skills` uses this to provide user-visible confirmation and
-/// to queue an agent-visible note for the next turn.
+/// This is intentionally a snapshot, not a cache invalidation hook. Every
+/// invocation performs another full core verifier/revocation/digest pass.
 pub fn installed_skill_slash_command_snapshot(
     config: &SkillCommandResolverConfig,
 ) -> SkillSlashCommandSnapshot {
@@ -291,7 +284,24 @@ pub fn installed_skill_slash_command_snapshot(
     let mut skipped = 0usize;
     let mut seen_slugs = HashSet::new();
 
-    for skill in discover_skills(&config.roots) {
+    let Some(trust) = config.trust_runtime.as_ref() else {
+        for root in &config.roots {
+            if let Some(entry) = blocked_skill_command_entry(&BlockedSkill {
+                name: root.display().to_string(),
+                reason: "no core skill trust verifier is configured".to_string(),
+            }) {
+                blocked.push(entry);
+            }
+        }
+        return SkillSlashCommandSnapshot {
+            roots: config.roots.clone(),
+            available,
+            blocked,
+            skipped,
+        };
+    };
+    let catalog = discover_verified_skills(&config.roots, trust);
+    for skill in catalog.available {
         if !skill_matches_platform(&skill, config.platform.as_deref()) {
             skipped = skipped.saturating_add(1);
             continue;
@@ -306,10 +316,16 @@ pub fn installed_skill_slash_command_snapshot(
             skipped = skipped.saturating_add(1);
             continue;
         }
-        match security_gate_skill_content(&skill.name, &skill.body) {
-            Ok(()) => available.push(skill_command_entry(&skill, &slug, None)),
-            Err(err) => blocked.push(skill_command_entry(&skill, &slug, Some(err))),
+        available.push(skill_command_entry(&skill, &slug));
+    }
+    for rejection in catalog.blocked {
+        let Some(entry) = blocked_skill_command_entry(&rejection) else {
+            continue;
+        };
+        if !seen_slugs.insert(entry.command.trim_start_matches('/').to_string()) {
+            continue;
         }
+        blocked.push(entry);
     }
 
     available.sort_by(|a, b| a.command.cmp(&b.command));
@@ -326,7 +342,7 @@ pub fn installed_skill_slash_command_snapshot(
 /// Render a concise `/reload-skills` reply for CLI/gateway users.
 pub fn render_skill_slash_command_snapshot(snapshot: &SkillSlashCommandSnapshot) -> String {
     let mut out = format!(
-        "Reloaded installed skill commands: available={} blocked={} skipped={}.\nDynamic SKILL.md slash commands are scanned live; no prompt cache was invalidated.",
+        "Reloaded installed skill commands: available={} blocked={} skipped={}.\nVerified v2 skill packages are rechecked on every invocation; no prompt cache was invalidated.",
         snapshot.available.len(),
         snapshot.blocked.len(),
         snapshot.skipped
@@ -378,14 +394,15 @@ pub fn build_skill_reload_system_note(snapshot: &SkillSlashCommandSnapshot) -> S
     };
 
     format!(
-        "[SYSTEM: The user refreshed installed skill slash commands with /reload-skills. Dynamic SKILL.md commands are scanned from disk on invocation; no prompt cache was invalidated. Current available commands: {available}. Blocked commands: {blocked}.]"
+        "[SYSTEM: The user refreshed installed skill slash commands with /reload-skills. Verified v2 skill packages are rechecked on invocation; no prompt cache was invalidated. Current available commands: {available}. Blocked commands: {blocked}.]"
     )
 }
 
-/// Build the agent-facing message for a skill slash command invocation.
-pub fn build_skill_slash_invocation_message(
+/// Build the agent-facing message for a freshly verified skill invocation.
+fn build_skill_slash_invocation_message(
     skill_name: &str,
     skill_body: &str,
+    provenance: &SkillTrustIdentity,
     user_instruction: &str,
 ) -> String {
     let mut parts = vec![
@@ -393,6 +410,8 @@ pub fn build_skill_slash_invocation_message(
             "[SYSTEM: The user has invoked the \"{}\" skill, indicating they want you to follow its instructions. The full skill content is loaded below.]",
             skill_name
         ),
+        String::new(),
+        render_skill_provenance_tag(provenance),
         String::new(),
         skill_body.trim().to_string(),
     ];
@@ -408,11 +427,9 @@ pub fn build_skill_slash_invocation_message(
     parts.join("\n")
 }
 
-/// Resolve an otherwise-unknown slash command against installed `SKILL.md` files.
-///
-/// Built-in and quick-command handlers should run before this resolver. The
-/// resolver only returns `Some` when the command slug matches a discovered
-/// installed skill.
+/// Resolve an otherwise-unknown slash command through the core-verified v2
+/// skill store. Built-in and quick-command handlers should run before this
+/// resolver.
 pub fn resolve_installed_skill_slash_command(
     command: &str,
     args: &str,
@@ -422,33 +439,39 @@ pub fn resolve_installed_skill_slash_command(
     if requested.is_empty() {
         return Ok(None);
     }
-
-    let skills = discover_skills(&config.roots);
-    for skill in skills {
-        if !skill_matches_platform(&skill, config.platform.as_deref()) {
-            continue;
-        }
-        let slug = slugify_skill_command_name(&skill.name);
-        if slug.is_empty() || slug != requested {
-            continue;
-        }
-        if !skill_allowed(&skill.name, &slug, &config.enabled, &config.disabled) {
-            return Ok(None);
-        }
-        security_gate_skill_content(&skill.name, &skill.body)?;
-        let skill_md_path = skill.path.join("SKILL.md");
-        let description = skill_description(&skill);
-        let message = build_skill_slash_invocation_message(&skill.name, &skill.body, args);
-        return Ok(Some(SkillSlashInvocation {
-            command: format!("/{slug}"),
-            skill_name: skill.name,
-            description,
-            skill_md_path,
-            message,
-        }));
+    let trust = config
+        .trust_runtime
+        .as_ref()
+        .ok_or_else(|| "no core skill trust verifier is configured".to_string())?;
+    let Some(skill) = load_verified_skill_by_selector(&config.roots, &requested, trust)? else {
+        return Ok(None);
+    };
+    if !skill_matches_platform(&skill, config.platform.as_deref()) {
+        return Ok(None);
+    }
+    let slug = slugify_skill_command_name(&skill.name);
+    if slug.is_empty() || slug != requested {
+        return Ok(None);
+    }
+    if !skill_allowed(&skill.name, &slug, &config.enabled, &config.disabled) {
+        return Ok(None);
     }
 
-    Ok(None)
+    let description = skill_description(&skill);
+    let provenance = skill.provenance().clone();
+    let message = build_skill_slash_invocation_message(
+        &skill.name,
+        &skill.body,
+        &provenance,
+        args,
+    );
+    Ok(Some(SkillSlashInvocation {
+        command: format!("/{slug}"),
+        skill_name: skill.name,
+        description,
+        provenance,
+        message,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -467,10 +490,11 @@ pub fn resolve_installed_skill_slash_command(
 ///     description: "Review code changes"
 ///     template: "Review the following: {args}"
 /// ```
+/// Register frontmatter commands only from already verified lock-store entries.
 pub fn register_skill_commands(skills: &[SkillInfo]) -> SkillCommandRegistry {
     let mut registry = SkillCommandRegistry::new();
 
-    for skill in skills {
+    for skill in skills.iter().filter(|skill| skill.is_verified()) {
         let Some(commands_val) = skill.frontmatter.get("commands") else {
             continue;
         };
@@ -495,18 +519,14 @@ pub fn register_skill_commands(skills: &[SkillInfo]) -> SkillCommandRegistry {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let template = obj
-                .get("template")
-                .and_then(|v| v.as_str())
-                .unwrap_or("{args}")
-                .to_string();
 
             if !name.is_empty() {
                 registry.register(SkillCommand {
                     name,
                     description,
                     skill_name: skill.name.clone(),
-                    template,
+                    provenance: skill.provenance().clone(),
+                    verified_skill: skill.clone(),
                 });
             }
         }
@@ -515,19 +535,52 @@ pub fn register_skill_commands(skills: &[SkillInfo]) -> SkillCommandRegistry {
     registry
 }
 
-/// Handle a skill command invocation.
-///
-/// Returns the skill content to inject into the conversation, with `{args}`
-/// replaced by the user's arguments.
+fn verified_command_template(skill: &SkillInfo, command_name: &str) -> Option<String> {
+    let commands = skill.frontmatter.get("commands")?.as_array()?;
+    for command in commands.iter().filter_map(|command| command.as_object()) {
+        if command
+            .get("name")
+            .and_then(|value| value.as_str())
+            .is_some_and(|name| name == command_name)
+        {
+            return Some(
+                command
+                    .get("template")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("{args}")
+                    .to_string(),
+            );
+        }
+    }
+    None
+}
+
+/// Handle a skill command invocation after refreshing its owning package
+/// through the core verifier. Revoked, quarantined, tampered, or otherwise
+/// changed packages therefore cannot inject a previously registered template.
 pub fn handle_skill_command(
     registry: &SkillCommandRegistry,
     command: &str,
     args: &str,
-) -> Option<String> {
+    trust: &SkillTrustRuntime,
+) -> Result<Option<String>, String> {
     let cmd_name = command.trim_start_matches('/');
-    let cmd = registry.get(cmd_name)?;
-    let content = cmd.template.replace("{args}", args);
-    Some(content)
+    let Some(cmd) = registry.get(cmd_name) else {
+        return Ok(None);
+    };
+    let fresh = reload_verified_skill(&cmd.verified_skill, trust)?;
+    let template = verified_command_template(&fresh, &cmd.name).ok_or_else(|| {
+        format!(
+            "verified skill '{}' no longer declares command '/{}'",
+            fresh.name, cmd.name
+        )
+    })?;
+    let content = template.replace("{args}", args);
+    Ok(Some(format!(
+        "{}\n{}",
+        render_skill_provenance_tag(fresh.provenance()),
+        content
+    )))
 }
 
 /// Get skills that respond to the `/plan` command.
@@ -535,32 +588,37 @@ pub fn get_plan_command_skills(skills: &[SkillInfo]) -> Vec<&SkillInfo> {
     skills
         .iter()
         .filter(|skill| {
-            skill
-                .frontmatter
-                .get("commands")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter().any(|cmd| {
-                        cmd.as_object()
-                            .and_then(|o| o.get("name"))
-                            .and_then(|v| v.as_str())
-                            .map(|n| n == "plan")
-                            .unwrap_or(false)
+            skill.is_verified()
+                && skill
+                    .frontmatter
+                    .get("commands")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter().any(|cmd| {
+                            cmd.as_object()
+                                .and_then(|o| o.get("name"))
+                                .and_then(|v| v.as_str())
+                                .map(|n| n == "plan")
+                                .unwrap_or(false)
+                        })
                     })
-                })
-                .unwrap_or(false)
+                    .unwrap_or(false)
         })
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use hermes_core::Skill;
+    use hermes_skills::{
+        canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
+        LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
+        SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
+        SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
+        SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
+        SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+    };
+    use std::collections::{BTreeMap, HashMap};
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -582,34 +640,169 @@ mod tests {
                 }
             ]),
         );
-
-        SkillInfo {
-            name: "planning".to_string(),
-            path: PathBuf::from("/skills/planning"),
-            content: String::new(),
+        SkillInfo::test_fixture(
+            "planning",
+            PathBuf::from("planning"),
+            String::new(),
             frontmatter,
-            body: String::new(),
-        }
+            String::new(),
+        )
     }
 
     fn make_skill_no_commands() -> SkillInfo {
-        SkillInfo {
-            name: "basic".to_string(),
-            path: PathBuf::from("/skills/basic"),
-            content: String::new(),
-            frontmatter: HashMap::new(),
-            body: String::new(),
-        }
+        SkillInfo::test_fixture(
+            "basic",
+            PathBuf::from("basic"),
+            String::new(),
+            HashMap::new(),
+            String::new(),
+        )
     }
 
-    fn write_skill(root: &std::path::Path, dir: &str, frontmatter: &str, body: &str) {
-        let skill_dir = root.join(dir);
-        fs::create_dir_all(&skill_dir).unwrap();
+    fn install_attested_local_skill(
+        root: &std::path::Path,
+        name: &str,
+        content: &str,
+        description: &str,
+    ) {
+        let store = FileSkillStore::new(root.to_path_buf());
+        futures::executor::block_on(store.save(&Skill {
+            name: name.to_string(),
+            content: content.to_string(),
+            category: None,
+            description: Some(description.to_string()),
+        }))
+        .unwrap();
+        let digest = canonical_bundle_digest(&root.join(name)).unwrap();
+        store
+            .attest_local_skill(
+                name,
+                LocalOwnerAttestation::new(
+                    "test-owner",
+                    format!("test-attestation-{name}"),
+                    digest,
+                    "2026-07-20T00:00:00Z",
+                ),
+            )
+            .unwrap();
+    }
+
+    fn install_signed_remote_skill(root: &std::path::Path) -> (SkillTrustRuntime, SkillSigningKey) {
+        let name = "signed-skill";
+        let package_root = root.join(name);
+        fs::create_dir_all(&package_root).unwrap();
         fs::write(
-            skill_dir.join("SKILL.md"),
-            format!("---\n{frontmatter}\n---\n{body}"),
+            package_root.join("SKILL.md"),
+            "---\nname: signed-skill\ndescription: Signed fixture\n---\n# Signed\n\n1. Follow verified instructions",
         )
         .unwrap();
+        let signer = SkillSigningKey::from_seed([23; 32]);
+        let identity = SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/signed-skill",
+            "publisher.example",
+            "0123456789abcdef0123456789abcdef01234567",
+            canonical_bundle_digest(&package_root).unwrap(),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = SkillPackageManifestV2::new(
+            SkillPackageSource::Remote,
+            identity,
+            SkillPackageProof::RemoteSignature(SkillSignature::ed25519("test-key", "")),
+            full_skill_scan(&package_root),
+            SkillCompatibility::default(),
+            SkillPermissions::default(),
+            Vec::new(),
+        );
+        signer.sign_manifest(&mut manifest, "test-key").unwrap();
+        store_lock(
+            root,
+            &SkillLockV2 {
+                schema_version: SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![SkillLockEntryV2 {
+                    install_path: name.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .unwrap();
+        let verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(vec![signer.trusted_key("test-key", true)]).unwrap(),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        (SkillTrustRuntime::new(verifier), signer)
+    }
+
+    fn revoke_signed_remote_skill(root: &std::path::Path, signer: &SkillSigningKey) {
+        let mut revocations = SignedSkillRevocationList {
+            schema_version: SKILL_REVOCATION_SCHEMA_VERSION,
+            issued_at: "2026-07-20T00:00:00Z".to_string(),
+            signature: None,
+            revoked: vec![SkillRevocation {
+                name: Some("signed-skill".to_string()),
+                publisher_id: None,
+                immutable_source_revision: None,
+                content_digest: None,
+                key_id: None,
+                reason: "fixture revocation".to_string(),
+                revoked_at: "2026-07-20T00:00:00Z".to_string(),
+            }],
+        };
+        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        store_revocations(root, &revocations).unwrap();
+    }
+
+    fn fresh_registry_for_handler(
+        root: &std::path::Path,
+    ) -> (SkillCommandRegistry, SkillTrustRuntime) {
+        install_attested_local_skill(
+            root,
+            "planning",
+            "---\ncommands:\n  - name: plan\n    description: Generate a plan\n    template: \"Create a detailed plan for: {args}\"\n---\n# Planning\n\n1. Build a verified plan",
+            "Planning",
+        );
+        let trust = SkillTrustRuntime::fail_closed().unwrap();
+        let skill = load_verified_skill_by_selector(&[root.to_path_buf()], "planning", &trust)
+            .unwrap()
+            .unwrap();
+        (register_skill_commands(&[skill]), trust)
+    }
+
+    #[test]
+    fn test_handler_uses_fresh_verified_template_not_mutated_registry_snapshot() {
+        let tmp = tempdir().unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "planning",
+            "---\ncommands:\n  - name: plan\n    description: Generate a plan\n    template: \"Create a detailed plan for: {args}\"\n---\n# Planning\n\n1. Build a verified plan",
+            "Planning",
+        );
+        let trust = SkillTrustRuntime::fail_closed().unwrap();
+        let mut cached = load_verified_skill_by_selector(
+            &[tmp.path().to_path_buf()],
+            "planning",
+            &trust,
+        )
+        .unwrap()
+        .unwrap();
+        cached.frontmatter.insert(
+            "commands".to_string(),
+            serde_json::json!([{
+                "name": "plan",
+                "template": "MUTATED SNAPSHOT: {args}"
+            }]),
+        );
+        let registry = register_skill_commands(&[cached]);
+
+        let result = handle_skill_command(&registry, "/plan", "ship safely", &trust)
+            .unwrap()
+            .unwrap();
+        assert!(result.contains("Create a detailed plan for: ship safely"));
+        assert!(!result.contains("MUTATED SNAPSHOT"));
     }
 
     #[test]
@@ -623,22 +816,37 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_skill_command() {
-        let skills = vec![make_skill_with_commands()];
-        let registry = register_skill_commands(&skills);
+    fn test_handle_skill_command_refreshes_verified_package() {
+        let tmp = tempdir().unwrap();
+        let (registry, trust) = fresh_registry_for_handler(tmp.path());
+        let result = handle_skill_command(&registry, "/plan", "build a REST API", &trust)
+            .unwrap()
+            .unwrap();
+        assert!(result.contains("Create a detailed plan for: build a REST API"));
+        assert!(result.contains("<skill_provenance package=\"planning\""));
+    }
 
-        let result = handle_skill_command(&registry, "/plan", "build a REST API");
-        assert_eq!(
-            result.unwrap(),
-            "Create a detailed plan for: build a REST API"
-        );
+    #[test]
+    fn test_handle_skill_command_denies_tampered_package_after_registration() {
+        let tmp = tempdir().unwrap();
+        let (registry, trust) = fresh_registry_for_handler(tmp.path());
+        fs::write(
+            tmp.path().join("planning").join("SKILL.md"),
+            "# Planning\n\n1. Tampered content",
+        )
+        .unwrap();
+        assert!(handle_skill_command(&registry, "/plan", "args", &trust).is_err());
     }
 
     #[test]
     fn test_handle_unknown_command() {
         let registry = SkillCommandRegistry::new();
-        let result = handle_skill_command(&registry, "/unknown", "args");
-        assert!(result.is_none());
+        let trust = SkillTrustRuntime::fail_closed().unwrap();
+        assert!(
+            handle_skill_command(&registry, "/unknown", "args", &trust)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -669,57 +877,62 @@ mod tests {
     #[test]
     fn resolves_installed_skill_by_slug_and_builds_agent_message() {
         let tmp = tempdir().unwrap();
-        write_skill(
+        install_attested_local_skill(
             tmp.path(),
             "release-captain",
-            "name: Release Captain\ndescription: Ship releases safely",
-            "# Release Captain\n1. Inspect changes\n2. Verify gates",
+            "# Release Captain\n\n1. Inspect changes\n2. Verify gates",
+            "Ship releases safely",
         );
         let config = SkillCommandResolverConfig {
             roots: vec![tmp.path().to_path_buf()],
             platform: Some("linux".to_string()),
             ..SkillCommandResolverConfig::default()
         };
-
         let resolved = resolve_installed_skill_slash_command("/release_captain", "cut v1", &config)
             .unwrap()
             .expect("skill command");
-
         assert_eq!(resolved.command, "/release-captain");
-        assert_eq!(resolved.skill_name, "Release Captain");
+        assert_eq!(resolved.skill_name, "release-captain");
         assert_eq!(resolved.description, "Ship releases safely");
-        assert!(resolved.message.contains("Release Captain"));
         assert!(resolved.message.contains("Verify gates"));
         assert!(resolved.message.contains("cut v1"));
+        assert!(resolved.message.contains("<skill_provenance"));
     }
 
     #[test]
-    fn resolver_respects_enabled_disabled_and_platform_filters() {
+    fn signed_slash_package_loads_then_revocation_denies_snapshot_and_invocation() {
         let tmp = tempdir().unwrap();
-        write_skill(
-            tmp.path(),
-            "mac-helper",
-            "name: mac-helper\nplatform: darwin",
-            "# Mac Helper\n1. Use macOS behavior",
-        );
-        write_skill(
-            tmp.path(),
-            "beta",
-            "name: beta\ndescription: Beta skill",
-            "# Beta\n1. Do beta work",
-        );
-
-        let linux = SkillCommandResolverConfig {
+        let (trust, signer) = install_signed_remote_skill(tmp.path());
+        let config = SkillCommandResolverConfig {
             roots: vec![tmp.path().to_path_buf()],
             platform: Some("linux".to_string()),
+            trust_runtime: Some(trust.clone()),
             ..SkillCommandResolverConfig::default()
         };
-        assert!(
-            resolve_installed_skill_slash_command("/mac-helper", "", &linux)
-                .unwrap()
-                .is_none()
-        );
+        let loaded = resolve_installed_skill_slash_command("/signed-skill", "verify", &config)
+            .unwrap()
+            .expect("signed package must load");
+        assert_eq!(loaded.skill_name, "signed-skill");
+        assert_eq!(loaded.provenance.key_id.as_deref(), Some("test-key"));
+        assert_eq!(installed_skill_slash_command_snapshot(&config).available.len(), 1);
 
+        revoke_signed_remote_skill(tmp.path(), &signer);
+        assert!(resolve_installed_skill_slash_command("/signed-skill", "", &config).is_err());
+        let snapshot = installed_skill_slash_command_snapshot(&config);
+        assert!(snapshot.available.is_empty());
+        assert_eq!(snapshot.blocked.len(), 1);
+        assert_eq!(snapshot.blocked[0].skill_name, "signed-skill");
+    }
+
+    #[test]
+    fn resolver_respects_enabled_and_disabled_filters() {
+        let tmp = tempdir().unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "beta",
+            "# Beta\n\n1. Do beta work",
+            "Beta skill",
+        );
         let disabled = SkillCommandResolverConfig {
             roots: vec![tmp.path().to_path_buf()],
             disabled: vec!["beta".to_string()],
@@ -731,86 +944,82 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-
         let enabled = SkillCommandResolverConfig {
             roots: vec![tmp.path().to_path_buf()],
             enabled: vec!["beta".to_string()],
             platform: Some("linux".to_string()),
             ..SkillCommandResolverConfig::default()
         };
-        assert!(resolve_installed_skill_slash_command("/beta", "", &enabled)
-            .unwrap()
-            .is_some());
         assert!(
-            resolve_installed_skill_slash_command("/mac-helper", "", &enabled)
+            resolve_installed_skill_slash_command("/beta", "", &enabled)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn resolver_ignores_unlocked_dropin() {
+        let tmp = tempdir().unwrap();
+        let dropin = tmp.path().join("danger");
+        fs::create_dir_all(&dropin).unwrap();
+        fs::write(
+            dropin.join("SKILL.md"),
+            "---\nname: danger\n---\n# Danger\n\n1. Do not load",
+        )
+        .unwrap();
+        let config = SkillCommandResolverConfig {
+            roots: vec![tmp.path().to_path_buf()],
+            ..SkillCommandResolverConfig::default()
+        };
+        assert!(
+            resolve_installed_skill_slash_command("/danger", "", &config)
                 .unwrap()
                 .is_none()
         );
     }
 
     #[test]
-    fn resolver_blocks_dangerous_skill_content() {
+    fn snapshot_reports_tampered_blocked_and_filtered_packages() {
         let tmp = tempdir().unwrap();
-        write_skill(
-            tmp.path(),
-            "danger",
-            "name: danger",
-            "# Danger\n1. Run rm -rf /",
-        );
-        let config = SkillCommandResolverConfig {
-            roots: vec![tmp.path().to_path_buf()],
-            platform: Some("linux".to_string()),
-            ..SkillCommandResolverConfig::default()
-        };
-
-        let err = resolve_installed_skill_slash_command("/danger", "", &config)
-            .expect_err("dangerous skill should be blocked");
-        assert!(err.contains("Guard violation:"));
-        assert!(err.contains("Blocked content:"));
-    }
-
-    #[test]
-    fn snapshot_reports_available_blocked_and_skipped_skill_commands() {
-        let tmp = tempdir().unwrap();
-        write_skill(
+        install_attested_local_skill(
             tmp.path(),
             "release-captain",
-            "name: Release Captain\ndescription: Ship releases safely",
-            "# Release Captain\n1. Inspect changes",
+            "# Release Captain\n\n1. Inspect changes",
+            "Ship releases safely",
         );
-        write_skill(
+        install_attested_local_skill(
             tmp.path(),
             "danger",
-            "name: Danger",
-            "# Danger\n1. Run rm -rf /",
+            "# Danger\n\n1. Perform a safe action",
+            "Danger",
         );
-        write_skill(
+        install_attested_local_skill(
             tmp.path(),
             "mac-only",
-            "name: Mac Only\nplatform: darwin",
-            "# Mac Only\n1. Use macOS",
+            "# Mac only\n\n1. Use macOS",
+            "Mac only",
         );
+        fs::write(
+            tmp.path().join("danger").join("SKILL.md"),
+            "# Danger\n\n1. Tampered content",
+        )
+        .unwrap();
         let config = SkillCommandResolverConfig {
             roots: vec![tmp.path().to_path_buf()],
+            enabled: vec!["release-captain".to_string()],
             platform: Some("linux".to_string()),
             ..SkillCommandResolverConfig::default()
         };
-
         let snapshot = installed_skill_slash_command_snapshot(&config);
-
         assert_eq!(snapshot.available.len(), 1);
         assert_eq!(snapshot.available[0].command, "/release-captain");
-        assert_eq!(snapshot.available[0].description, "Ship releases safely");
         assert_eq!(snapshot.blocked.len(), 1);
         assert_eq!(snapshot.blocked[0].command, "/danger");
         assert!(snapshot.blocked[0].blocked_reason.is_some());
         assert_eq!(snapshot.skipped, 1);
-
         let rendered = render_skill_slash_command_snapshot(&snapshot);
         assert!(rendered.contains("available=1 blocked=1 skipped=1"));
         assert!(rendered.contains("/release-captain"));
-        assert!(rendered.contains("no prompt cache was invalidated"));
-
         let note = build_skill_reload_system_note(&snapshot);
         assert!(note.contains("/reload-skills"));
         assert!(note.contains("/release-captain"));

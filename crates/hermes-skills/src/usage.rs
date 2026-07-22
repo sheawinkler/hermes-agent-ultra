@@ -273,71 +273,31 @@ fn bundled_skill_names(skills_dir: &Path) -> BTreeSet<String> {
     names
 }
 
-#[derive(Debug, Deserialize)]
-struct HubLock {
-    #[serde(default)]
-    installed: HubInstalledCollection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum HubInstalledCollection {
-    Vec(Vec<HubInstalledEntry>),
-    Map(BTreeMap<String, HubInstalledEntry>),
-}
-
-impl Default for HubInstalledCollection {
-    fn default() -> Self {
-        Self::Vec(Vec::new())
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct HubInstalledEntry {
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    install_path: String,
-    #[serde(flatten)]
-    _rest: BTreeMap<String, Value>,
-}
-
 fn hub_installed_names(skills_dir: &Path) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    let Ok(raw) = fs::read_to_string(skills_dir.join(".hub").join("lock.json")) else {
-        return names;
+    let Ok(crate::SkillLockLoad::V2(lock)) = crate::load_lock_for_migration(skills_dir) else {
+        // A missing, malformed, or legacy lock is never a provenance source.
+        return BTreeSet::new();
     };
-    let Ok(lock) = serde_json::from_str::<HubLock>(&raw) else {
-        return names;
-    };
-    let entries: Vec<(Option<String>, HubInstalledEntry)> = match lock.installed {
-        HubInstalledCollection::Vec(entries) => {
-            entries.into_iter().map(|entry| (None, entry)).collect()
-        }
-        HubInstalledCollection::Map(entries) => entries
-            .into_iter()
-            .map(|(name, entry)| (Some(name), entry))
-            .collect(),
-    };
-    for (key, entry) in entries {
-        if let Some(key) = key.filter(|v| !v.trim().is_empty()) {
-            names.insert(key);
-        }
-        if !entry.name.trim().is_empty() {
-            names.insert(entry.name.trim().to_string());
-        }
-        if !entry.install_path.trim().is_empty() {
-            let path = Path::new(entry.install_path.trim());
-            if let Some(base) = path.file_name().and_then(|v| v.to_str()) {
-                names.insert(base.to_string());
+    lock.packages
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry.manifest.source,
+                crate::SkillPackageSource::Remote | crate::SkillPackageSource::EmbeddedBuiltin
+            )
+        })
+        .flat_map(|entry| {
+            let mut names = vec![entry.manifest.identity.name];
+            if let Some(base) = Path::new(&entry.install_path)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.is_empty())
+            {
+                names.push(base.to_string());
             }
-            let skill_dir = skills_dir.join(path);
-            if skill_dir.join("SKILL.md").exists() {
-                names.insert(read_skill_name_from_dir(&skill_dir));
-            }
-        }
-    }
-    names
+            names
+        })
+        .collect()
 }
 
 pub fn is_protected_skill(skills_dir: &Path, skill_name: &str) -> bool {
@@ -510,12 +470,51 @@ mod tests {
             .map(|cat| skills_dir.join(cat).join(name))
             .unwrap_or_else(|| skills_dir.join(name));
         fs::create_dir_all(&dir).unwrap();
+
         fs::write(
             dir.join("SKILL.md"),
             format!("---\nname: {name}\ndescription: test\n---\n# body\n"),
         )
         .unwrap();
         dir
+    }
+
+    fn write_remote_lock(skills_dir: &Path, name: &str, install_path: &str) {
+        let digest = format!("sha256:{}", "0".repeat(64));
+        let identity = crate::SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/skills",
+            "publisher",
+            digest.clone(),
+            digest,
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = crate::SkillPackageManifestV2::new(
+            crate::SkillPackageSource::Remote,
+            identity,
+            crate::SkillPackageProof::RemoteSignature(crate::SkillSignature::ed25519(
+                "test-key",
+                "not-used-by-provenance-test",
+            )),
+            crate::SkillScanResultV2::clean(),
+            crate::SkillCompatibility::default(),
+            crate::SkillPermissions::default(),
+            Vec::new(),
+        );
+        manifest.refresh_manifest_digest().unwrap();
+        crate::store_lock(
+            skills_dir,
+            &crate::SkillLockV2 {
+                schema_version: crate::SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![crate::SkillLockEntryV2 {
+                    install_path: install_path.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -561,13 +560,8 @@ mod tests {
     fn protected_skills_do_not_get_usage_records() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
-        fs::create_dir_all(skills.join(".hub")).unwrap();
         fs::write(skills.join(".bundled_manifest"), "bundled:abc\n").unwrap();
-        fs::write(
-            skills.join(".hub").join("lock.json"),
-            r#"{"installed":[{"name":"hubbed","install_path":"hubbed"}]}"#,
-        )
-        .unwrap();
+        write_remote_lock(skills, "hubbed", "hubbed");
 
         bump_view(skills, "bundled").unwrap();
         bump_use(skills, "hubbed").unwrap();
@@ -589,14 +583,9 @@ mod tests {
             "---\nname: get-note-display\n---\n# body\n",
         )
         .unwrap();
-        fs::create_dir_all(skills.join(".hub")).unwrap();
-        fs::write(
-            skills.join(".hub").join("lock.json"),
-            r#"{"installed":{"getnote":{"source":"taps/main","install_path":"productivity/getnote"}}}"#,
-        )
-        .unwrap();
+        write_remote_lock(skills, "getnote", "productivity/getnote");
         assert!(is_protected_skill(skills, "getnote"));
-        assert!(is_protected_skill(skills, "get-note-display"));
+        assert!(!is_protected_skill(skills, "get-note-display"));
     }
 
     #[test]

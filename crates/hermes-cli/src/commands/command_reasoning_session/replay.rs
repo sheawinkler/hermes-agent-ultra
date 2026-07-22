@@ -9,7 +9,7 @@ fn replay_enabled_runtime() -> bool {
         })
 }
 
-fn replay_log_path_for_session(session_id: &str) -> PathBuf {
+fn replay_log_path_for_session(state_root: &Path, session_id: &str) -> PathBuf {
     let sid = if session_id.trim().is_empty() {
         "session".to_string()
     } else {
@@ -24,16 +24,142 @@ fn replay_log_path_for_session(session_id: &str) -> PathBuf {
             })
             .collect::<String>()
     };
-    hermes_config::hermes_home()
+    state_root
         .join("logs")
         .join("replay")
         .join(format!("{sid}.jsonl"))
 }
 
+fn authoritative_run_export_dir(state_root: &Path) -> PathBuf {
+    state_root.join("run-record-v1").join("exports")
+}
+
+
+/// Read the immutable export once, then let core verify and retain the same
+/// canonical bytes in the typed replay plan. Callers must never re-read `path`
+/// to reconstruct an already verified plan.
+fn read_verified_run_replay_plan(
+    path: &Path,
+) -> hermes_agent::run_export::RunExportResult<
+    hermes_agent::deterministic_replay::VerifiedRunReplayPlan,
+> {
+    let bytes = std::fs::read(path).map_err(|source| hermes_agent::run_export::RunExportError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    hermes_agent::run_export::verify_run_export_replay_plan_bytes(&bytes)
+}
+
+fn render_replay_evidence_count(
+    count: hermes_agent::deterministic_replay::ReplayEvidenceCount,
+) -> String {
+    match count {
+        hermes_agent::deterministic_replay::ReplayEvidenceCount::Available(value) => {
+            value.to_string()
+        }
+        hermes_agent::deterministic_replay::ReplayEvidenceCount::Unavailable => {
+            "unavailable".to_string()
+        }
+    }
+}
+
+fn render_verified_run_reconstruction(
+    path: &Path,
+    plan: &hermes_agent::deterministic_replay::VerifiedRunReplayPlan,
+    report: &hermes_agent::deterministic_replay::DeterministicReplayReport,
+) -> String {
+    let summary = plan.summary();
+    let exact = report.exact();
+    let artifact_availability = if report.artifact_count() == 0 {
+        "not_required"
+    } else {
+        "verified"
+    };
+    let counters = report.counters();
+    let mut output = format!(
+        "Authoritative verified run reconstruction\nintegrity_verified=true\nintegrity_authenticated=false\nevidence_complete={}\neffects_reconstructed_not_executed=true\nexact={}\nreconstruction_fidelity={}\nrun_id={}\npath={}\ndigest={}\nevent_count={}\nevent_sequence=1..={}\nartifact_count={}\nartifact_availability={}\ntool_call_count={}\nfailure_count={}\nterminal_reason={}\nfinal_outcome={}",
+        summary.evidence_complete(),
+        exact,
+        report.fidelity().as_str(),
+        report.run_id(),
+        path.display(),
+        report.export_digest(),
+        report.event_count(),
+        report.event_count(),
+        report.artifact_count(),
+        artifact_availability,
+        render_replay_evidence_count(counters.tool_call_count),
+        render_replay_evidence_count(counters.failure_count),
+        report.terminal_reason().as_str(),
+        report.final_outcome(),
+    );
+    for artifact in report.artifacts() {
+        let _ = writeln!(
+            output,
+            "\nartifact_event_id={}\nartifact_digest={}\nartifact_availability={}\nartifact_fidelity={}",
+            artifact.event_id,
+            artifact.envelope_digest,
+            artifact.availability.as_str(),
+            artifact.fidelity.as_str(),
+        );
+    }
+    output
+}
+
+#[derive(Clone, Copy)]
+enum RunExportSelection {
+    Latest,
+    All,
+    Exact(hermes_agent::run_ledger::RunId),
+}
+
+fn parse_run_export_selection(raw: &str) -> Result<RunExportSelection, AgentError> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("latest") {
+        return Ok(RunExportSelection::Latest);
+    }
+    if raw.eq_ignore_ascii_case("all") {
+        return Ok(RunExportSelection::All);
+    }
+    raw.parse::<hermes_agent::run_ledger::RunId>()
+        .map(RunExportSelection::Exact)
+        .map_err(|_| {
+            AgentError::Config(
+                "run export selector must be latest, all, or an exact run ID".to_string(),
+            )
+        })
+}
+
+fn selected_run_ids_for_export(
+    app: &App,
+    selection: RunExportSelection,
+) -> Result<Vec<hermes_agent::run_ledger::RunId>, AgentError> {
+    match selection {
+        RunExportSelection::Latest => app
+            .run_runtime
+            .session_runs(
+                &app.session_id,
+                hermes_agent::SessionRunSelection::Latest,
+            )
+            .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
+            .map_err(|error| AgentError::Config(format!("could not inspect current session runs: {error}"))),
+        RunExportSelection::All => app
+            .run_runtime
+            .session_runs(&app.session_id, hermes_agent::SessionRunSelection::All)
+            .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
+            .map_err(|error| AgentError::Config(format!("could not inspect current session runs: {error}"))),
+        RunExportSelection::Exact(run_id) => app
+            .run_runtime
+            .inspect_run(run_id)
+            .map(|_| vec![run_id])
+            .map_err(|error| AgentError::Config(format!("could not inspect run {run_id}: {error}"))),
+    }
+}
+
 fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentError> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         AgentError::Io(format!(
-            "Failed to read replay log {}: {}",
+            "Failed to read legacy replay diagnostic log {}: {}",
             path.display(),
             e
         ))
@@ -47,9 +173,9 @@ fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentEr
         .rev()
         .collect();
     if lines.is_empty() {
-        return Ok("Replay log is empty.".to_string());
+        return Ok("Legacy replay diagnostic (unverified): log is empty.".to_string());
     }
-    let mut out = String::new();
+    let mut out = String::from("Legacy replay diagnostic (unverified)\n");
     for line in lines {
         let value: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
@@ -96,7 +222,7 @@ fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentEr
 fn replay_entries(path: &Path, limit: usize) -> Result<Vec<serde_json::Value>, AgentError> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         AgentError::Io(format!(
-            "Failed to read replay log {}: {}",
+            "Failed to read legacy replay diagnostic log {}: {}",
             path.display(),
             e
         ))
@@ -132,13 +258,17 @@ fn render_replay_trace_focus(
         .collect();
     if filtered.is_empty() {
         return Ok(format!(
-            "No replay events found for trace '{}' in {}.",
+            "Legacy replay diagnostic (unverified): no events found for trace '{}' in {}.",
             trace_filter,
             path.display()
         ));
     }
     let mut out = String::new();
-    let _ = writeln!(out, "Replay trace focus: {}", trace_filter);
+    let _ = writeln!(
+        out,
+        "Legacy replay trace focus (diagnostic/unverified): {}",
+        trace_filter
+    );
     let _ = writeln!(out, "events: {}", filtered.len());
     let _ = writeln!(out, "path: {}", path.display());
     let _ = writeln!(out);
@@ -165,11 +295,12 @@ fn render_replay_trace_focus(
 fn render_replay_trace_graph(path: &Path, limit: usize) -> Result<String, AgentError> {
     let rows = replay_entries(path, limit)?;
     if rows.is_empty() {
-        return Ok("Replay graph: no entries in current window.".to_string());
+        return Ok("Legacy replay graph (diagnostic/unverified): no entries in current window."
+            .to_string());
     }
     let mut out = String::new();
-    let _ = writeln!(out, "Replay lineage graph");
-    let _ = writeln!(out, "--------------------");
+    let _ = writeln!(out, "Legacy replay lineage graph (diagnostic/unverified)");
+    let _ = writeln!(out, "---------------------------------------------------");
     let _ = writeln!(out, "window={} path={}", rows.len(), path.display());
     for row in rows {
         let seq = row
@@ -202,10 +333,10 @@ fn render_replay_trace_graph(path: &Path, limit: usize) -> Result<String, AgentE
     Ok(out.trim_end().to_string())
 }
 
-fn replay_trace_integrity(path: &Path) -> Result<(usize, usize, usize), AgentError> {
+fn legacy_replay_trace_diagnostic(path: &Path) -> Result<(usize, usize, usize), AgentError> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         AgentError::Io(format!(
-            "Failed to read replay log {}: {}",
+            "Failed to read legacy replay diagnostic log {}: {}",
             path.display(),
             e
         ))
@@ -243,78 +374,44 @@ fn replay_trace_integrity(path: &Path) -> Result<(usize, usize, usize), AgentErr
     Ok((entries, parse_errors, chain_breaks))
 }
 
-fn export_replay_trace_json(
-    replay_path: &Path,
-    limit: usize,
-    output_path: &Path,
-) -> Result<usize, AgentError> {
-    let raw = std::fs::read_to_string(replay_path).map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to read replay log {}: {}",
-            replay_path.display(),
-            e
-        ))
-    })?;
-    let rows: Vec<serde_json::Value> = raw
-        .lines()
-        .rev()
-        .take(limit.max(1))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-
-    let payload = serde_json::json!({
-        "generated_at": chrono::Utc::now().to_rfc3339(),
-        "source_replay": replay_path.display().to_string(),
-        "rows": rows,
-    });
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AgentError::Io(format!(
-                "Failed to create replay export directory {}: {}",
-                parent.display(),
-                e
-            ))
-        })?;
-    }
-    std::fs::write(
-        output_path,
-        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string()),
-    )
-    .map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to write replay export {}: {}",
-            output_path.display(),
-            e
-        ))
-    })?;
-    Ok(payload["rows"].as_array().map(|arr| arr.len()).unwrap_or(0))
-}
 
 fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args
         .first()
         .is_some_and(|sub| sub.eq_ignore_ascii_case("trace"))
     {
-        let replay_path = replay_log_path_for_session(&app.session_id);
+        let replay_path = replay_log_path_for_session(&app.state_root, &app.session_id);
         let sub = args.get(1).map(|s| s.trim().to_ascii_lowercase());
         match sub.as_deref() {
             None | Some("status") => {
+                let session_runs = app
+                    .run_runtime
+                    .session_runs(&app.session_id, hermes_agent::SessionRunSelection::All)
+                    .map(|runs| runs.len().to_string())
+                    .unwrap_or_else(|error| format!("unavailable ({error})"));
+                let export_dir = authoritative_run_export_dir(&app.state_root);
                 emit_command_output(
                     app,
                     format!(
-                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|verify|export [N] [PATH]|path]",
+                        "Legacy replay diagnostics (JSONL / unverified): {}{}\nSession: {}\nLegacy JSONL path: {}\nAuthoritative complete run export directory: {}\nSession ledger runs: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|legacy-check|verify <PATH>|replay <PATH>|export [latest|all|RUN_ID]|path]",
                         if replay_enabled_runtime() { "ON" } else { "OFF" },
-                        if replay_path.exists() { "" } else { " (no log yet)" },
+                        if replay_path.exists() { "" } else { " (no legacy log yet)" },
                         app.session_id,
-                        replay_path.display()
+                        replay_path.display(),
+                        export_dir.display(),
+                        session_runs
                     ),
                 );
             }
             Some("path") => {
-                emit_command_output(app, format!("Replay path: {}", replay_path.display()));
+                emit_command_output(
+                    app,
+                    format!(
+                        "Legacy replay diagnostic path (unverified): {}\nAuthoritative complete run export directory: {}",
+                        replay_path.display(),
+                        authoritative_run_export_dir(&app.state_root).display()
+                    ),
+                );
             }
             Some("tail") => {
                 let limit = args
@@ -326,7 +423,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                     emit_command_output(
                         app,
                         format!(
-                            "Replay log not found for current session yet: {}",
+                            "Legacy replay diagnostic log not found for current session yet: {}",
                             replay_path.display()
                         ),
                     );
@@ -349,7 +446,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                     emit_command_output(
                         app,
                         format!(
-                            "Replay log not found for current session yet: {}",
+                            "Legacy replay diagnostic log not found for current session yet: {}",
                             replay_path.display()
                         ),
                     );
@@ -368,7 +465,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                     emit_command_output(
                         app,
                         format!(
-                            "Replay log not found for current session yet: {}",
+                            "Legacy replay diagnostic log not found for current session yet: {}",
                             replay_path.display()
                         ),
                     );
@@ -378,23 +475,176 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 emit_command_output(app, rendered);
             }
             Some("verify") => {
+                if args.len() != 3 {
+                    emit_command_output(app, "Usage: /raw trace verify <PATH>");
+                    return Ok(CommandResult::Handled);
+                }
+                let raw_path = args[2];
+                if Path::new(raw_path)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
+                {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Legacy v0 JSONL replay is refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\nlegacy_v0_unverified_non_executable=true\npath={}",
+                            raw_path
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                match verify_canonical_run_export(app, raw_path) {
+                    Ok((export_path, verified)) => {
+                        let evidence_complete = verified.evidence_complete();
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Authoritative run export integrity summary\nintegrity_verified=true\nintegrity_authenticated=false\nevidence_complete={}\nlegacy_delivery_result_count={}\nrun_id={}\npath={}\ndigest={}\nevent_count={}\noutbox_count={}",
+                                evidence_complete,
+                                verified.legacy_delivery_result_count,
+                                verified.run_id,
+                                export_path.display(),
+                                verified.digest,
+                                verified.event_count,
+                                verified.outbox_count
+                            ),
+                        );
+                    }
+                    Err(error) => emit_command_output(
+                        app,
+                        format!(
+                            "Authoritative run export integrity summary rejected\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\npath={}\nreason={}",
+                            raw_path, error
+                        ),
+                    ),
+                }
+            }
+            Some("replay") => {
+                if args.len() != 3 {
+                    emit_command_output(app, "Usage: /raw trace replay <PATH>");
+                    return Ok(CommandResult::Handled);
+                }
+                let raw_path = args[2];
+                if Path::new(raw_path)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
+                {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Legacy v0 JSONL replay is refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\nlegacy_v0_unverified_non_executable=true\neffects_reconstructed_not_executed=false\nexact=false\npath={}",
+                            raw_path
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+
+                let export_path = match canonical_authoritative_run_export_path(app, raw_path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Authoritative run reconstruction refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\neffects_reconstructed_not_executed=false\nexact=false\npath={}\nreason={}",
+                                raw_path, error
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                };
+                let plan = match read_verified_run_replay_plan(&export_path) {
+                    Ok(plan) => plan,
+                    Err(hermes_agent::run_export::RunExportError::LegacyV0NotVerifiable) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Legacy v0 JSONL replay is refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\nlegacy_v0_unverified_non_executable=true\neffects_reconstructed_not_executed=false\nexact=false\npath={}",
+                                export_path.display()
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                    Err(error) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Authoritative run reconstruction refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\neffects_reconstructed_not_executed=false\nexact=false\npath={}\nreason={}",
+                                export_path.display(),
+                                error
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                };
+                let expected_filename = format!("{}.run.json", plan.summary().run_id);
+                if export_path.file_name().and_then(|name| name.to_str())
+                    != Some(expected_filename.as_str())
+                {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Authoritative run reconstruction refused\nintegrity_verified=false\nintegrity_authenticated=false\nevidence_complete=false\neffects_reconstructed_not_executed=false\nexact=false\npath={}\nreason=canonical export filename does not bind verified run ID {}",
+                            export_path.display(),
+                            plan.summary().run_id
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+
+                let reader = match app.run_runtime.bind_verified_replay_plan(&plan) {
+                    Ok(reader) => reader,
+                    Err(error) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Authoritative run reconstruction refused\nintegrity_verified=true\nintegrity_authenticated=false\nevidence_complete={}\neffects_reconstructed_not_executed=false\nexact=false\npath={}\nreason={}",
+                                plan.summary().evidence_complete(),
+                                export_path.display(),
+                                error
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                };
+                let reconstruction =
+                    hermes_agent::deterministic_replay::reconstruct_verified_run(&plan, Some(&reader));
+                match reconstruction {
+                    Ok(report) => {
+                        emit_command_output(
+                            app,
+                            render_verified_run_reconstruction(&export_path, &plan, &report),
+                        );
+                    }
+                    Err(error) => emit_command_output(
+                        app,
+                        format!(
+                            "Authoritative run reconstruction refused\nintegrity_verified=true\nintegrity_authenticated=false\nevidence_complete={}\neffects_reconstructed_not_executed=false\nexact=false\npath={}\nreason={}",
+                            plan.summary().evidence_complete(),
+                            export_path.display(),
+                            error
+                        ),
+                    ),
+                }
+            }
+            Some("legacy-check") => {
                 if !replay_path.exists() {
                     emit_command_output(
                         app,
                         format!(
-                            "Replay log not found for current session yet: {}",
+                            "Legacy replay diagnostic log not found for current session yet: {}",
                             replay_path.display()
                         ),
                     );
                     return Ok(CommandResult::Handled);
                 }
-                let (entries, parse_errors, chain_breaks) = replay_trace_integrity(&replay_path)?;
-                let ok = parse_errors == 0 && chain_breaks == 0;
+                let (entries, parse_errors, chain_breaks) =
+                    legacy_replay_trace_diagnostic(&replay_path)?;
                 emit_command_output(
                     app,
                     format!(
-                        "Replay integrity: {}\nentries: {}\nparse_errors: {}\nchain_breaks: {}\npath: {}",
-                        if ok { "PASS" } else { "FAIL" },
+                        "Legacy JSONL replay diagnostic (unverified/non-executable)\nintegrity_verified=false\nentries={}\nparse_errors={}\nchain_breaks={}\npath={}",
                         entries,
                         parse_errors,
                         chain_breaks,
@@ -403,38 +653,95 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 );
             }
             Some("export") => {
-                let limit = args
-                    .get(2)
-                    .and_then(|raw| raw.trim().parse::<usize>().ok())
-                    .unwrap_or(100)
-                    .clamp(1, 1000);
-                let output_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| {
-                    hermes_config::hermes_home()
-                        .join("logs")
-                        .join("replay")
-                        .join("exports")
-                        .join(format!("{}-tail.json", app.session_id))
-                });
-                if !replay_path.exists() {
+                if args.len() > 3 {
+                    emit_command_output(
+                        app,
+                        "Usage: /raw trace export [latest|all|RUN_ID]",
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let selector = args.get(2).copied().unwrap_or("latest");
+                let selection = match parse_run_export_selection(selector) {
+                    Ok(selection) => selection,
+                    Err(error) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Run export selector rejected: {}\nUsage: /raw trace export [latest|all|RUN_ID]",
+                                error
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                };
+                let scope = match selection {
+                    RunExportSelection::Latest | RunExportSelection::All => {
+                        "current_persisted_session"
+                    }
+                    RunExportSelection::Exact(_) => "exact_accessible_local_run",
+                };
+                let run_ids = match selected_run_ids_for_export(app, selection) {
+                    Ok(run_ids) => run_ids,
+                    Err(error) => {
+                        emit_command_output(
+                            app,
+                            format!(
+                                "Authoritative run export selection failed\nselector={}\nscope={}\nreason={}",
+                                selector, scope, error
+                            ),
+                        );
+                        return Ok(CommandResult::Handled);
+                    }
+                };
+                if run_ids.is_empty() {
                     emit_command_output(
                         app,
                         format!(
-                            "Replay log not found for current session yet: {}",
-                            replay_path.display()
+                            "No ledger runs found for the current persisted session.\nselector={}\nscope={}\nauthoritative_export_dir={}",
+                            selector,
+                            scope,
+                            authoritative_run_export_dir(&app.state_root).display()
                         ),
                     );
                     return Ok(CommandResult::Handled);
                 }
-                let written = export_replay_trace_json(&replay_path, limit, &output_path)?;
-                emit_command_output(
-                    app,
-                    format!(
-                        "Replay export written.\nrows: {}\nsource: {}\noutput: {}",
-                        written,
-                        replay_path.display(),
-                        output_path.display()
-                    ),
-                );
+
+                let mut receipts = Vec::new();
+                for run_id in run_ids {
+                    match app.run_runtime.publish_run_export(run_id) {
+                        Ok(receipt) => receipts.push(receipt),
+                        Err(error) => {
+                            let mut out =
+                                String::from("Authoritative complete run export publication incomplete\n");
+                            let _ = writeln!(out, "selector={selector}");
+                            let _ = writeln!(out, "scope={scope}");
+                            for receipt in &receipts {
+                                let _ = writeln!(out, "run_id={}", receipt.run_id);
+                                let _ = writeln!(out, "path={}", receipt.path.display());
+                                let _ = writeln!(out, "digest={}", receipt.digest);
+                                let _ =
+                                    writeln!(out, "newly_published={}", receipt.published);
+                            }
+                            let _ = writeln!(out, "publication_complete=false");
+                            let _ = writeln!(out, "failed_run_id={run_id}");
+                            let _ = writeln!(out, "reason={error}");
+                            emit_command_output(app, out.trim_end());
+                            return Ok(CommandResult::Handled);
+                        }
+                    }
+                }
+
+                let mut out = String::from("Authoritative complete run export publication\n");
+                let _ = writeln!(out, "selector={selector}");
+                let _ = writeln!(out, "scope={scope}");
+                for receipt in receipts {
+                    let _ = writeln!(out, "run_id={}", receipt.run_id);
+                    let _ = writeln!(out, "path={}", receipt.path.display());
+                    let _ = writeln!(out, "digest={}", receipt.digest);
+                    let _ = writeln!(out, "newly_published={}", receipt.published);
+                }
+                let _ = writeln!(out, "publication_complete=true");
+                emit_command_output(app, out.trim_end());
             }
             Some("on") | Some("off") | Some("toggle") => {
                 let next = match sub.as_deref().unwrap_or("status") {
@@ -447,18 +754,18 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 emit_command_output(
                     app,
                     format!(
-                        "Replay trace mode: {}.\nThis applies to new turns in the current process.",
+                        "Legacy replay trace diagnostic mode: {}.\nThis applies to new turns in the current process and remains unverified/non-executable.",
                         if next { "ON" } else { "OFF" }
                     ),
                 );
             }
             Some("help") | Some("--help") | Some("-h") => emit_command_output(
                 app,
-                "Replay trace controls:\n  /raw trace status              Show enabled state + current log path\n  /raw trace on|off              Enable or disable deterministic replay trace logs\n  /raw trace toggle              Toggle replay trace logs\n  /raw trace tail [N]            Show latest trace events with lineage hashes\n  /raw trace focus <id> [N]      Filter replay rows by trace_id\n  /raw trace graph [N]           Show lineage edges for recent rows\n  /raw trace verify              Validate replay hash-chain integrity\n  /raw trace export [N] [PATH]   Export tail events to JSON\n  /raw trace path                Show trace log file for current session",
+                "Replay trace controls:\n  /raw trace status                         Show legacy JSONL diagnostics and authoritative export directory\n  /raw trace on|off|toggle                  Control legacy JSONL diagnostics for new turns (unverified)\n  /raw trace tail [N]                       Show bounded legacy diagnostic events (unverified)\n  /raw trace focus <id> [N]                 Filter bounded legacy diagnostic rows (unverified)\n  /raw trace graph [N]                      Show bounded legacy diagnostic lineage (unverified)\n  /raw trace legacy-check                   Count legacy JSONL parse/chain issues (unverified/non-executable)\n  /raw trace verify <PATH>                  Summarize integrity/evidence for a complete authoritative run export\n  /raw trace replay <PATH>                  Reconstruct a verified run without providers, tools, or effect execution\n  /raw trace export [latest|all|RUN_ID]     Publish complete exports from current persisted session or exact accessible run\n  /raw trace path                           Show diagnostic and authoritative paths",
             ),
             _ => emit_command_output(
                 app,
-                "Usage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|verify|export [N] [PATH]|path]",
+                "Usage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|legacy-check|verify <PATH>|replay <PATH>|export [latest|all|RUN_ID]|path]",
             ),
         }
         return Ok(CommandResult::Handled);
@@ -470,7 +777,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
         emit_command_output(
             app,
             format!(
-                "RTK raw mode: {}{}\nDual logs: {}\nReplay trace: {}\nUsage: /raw [on|off|toggle|once|status|trace]",
+                "RTK raw mode: {}{}\nDual logs: {}\nLegacy replay diagnostics (unverified): {}\nUsage: /raw [on|off|toggle|once|status|trace]",
                 if state.enabled { "ON" } else { "OFF" },
                 if state.once_pending {
                     " (one-shot pending)"
@@ -487,7 +794,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
     match args[0].trim().to_ascii_lowercase().as_str() {
         "help" => emit_command_output(
             app,
-            "RTK raw controls:\n  /raw status        Show current mode + log path\n  /raw on            Disable output filtering for all tool calls\n  /raw off           Re-enable RTK output filtering\n  /raw toggle        Toggle global raw mode\n  /raw once          Raw pass-through for next tool call only\n  /raw trace ...     Deterministic replay trace controls",
+            "RTK raw controls:\n  /raw status        Show current mode + log path\n  /raw on            Disable output filtering for all tool calls\n  /raw off           Re-enable RTK output filtering\n  /raw toggle        Toggle global raw mode\n  /raw once          Raw pass-through for next tool call only\n  /raw trace ...     Legacy JSONL diagnostics (unverified) plus authoritative run export controls",
         ),
         "once" => {
             app.tool_registry.set_raw_mode_once();

@@ -18,7 +18,7 @@ What it proves:
 - verifies `hermes-agent-ultra` and `hermes-ultra`
 - verifies an existing upstream `hermes` command is not clobbered by default
 - checks setup help, auth status, memory status, provider route health,
-  systems release/status, and one-true-harness tool registry entries
+  systems release/status, and audited capability-inventory entries
 
 ## Source Tree Confidence Path
 
@@ -29,7 +29,7 @@ the repo-owned command is the artifact to trust when hosted CI is unavailable.
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} bash scripts/run-repo-ci.sh
 python3 scripts/generate-release-readiness-summary.py --repo-root . --check
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli --test e2e_sota_workflow_replay -- --nocapture
-CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli harness_command_reports_issue_backed_cockpit_and_teach_skill -- --nocapture
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli harness_command_reports_audited_incomplete_maturity --lib -- --nocapture
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli test_simulate_command_is_registered_and_completable -- --nocapture
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli test_qos_and_eval_commands_are_registered -- --nocapture
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli runtime_parity_ops -- --nocapture
@@ -40,10 +40,10 @@ CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-http dashboard
 
 | Claim | Public surface | Deterministic proof |
 | --- | --- | --- |
-| Current parity baseline is closed | release-readiness summary | `scripts/generate-release-readiness-summary.py --check` |
+| Parity readiness fails closed while provenance is pending | release-readiness summary | `scripts/generate-release-readiness-summary.py --check` |
 | Published artifacts install cleanly | release artifact smoke | `scripts/smoke-release-artifact.sh --version v0.21.3` |
 | Upstream `hermes` can coexist | installer smoke sentinel | `scripts/smoke-release-artifact.sh --version v0.21.3` |
-| One-true-harness cockpit exists | `/harness`, `harness_cockpit` | `cargo test -p hermes-cli harness_command_reports_issue_backed_cockpit_and_teach_skill` |
+| Harness maturity fails closed (`0/12/3`) | `/harness json`, `harness_cockpit` | `cargo test -p hermes-cli harness_command_reports_audited_incomplete_maturity --lib` |
 | Tool simulator exists | `/simulate`, `tool_policy_simulate` | `cargo test -p hermes-cli test_simulate_command_is_registered_and_completable` |
 | Time-travel/session replay exists | `/timetravel`, replay fixture | `cargo test -p hermes-cli --test e2e_sota_workflow_replay` |
 | Live session eval harness exists | `/ops eval run` | `cargo test -p hermes-cli native_session_eval_harness_writes_compatible_report` |

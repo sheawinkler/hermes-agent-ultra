@@ -98,7 +98,7 @@ pub fn objective_lifecycle_is_active(status: &str) -> bool {
 
 pub fn canonical_objective_behavior_mode(mode: &str) -> String {
     match mode.trim().to_ascii_lowercase().as_str() {
-        "mission" | "sigma" | "god-tier" | "god_tier" | "godtier" | "perpetual" | "continuous" => {
+        "mission" | "god-tier" | "god_tier" | "godtier" | "perpetual" | "continuous" => {
             "mission".to_string()
         }
         "strict" | "evidence" | "evidence-first" => "strict".to_string(),
@@ -115,7 +115,6 @@ fn objective_prefers_mission_mode(objective: &str) -> bool {
         "perpetual",
         "always improve",
         "continuous improvement",
-        "sigma",
         "god tier",
         "mission-driven",
         "mission driven",

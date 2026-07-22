@@ -144,9 +144,55 @@ mod tests {
         ])
         .expect("parse cli");
         let mut app = App::new(cli).await.expect("build app");
-        let (tx, _rx) = mpsc::unbounded_channel::<crate::tui::Event>();
-        app.set_stream_handle(Some(tx.into()));
+        let (tx, _rx) = mpsc::channel::<crate::tui::Event>(16);
+        app.set_stream_handle(Some(crate::tui::StreamHandle::new(tx)));
         app
+    }
+
+    fn test_run_runtime() -> (std::sync::Arc<hermes_agent::RunRuntime>, tempfile::TempDir) {
+        let state = tempdir().expect("create temporary run-runtime state");
+        let run_runtime = std::sync::Arc::new(
+            hermes_agent::RunRuntime::open_for_ephemeral_testing(state.path())
+                .expect("open ephemeral test run runtime"),
+        );
+        (run_runtime, state)
+    }
+
+    #[tokio::test]
+    async fn app_startup_carries_cli_resolved_execution_mode_after_validating_all_layers() {
+        let _lock = env_test_lock();
+        let directory = tempdir().expect("create temporary Hermes home");
+        let _home = TempHomeGuard::new(directory.path());
+        let config_dir = directory.path().join("config");
+        let profiles_dir = config_dir.join("profiles");
+        std::fs::create_dir_all(&profiles_dir).expect("create profile directory");
+        std::fs::write(config_dir.join("config.yaml"), "execution_mode: reviewed\n")
+            .expect("write config mode");
+        std::fs::write(profiles_dir.join(".active_profile"), "runtime\n")
+            .expect("write active profile");
+        std::fs::write(profiles_dir.join("runtime.yaml"), "execution_mode: manual\n")
+            .expect("write profile mode");
+        let _environment =
+            EnvVarGuard::set("HERMES_EXECUTION_MODE", "autonomous_local");
+        let cli = crate::cli::Cli::try_parse_from([
+            "hermes",
+            "-C",
+            config_dir.to_str().expect("UTF-8 config path"),
+            "--execution-mode",
+            "manual",
+            "--ignore-rules",
+        ])
+        .expect("parse CLI");
+
+        let app = App::new(cli).await.expect("build app");
+
+        assert_eq!(
+            app.agent.config.execution_mode,
+            hermes_core::ResolvedExecutionMode {
+                mode: hermes_core::ExecutionMode::Manual,
+                source: hermes_core::ExecutionModeSource::Cli,
+            }
+        );
     }
 
     fn latest_ui_assistant_text(app: &App) -> String {
@@ -164,6 +210,22 @@ mod tests {
         app.config = Arc::new(config);
     }
 
+    fn plugin_surface_row(
+        name: &str,
+        path: std::path::PathBuf,
+        source: PluginSurfaceSource,
+    ) -> PluginSurfaceEntry {
+        PluginSurfaceEntry {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            source,
+            path: Some(path),
+            status: PluginSurfaceStatus::Quarantined,
+            reason: Some("fixture".to_string()),
+        }
+    }
+
     #[tokio::test]
     async fn external_plugin_command_rejects_python_dispatch() {
         let err = handle_cli_external_plugin_subcommand(vec!["honcho".to_string()])
@@ -174,7 +236,24 @@ mod tests {
             .contains("Python plugin command dispatch is disabled"));
     }
 
+    #[tokio::test]
+    async fn raw_plugin_install_update_and_activation_are_policy_blocked() {
+        for action in ["install", "update", "enable", "disable"] {
+            let error = handle_cli_plugins(
+                Some(action.to_string()),
+                Some("untrusted-plugin".to_string()),
+            )
+            .await
+            .expect_err("raw plugin lifecycle action must be blocked");
+            assert!(
+                matches!(error, hermes_core::AgentError::PolicyBlocked(_)),
+                "{action} unexpectedly returned {error}"
+            );
+        }
+    }
+
     fn tar_gz_entry_names(path: &Path) -> Vec<String> {
+
         let file = std::fs::File::open(path).expect("open archive");
         let dec = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(dec);
@@ -187,6 +266,92 @@ mod tests {
                     .and_then(|entry| entry.path().ok().map(|path| path.to_string_lossy().into()))
             })
             .collect()
+    }
+
+    #[test]
+    fn plugin_removal_refuses_duplicate_casefolded_discovery_rows() {
+        let rows = vec![
+            plugin_surface_row(
+                "duplicate-plugin",
+                std::path::PathBuf::from("/safe/user/duplicate-plugin"),
+                PluginSurfaceSource::User,
+            ),
+            plugin_surface_row(
+                "DUPLICATE-PLUGIN",
+                std::path::PathBuf::from("/safe/project/duplicate-plugin"),
+                PluginSurfaceSource::Project,
+            ),
+        ];
+
+        let error = select_plugin_removal_target("Duplicate-Plugin", &rows)
+            .expect_err("ambiguous case-folded plugin names must not select a path");
+
+        assert!(error.contains("refusing ambiguous plugin removal"));
+        assert!(error.contains("source=user; path=/safe/user/duplicate-plugin"));
+        assert!(error.contains("source=project; path=/safe/project/duplicate-plugin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_removal_revalidates_and_refuses_a_symlink_swap() {
+        use std::os::unix::fs::symlink;
+
+        let home = tempdir().expect("home");
+        let root = home.path().join("plugins");
+        let selected_path = root.join("selected-plugin");
+        std::fs::create_dir_all(&selected_path).expect("create selected plugin");
+        let selected = PluginRemovalTarget {
+            path: selected_path.clone(),
+            source: PluginSurfaceSource::User,
+        };
+        assert_eq!(
+            revalidate_plugin_removal_target(&selected, home.path())
+                .expect("direct regular plugin directory is removable"),
+            std::fs::canonicalize(&selected_path).expect("canonical selected path")
+        );
+
+        let nested_path = root.join("nested").join("not-direct");
+        std::fs::create_dir_all(&nested_path).expect("create nested plugin path");
+        let nested = PluginRemovalTarget {
+            path: nested_path,
+            source: PluginSurfaceSource::User,
+        };
+        let nested_error = revalidate_plugin_removal_target(&nested, home.path())
+            .expect_err("nested paths must not be removable");
+        assert!(nested_error.contains("not a direct child"));
+
+        let outside = tempdir().expect("outside");
+        std::fs::remove_dir_all(&selected_path).expect("replace selected path");
+        symlink(outside.path(), &selected_path).expect("swap selected directory with symlink");
+
+        let error = remove_plugin_bundle(&selected, home.path())
+            .expect_err("symlink replacement must be rejected immediately before removal");
+        assert!(matches!(error, hermes_core::AgentError::PolicyBlocked(_)));
+        assert!(selected_path.is_symlink());
+        assert!(outside.path().is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_removal_refuses_a_symlinked_allowed_root() {
+        use std::os::unix::fs::symlink;
+
+        let home = tempdir().expect("home");
+        let physical_root = tempdir().expect("physical root");
+        let physical_plugin = physical_root.path().join("selected-plugin");
+        std::fs::create_dir_all(&physical_plugin).expect("create physical plugin");
+        symlink(physical_root.path(), home.path().join("plugins"))
+            .expect("replace allowed root with symlink");
+        let selected = PluginRemovalTarget {
+            path: home.path().join("plugins").join("selected-plugin"),
+            source: PluginSurfaceSource::User,
+        };
+
+        let error = remove_plugin_bundle(&selected, home.path())
+            .expect_err("symlinked allowed root must be rejected");
+
+        assert!(matches!(error, hermes_core::AgentError::PolicyBlocked(_)));
+        assert!(physical_plugin.is_dir());
     }
 
     #[test]
@@ -303,87 +468,68 @@ mod tests {
     }
 
     #[test]
-    fn memory_honcho_setup_config_stores_local_jwt_under_host_block() {
-        let aliases = serde_json::Map::new();
+    fn memory_honcho_setup_config_stores_local_jwt_without_static_identity() {
         let cfg = build_honcho_setup_config(HonchoSetupConfigInput {
-            host: "hermes",
+            host: "tenant-host",
             deployment: "local",
             api_key: "local-jwt",
             base_url: "http://localhost:8000",
-            peer_name: "operator",
-            shape: "single",
-            runtime_peer_prefix: "",
-            aliases: &aliases,
         });
 
         assert_eq!(cfg["baseUrl"], "http://localhost:8000");
         assert!(cfg.get("apiKey").is_none());
-        assert_eq!(cfg["hosts"]["hermes"]["apiKey"], "local-jwt");
-        assert!(cfg["hosts"]["hermes"]["pinUserPeer"]
-            .as_bool()
-            .expect("hermes pinUserPeer bool"));
+        assert_eq!(cfg["hosts"]["tenant-host"]["apiKey"], "local-jwt");
+        for identity in [
+            "workspace",
+            "aiPeer",
+            "peerName",
+            "pinUserPeer",
+            "userPeerAliases",
+            "runtimePeerPrefix",
+        ] {
+            assert!(cfg["hosts"]["tenant-host"].get(identity).is_none());
+        }
     }
 
     #[test]
-    fn memory_honcho_setup_config_keeps_gateway_aliases_for_hybrid_shape() {
-        let aliases = parse_honcho_aliases("telegram-1=operator, discord-2=operator");
+    fn memory_honcho_setup_config_uses_explicit_host_without_peer_mapping() {
         let cfg = build_honcho_setup_config(HonchoSetupConfigInput {
-            host: "hermes_coder",
+            host: "tenant-host",
             deployment: "cloud",
             api_key: "cloud-key",
             base_url: "",
-            peer_name: "operator",
-            shape: "hybrid",
-            runtime_peer_prefix: "gateway_",
-            aliases: &aliases,
         });
 
         assert_eq!(cfg["apiKey"], "cloud-key");
-        assert_eq!(cfg["hosts"]["hermes_coder"]["aiPeer"], "coder");
-        assert!(!cfg["hosts"]["hermes_coder"]["pinUserPeer"]
-            .as_bool()
-            .expect("hermes_coder pinUserPeer bool"));
-        assert_eq!(
-            cfg["hosts"]["hermes_coder"]["userPeerAliases"]["telegram-1"],
-            "operator"
-        );
-        assert_eq!(
-            cfg["hosts"]["hermes_coder"]["runtimePeerPrefix"],
-            "gateway_"
-        );
+        assert!(cfg["hosts"]["tenant-host"].get("aiPeer").is_none());
+        assert!(cfg["hosts"]["tenant-host"].get("peerName").is_none());
+        assert!(cfg["hosts"]["tenant-host"].get("pinUserPeer").is_none());
     }
 
     #[test]
-    fn memory_honcho_profile_host_key_is_honcho_safe() {
+    fn memory_honcho_setup_requires_an_explicit_host_identity() {
         let _guard = env_test_lock();
-        let prev_profile = std::env::var("HERMES_PROFILE").ok();
-        let prev_host = std::env::var("HERMES_HONCHO_HOST").ok();
-        std::env::set_var("HERMES_PROFILE", "research.team/v1");
-        std::env::remove_var("HERMES_HONCHO_HOST");
+        let _profile = EnvVarGuard::set("HERMES_PROFILE", "research.team/v1");
+        let _missing_host = EnvVarGuard::remove("HERMES_HONCHO_HOST");
+        assert!(matches!(
+            active_honcho_host_key_for_cli(),
+            Err(AgentError::Config(_))
+        ));
 
-        assert_eq!(active_honcho_host_key_for_cli(), "hermes_research_team_v1");
+        let _explicit_host = EnvVarGuard::set("HERMES_HONCHO_HOST", "tenant-host");
         assert_eq!(
-            honcho_ai_peer_for_host("hermes_research_team_v1"),
-            "research_team_v1"
+            active_honcho_host_key_for_cli().expect("explicit host"),
+            "tenant-host"
         );
-
-        match prev_profile {
-            Some(value) => std::env::set_var("HERMES_PROFILE", value),
-            None => std::env::remove_var("HERMES_PROFILE"),
-        }
-        match prev_host {
-            Some(value) => std::env::set_var("HERMES_HONCHO_HOST", value),
-            None => std::env::remove_var("HERMES_HONCHO_HOST"),
-        }
     }
 
     #[test]
-    fn memory_honcho_setup_accepts_and_preserves_existing_oauth_grant() {
+    fn memory_honcho_setup_preserves_existing_oauth_grant_without_peer_defaults() {
         let _guard = env_test_lock();
         let tmp = tempdir().expect("tempdir");
         let _home = TempHomeGuard::new(tmp.path());
         let _profile = EnvVarGuard::remove("HERMES_PROFILE");
-        let _host = EnvVarGuard::remove("HERMES_HONCHO_HOST");
+        let _host = EnvVarGuard::set("HERMES_HONCHO_HOST", "tenant-host");
         let _api_key = EnvVarGuard::remove("HONCHO_API_KEY");
         let _base_url = EnvVarGuard::remove("HONCHO_BASE_URL");
         let path = tmp.path().join("honcho.json");
@@ -392,7 +538,7 @@ mod tests {
             r#"{
                 "enabled": true,
                 "hosts": {
-                    "hermes": {
+                    "tenant-host": {
                         "apiKey": "hch-at-existing",
                         "oauth": {
                             "refreshToken": "hch-rt-existing",
@@ -417,25 +563,20 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&saved_path).expect("read config"))
                 .expect("json");
-        assert_eq!(parsed["hosts"]["hermes"]["apiKey"], "hch-at-existing");
+        assert_eq!(parsed["hosts"]["tenant-host"]["apiKey"], "hch-at-existing");
         assert_eq!(
-            parsed["hosts"]["hermes"]["oauth"]["refreshToken"],
+            parsed["hosts"]["tenant-host"]["oauth"]["refreshToken"],
             "hch-rt-existing"
         );
-        assert!(parsed["hosts"]["hermes"]["pinUserPeer"]
-            .as_bool()
-            .expect("hermes pinUserPeer bool"));
+        assert!(parsed["hosts"]["tenant-host"].get("pinUserPeer").is_none());
     }
 
     #[test]
-    fn memory_openviking_setup_config_normalizes_local_no_key_mode() {
+    fn memory_openviking_setup_config_normalizes_local_no_key_mode_without_identity() {
         let cfg = build_openviking_setup_config(OpenVikingSetupConfigInput {
             endpoint: "localhost:1933/",
             api_key: "",
             api_key_type: "none",
-            account: "",
-            user: "",
-            agent: "",
         })
         .expect("local setup config");
 
@@ -443,44 +584,41 @@ mod tests {
         assert_eq!(cfg["endpoint"], "http://localhost:1933");
         assert_eq!(cfg["api_key"], "");
         assert_eq!(cfg["api_key_type"], "none");
-        assert_eq!(cfg["account"], "default");
-        assert_eq!(cfg["user"], "default");
-        assert_eq!(cfg["agent"], "hermes");
+        assert!(cfg.get("account").is_none());
+        assert!(cfg.get("user").is_none());
+        assert!(cfg.get("agent").is_none());
     }
 
     #[test]
-    fn memory_openviking_setup_config_requires_root_tenant_identity() {
-        let err = build_openviking_setup_config(OpenVikingSetupConfigInput {
+    fn memory_openviking_root_key_setup_has_no_static_identity() {
+        let cfg = build_openviking_setup_config(OpenVikingSetupConfigInput {
             endpoint: "https://openviking.example",
             api_key: "root-secret",
             api_key_type: "root",
-            account: "",
-            user: "operator",
-            agent: "hermes",
         })
-        .expect_err("missing account should fail");
+        .expect("root key setup");
 
-        assert!(err.to_string().contains("requires account and user"));
+        assert_eq!(cfg["api_key_type"], "root");
+        assert!(cfg.get("account").is_none());
+        assert!(cfg.get("user").is_none());
+        assert!(cfg.get("agent").is_none());
     }
 
     #[test]
-    fn memory_openviking_setup_config_supports_user_key_without_tenant_prompts() {
+    fn memory_openviking_user_key_setup_has_no_static_identity() {
         let cfg = build_openviking_setup_config(OpenVikingSetupConfigInput {
             endpoint: "https://openviking.example/",
             api_key: "user-secret",
             api_key_type: "user",
-            account: "",
-            user: "",
-            agent: "agent",
         })
         .expect("user setup config");
 
         assert_eq!(cfg["endpoint"], "https://openviking.example");
         assert_eq!(cfg["api_key_type"], "user");
         assert_eq!(cfg["api_key"], "user-secret");
-        assert_eq!(cfg["account"], "default");
-        assert_eq!(cfg["user"], "default");
-        assert_eq!(cfg["agent"], "agent");
+        assert!(cfg.get("account").is_none());
+        assert!(cfg.get("user").is_none());
+        assert!(cfg.get("agent").is_none());
     }
 
     #[test]
@@ -491,9 +629,6 @@ mod tests {
         let _endpoint = EnvVarGuard::set("OPENVIKING_ENDPOINT", "http://localhost:1933");
         let _api_key = EnvVarGuard::remove("OPENVIKING_API_KEY");
         let _key_type = EnvVarGuard::remove("OPENVIKING_API_KEY_TYPE");
-        let _account = EnvVarGuard::remove("OPENVIKING_ACCOUNT");
-        let _user = EnvVarGuard::remove("OPENVIKING_USER");
-        let _agent = EnvVarGuard::remove("OPENVIKING_AGENT");
 
         let path = setup_memory_provider_target(
             "openviking",
@@ -509,7 +644,7 @@ mod tests {
         assert!(parsed["enabled"].as_bool().expect("enabled bool"));
         assert_eq!(parsed["endpoint"], "http://localhost:1933");
         assert_eq!(parsed["api_key_type"], "none");
-        assert_eq!(parsed["agent"], "hermes");
+        assert!(parsed.get("agent").is_none());
 
         #[cfg(unix)]
         {
@@ -532,7 +667,6 @@ mod tests {
         let _home = TempHomeGuard::new(tmp.path());
         let _api_key = EnvVarGuard::set("SUPERMEMORY_API_KEY", "sm-test-key");
         let _base_url = EnvVarGuard::set("SUPERMEMORY_BASE_URL", "https://api.supermemory.ai");
-        let _container = EnvVarGuard::set("SUPERMEMORY_CONTAINER_TAG", "hermes-tests");
 
         let path = setup_memory_provider_target(
             "supermemory",
@@ -546,7 +680,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
                 .expect("json");
         assert_eq!(parsed["api_key"], "sm-test-key");
-        assert_eq!(parsed["container_tag"], "hermes-tests");
+        assert!(parsed.get("container_tag").is_none());
         assert!(parsed["auto_recall"].as_bool().expect("auto_recall"));
         assert!(parsed["auto_capture"].as_bool().expect("auto_capture"));
 
@@ -625,7 +759,7 @@ mod tests {
     fn test_contextual_autocomplete_objective_behavior_modes() {
         let results = autocomplete_contextual("/objective behavior ");
         assert!(results.contains(&"/objective behavior strict ".to_string()));
-        assert!(results.contains(&"/objective behavior sigma ".to_string()));
+        assert!(results.contains(&"/objective behavior mission ".to_string()));
     }
 
     #[test]
@@ -652,6 +786,54 @@ mod tests {
             hermes_core::version::version_label()
         );
     }
+    #[tokio::test]
+    async fn config_set_slash_confirmation_omits_value() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let sentinel = "4242424242";
+
+        let result = handle_slash_command(
+            &mut app,
+            "/config",
+            &["set", "max_turns", sentinel],
+        )
+        .await
+        .expect("config set command");
+
+        assert_eq!(app.config.max_turns, 4_242_424_242);
+        let output = latest_ui_assistant_text(&app);
+        assert_eq!(output, "Set max_turns");
+        assert!(!output.contains(sentinel));
+    }
+    #[tokio::test]
+    async fn config_get_slash_redacts_url_credentials() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let password = "slash-get-password-sentinel";
+        let query_secret = "slash-get-query-sentinel";
+        let mut config = (*app.config).clone();
+        config.model = Some(format!(
+            "https://alice:{password}@models.example.test/v1?api_key={query_secret}"
+        ));
+        app.config = Arc::new(config);
+
+        let result = handle_slash_command(&mut app, "/config", &["get", "model"])
+            .await
+            .expect("config get command");
+
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("models.example.test"));
+        assert!(output.contains("REDACTED"));
+        assert!(!output.contains(password));
+        assert!(!output.contains(query_secret));
+    }
+
+
 
     #[tokio::test]
     async fn moa_without_prompt_is_usage_only() {
@@ -1076,5 +1258,6 @@ mod tests {
 
     mod runtime_parity_ops;
     mod skill_model_policy;
+    mod replay_studio;
 
 }

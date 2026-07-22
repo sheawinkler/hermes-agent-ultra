@@ -30,9 +30,12 @@ fn scalar_to_string(v: &Value) -> Option<String> {
 }
 
 fn drop_null_top_level_values(map: &mut Mapping) {
+    let execution_mode_key = key("execution_mode");
     let null_keys: Vec<Value> = map
         .iter()
-        .filter_map(|(k, v)| matches!(v, Value::Null).then_some(k.clone()))
+        .filter_map(|(key, value)| {
+            (matches!(value, Value::Null) && key != &execution_mode_key).then_some(key.clone())
+        })
         .collect();
     for key in null_keys {
         if let Some(name) = key.as_str() {
@@ -787,6 +790,30 @@ personalities: null
         assert_eq!(cfg.web, default.web);
         assert_eq!(cfg.sessions, default.sessions);
         assert_eq!(cfg.agent, default.agent);
+    }
+
+    #[test]
+    fn python_yaml_normalization_preserves_execution_mode_null() {
+        for raw in ["execution_mode: null\n", "execution_mode:\n"] {
+            let mut root: Value = serde_yaml::from_str(raw).unwrap();
+            {
+                let Value::Mapping(map) = &mut root else {
+                    panic!("execution-mode fixture should be a mapping");
+                };
+                normalize_config_yaml_root(map);
+                assert_eq!(
+                    map.get(&key("execution_mode")),
+                    Some(&Value::Null),
+                    "normalization must preserve explicit null"
+                );
+            }
+
+            let config: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+            assert_eq!(
+                config.execution_mode,
+                crate::config::ExecutionModeConfigValue::ExplicitNull
+            );
+        }
     }
 
     #[test]

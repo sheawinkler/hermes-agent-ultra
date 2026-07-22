@@ -1157,46 +1157,35 @@ agent:
 
 ## TTS Configuration
 
+The Rust runtime implements `openai`, `elevenlabs`, `minimax`, `piper`, and user-defined command providers. Configure one explicitly:
+
 ```yaml
 tts:
-  provider: "edge"              # "edge" | "elevenlabs" | "openai" | "minimax" | "mistral" | "gemini" | "xai" | "neutts"
-  speed: 1.0                    # Global speed multiplier (fallback for all providers)
-  edge:
-    voice: "en-US-AriaNeural"   # 322 voices, 74 languages
-    speed: 1.0                  # Speed multiplier (converted to rate percentage, e.g. 1.5 → +50%)
-  elevenlabs:
-    voice_id: "pNInz6obpgDQGcFmaJgB"
-    model_id: "eleven_multilingual_v2"
-  openai:
-    model: "gpt-4o-mini-tts"
-    voice: "alloy"              # alloy, echo, fable, onyx, nova, shimmer
-    speed: 1.0                  # Speed multiplier (clamped to 0.25–4.0 by the API)
-    base_url: "https://api.openai.com/v1"  # Override for OpenAI-compatible TTS endpoints
+  provider: minimax
+  speed: 1.0
   minimax:
-    speed: 1.0                  # Speech speed multiplier
-    # base_url: ""              # Optional: override for OpenAI-compatible TTS endpoints
-  mistral:
-    model: "voxtral-mini-tts-2603"
-    voice_id: "c69964a6-ab8b-4f8a-9465-ec0925096ec8"  # Paul - Neutral (default)
-  gemini:
-    model: "gemini-2.5-flash-preview-tts"   # or gemini-2.5-pro-preview-tts
-    voice: "Kore"               # 30 prebuilt voices: Zephyr, Puck, Kore, Enceladus, etc.
-  xai:
-    voice_id: "eve"             # xAI TTS voice
-    language: "en"              # ISO 639-1
-    sample_rate: 24000
-    bit_rate: 128000            # MP3 bitrate
-    # base_url: "https://api.x.ai/v1"
-  neutts:
-    ref_audio: ''
-    ref_text: ''
-    model: neuphonic/neutts-air-q4-gguf
-    device: cpu
+    voice_id: English_expressive_narrator
+    model: speech-02-hd
+    speed: 1.0
+    vol: 1.0
+    pitch: 0
+    # Optional: omit to let MiniMax select its API default emotion.
+    # emotion: happy  # happy | sad | angry | fearful | disgusted | surprised | calm | fluent | whisper
+    sample_rate: 32000
+    bitrate: 128000
+    format: mp3
+    channel: 1
+    # group_id: your-minimax-group
+    # base_url: https://api.minimax.io/v1/t2a_v2
 ```
 
-This controls both the `text_to_speech` tool and spoken replies in voice mode (`/voice tts` in the CLI or messaging gateway).
+MiniMax `t2a_v2` omits `emotion` by default. If configured, it accepts exactly `happy`, `sad`, `angry`, `fearful`, `disgusted`, `surprised`, `calm`, `fluent`, or `whisper`; `neutral` is rejected before any provider request.
 
-**Speed fallback hierarchy:** provider-specific speed (e.g. `tts.edge.speed`) → global `tts.speed` → `1.0` default. Set the global `tts.speed` to apply a uniform speed across all providers, or override per-provider for fine-grained control.
+Use environment variables for credentials (`MINIMAX_API_KEY`, `ELEVENLABS_API_KEY`, or an OpenAI/managed Nous credential). Piper uses `PIPER_MODEL` and optionally `PIPER_BINARY`.
+
+An explicit tool-call speed overrides `tts.<provider>.speed`, which overrides `tts.speed`. MiniMax clamps speed to `0.5`–`2.0`; OpenAI clamps it to `0.25`–`4.0`.
+
+Unsupported upstream-only provider names fail closed instead of silently selecting another service. See the [TTS guide](features/tts.md) for the exact runtime contract, legacy MiniMax endpoints, Piper variables, command-provider configuration, delivery semantics, and current limitations.
 
 ## Display Settings
 
@@ -1308,46 +1297,59 @@ Hashes are deterministic — the same user always maps to the same hash, so the 
 
 ## Speech-to-Text (STT)
 
-```yaml
-stt:
-  provider: "local"            # "local" | "groq" | "openai" | "mistral"
-  local:
-    model: "base"              # tiny, base, small, medium, large-v3
-  openai:
-    model: "whisper-1"         # whisper-1 | gpt-4o-mini-transcribe | gpt-4o-transcribe
-  # model: "whisper-1"         # Legacy fallback key still respected
-```
+STT is the callable **`transcription`** tool (`TranscriptionHandler`), also used by the Teams meeting pipeline. Messaging ingress does **not** auto-run this handler on every voice note; it may only prepend `[transcription_candidate]`.
 
-Provider behavior:
+**Important:** `TranscriptionHandler` does **not** read an `stt:` block from `config.yaml`. There is no `stt.enabled` switch and no local faster-whisper / whisper-CLI / `HERMES_LOCAL_STT_COMMAND` / xAI path in this handler.
 
-- `local` uses `faster-whisper` running on your machine. Install it separately with `pip install faster-whisper`.
-- `groq` uses Groq's Whisper-compatible endpoint and reads `GROQ_API_KEY`.
-- `openai` uses the OpenAI speech API and reads `VOICE_TOOLS_OPENAI_KEY`.
+### Tool parameters
 
-If the requested provider is unavailable, Hermes falls back automatically in this order: `local` → `groq` → `openai`.
+| Parameter | Required | Meaning |
+|-----------|----------|---------|
+| `audio_path` | Yes | **Absolute** path to an existing regular file under an approved media root — not an arbitrary workspace path |
+| `provider` | No | `openai`, `groq`, or `mistral`/`voxtral` |
+| `model` | No | Provider-specific model override |
+| `response_format` | No | `text`, `json`, or `verbose_json` when applicable |
+| `language` | No | Optional ISO language hint |
 
-Groq and OpenAI model overrides are environment-driven:
+### `audio_path` approved roots
+
+Path checks run **before** credential resolution or HTTP upload. The file must canonicalize to a regular file under:
+
+- Built-in Hermes media cache dirs (`~/.hermes/audio_cache`, `~/.hermes/cache/audio`, and sibling media caches)
+- `HERMES_MEDIA_CACHE_DIR` (default `/tmp/hermes-media-cache`)
+- Operator `HERMES_MEDIA_ALLOW_DIRS` (absolute dirs; `:` / `;` platform separators, commas also accepted)
+
+Workspace files are **not** allowed by default. Symlink escapes fail closed. The Teams meeting pipeline alone may pass the private per-run directory it creates beneath its configured temp root for a pipeline-produced recording.
 
 ```bash
-STT_GROQ_MODEL=whisper-large-v3-turbo
+# Linux/macOS
+HERMES_MEDIA_ALLOW_DIRS=/var/hermes/inbound-audio:/mnt/shared/voice-drop
+# Windows
+# HERMES_MEDIA_ALLOW_DIRS=D:\hermes\inbound-audio;E:\voice-drop
+HERMES_MEDIA_CACHE_DIR=/var/cache/hermes-media
+```
+
+### Environment
+
+```bash
+# Optional default provider when the tool omits `provider`
+HERMES_STT_PROVIDER=openai   # alias: STT_PROVIDER — openai | groq | mistral
+
+# Credentials
+VOICE_TOOLS_OPENAI_KEY=***   # preferred; also HERMES_OPENAI_API_KEY / OPENAI_API_KEY
+GROQ_API_KEY=***
+MISTRAL_API_KEY=***
+
+# Optional overrides
 STT_OPENAI_MODEL=whisper-1
-GROQ_BASE_URL=https://api.groq.com/openai/v1
 STT_OPENAI_BASE_URL=https://api.openai.com/v1
+STT_GROQ_MODEL=whisper-large-v3-turbo
+STT_GROQ_BASE_URL=https://api.groq.com/openai/v1
+STT_MISTRAL_MODEL=voxtral-mini-latest
+STT_MISTRAL_BASE_URL=https://api.mistral.ai/v1
 ```
 
-## Voice Mode (CLI)
-
-```yaml
-voice:
-  record_key: "ctrl+b"         # Push-to-talk key inside the CLI
-  max_recording_seconds: 120    # Hard stop for long recordings
-  auto_tts: false               # Enable spoken replies automatically when /voice on
-  beep_enabled: true            # Play record start/stop beeps in CLI voice mode
-  silence_threshold: 200        # RMS threshold for speech detection
-  silence_duration: 3.0         # Seconds of silence before auto-stop
-```
-
-Use `/voice on` in the CLI to enable microphone mode, `record_key` to start/stop recording, and `/voice tts` to toggle spoken replies. See [Voice Mode](/docs/user-guide/features/voice-mode) for end-to-end setup and platform-specific behavior.
+If `provider` and `HERMES_STT_PROVIDER`/`STT_PROVIDER` are unset, the handler picks the first available credential path (Nous-managed OpenAI audio when enabled, else OpenAI key, else Groq, else Mistral). Failures fail closed on the tool call. Full contract: [Voice & TTS — Transcription](features/tts.md#transcription-tool-stt).
 
 ## Streaming
 

@@ -28,14 +28,95 @@ fn mask_secret_value(secret: &str) -> String {
     if secret.is_empty() {
         return "(empty)".to_string();
     }
-    if secret.len() <= 8 {
-        return "*".repeat(secret.len());
+    let char_count = secret.chars().count();
+    if char_count <= 8 {
+        return "*".repeat(char_count);
     }
-    format!(
-        "{}***{}",
-        &secret[..4],
-        &secret[secret.len().saturating_sub(4)..]
-    )
+    let prefix_end = secret
+        .char_indices()
+        .nth(4)
+        .map(|(index, _)| index)
+        .unwrap_or(secret.len());
+    let suffix_start = secret
+        .char_indices()
+        .nth(char_count - 4)
+        .map(|(index, _)| index)
+        .unwrap_or_default();
+    format!("{}***{}", &secret[..prefix_end], &secret[suffix_start..])
+}
+
+const REDACTED_CONFIG_SECRET: &str = "[REDACTED]";
+const SECRET_CONFIG_KEY_HINTS: &[&str] = &[
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "credential",
+    "docker_env",
+    "encoding_aes_key",
+    "encrypt_key",
+    "passphrase",
+    "password",
+    "private_key",
+    "secret",
+    "webhook",
+];
+const NON_SECRET_CONFIG_KEYS: &[&str] =
+    &["api_key_env", "oauth_token_url", "token_type", "tokenizer"];
+
+fn config_key_looks_secret(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase().replace('-', "_");
+    let leaf = normalized.rsplit('.').next().unwrap_or(normalized.as_str());
+    if NON_SECRET_CONFIG_KEYS.contains(&leaf) {
+        return false;
+    }
+    if leaf.ends_with("_url") && !normalized.contains("webhook") {
+        return false;
+    }
+    SECRET_CONFIG_KEY_HINTS
+        .iter()
+        .any(|hint| normalized.contains(hint))
+        || leaf == "token"
+        || leaf == "tokens"
+        || leaf.ends_with("token")
+}
+
+fn redact_config_value(key_hint: Option<&str>, value: &mut serde_json::Value) {
+    if key_hint.is_some_and(config_key_looks_secret) {
+        *value = serde_json::Value::String(REDACTED_CONFIG_SECRET.to_string());
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                redact_config_value(Some(key), item);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_config_value(key_hint, item);
+            }
+        }
+        serde_json::Value::String(raw) => {
+            let redacted = hermes_config::redact_url_credentials_for_display(raw);
+            if redacted != *raw {
+                *raw = redacted;
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+}
+
+fn redacted_json_for_display(mut value: serde_json::Value) -> Result<String, AgentError> {
+    redact_config_value(None, &mut value);
+    serde_json::to_string_pretty(&value)
+        .map_err(|error| AgentError::Config(format!("Failed to render config: {error}")))
+}
+
+pub fn redacted_config_json(config: &GatewayConfig) -> Result<String, AgentError> {
+    let value = serde_json::to_value(config)
+        .map_err(|error| AgentError::Config(format!("Failed to serialize config: {error}")))?;
+    redacted_json_for_display(value)
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +276,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/harness",
-        "Show the one-true-harness cockpit: skills, proof, OIDC, replay, objectives, onboarding, and chaos surfaces",
+        "Show the audited production-completeness inventory for skills, proof, OIDC, replay, objectives, onboarding, and chaos",
     ),
     (
         "/claims",
@@ -228,7 +309,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/studio",
-        "Replay studio (`/studio replay status|verify|diff <export_a.json> <export_b.json>`)",
+        "Replay studio for canonical run exports (`/studio replay status|verify <PATH>|diff <EXPORT_A> <EXPORT_B>`; legacy JSONL is diagnostic/unverified)",
     ),
     ("/goal", "Alias for /objective"),
     (
@@ -388,7 +469,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/raw",
-        "RTK raw-mode controls + deterministic trace controls (status/on/off/toggle/once/trace with tail/verify/export/path)",
+        "RTK raw-mode controls + legacy JSONL diagnostics (tail/focus/graph/legacy-check) and authoritative run export verification (`trace verify <PATH>|export [latest|all|RUN_ID]`; latest/all are current persisted session only)",
     ),
     (
         "/policy",
@@ -423,37 +504,33 @@ const HERMES_SKILLS_INDEX_URL: &str =
     "https://hermes-agent.nousresearch.com/docs/api/skills-index.json";
 const SKILLS_SH_SEARCH_URL: &str = "https://skills.sh/api/search";
 const CLAWHUB_API_BASE: &str = "https://clawhub.ai/api/v1";
-const SKILLS_HUB_STATE_DIR: &str = ".hub";
-const SKILLS_HUB_LOCK_FILE: &str = "lock.json";
-const SKILLS_HUB_AUDIT_FILE: &str = "audit.log";
-const SKILLS_HUB_LOCK_VERSION: u32 = 1;
 const SENTRUX_MCP_SERVER_NAME: &str = "sentrux";
 const SENTRUX_MCP_COMMAND: &str = "sentrux";
 const SENTRUX_MCP_ARG: &str = "--mcp";
 const UNREAL_MCP_SERVER_NAME: &str = "unreal-engine";
 const UNREAL_MCP_URL: &str = "http://127.0.0.1:8000/mcp";
-const SKILL_BOOTSTRAP_ALLOWED_EXECUTABLES: &[&str] = &[
-    "bash", "sh", "python", "python3", "pip", "pip3", "pipx", "uv", "uvx", "node", "npm", "npx",
-    "pnpm", "yarn", "bun", "cargo", "rustup", "go", "make", "cmake", "git", "brew", "apt",
-    "apt-get", "dnf", "yum", "pacman", "zypper", "apk",
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillTapSpec {
     repo: String,
     path: String,
+    requested_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedSkillSource {
     repo: String,
-    branch: String,
+    immutable_revision: String,
     skill_dir: String,
 }
 
 #[derive(Debug, Clone)]
 enum RegistryInstallSource {
-    GitRepo(ResolvedSkillSource),
+    GitRepo {
+        repo: String,
+        requested_ref: Option<String>,
+        skill_dir: String,
+    },
     LobeRegistry {
         slug: String,
     },
@@ -478,63 +555,6 @@ enum InstallFallbackSource {
     Tap,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SkillHubInstalledEntry {
-    name: String,
-    source: String,
-    identifier: String,
-    trust_level: String,
-    scan_verdict: String,
-    content_hash: String,
-    install_path: String,
-    #[serde(default)]
-    files: Vec<String>,
-    #[serde(default)]
-    metadata: serde_json::Value,
-    installed_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SkillsHubLockFile {
-    #[serde(default = "default_skills_hub_lock_version")]
-    version: u32,
-    #[serde(default)]
-    installed: Vec<SkillHubInstalledEntry>,
-}
-
-impl Default for SkillsHubLockFile {
-    fn default() -> Self {
-        Self {
-            version: SKILLS_HUB_LOCK_VERSION,
-            installed: Vec::new(),
-        }
-    }
-}
-
-fn default_skills_hub_lock_version() -> u32 {
-    SKILLS_HUB_LOCK_VERSION
-}
-
-#[derive(Debug, Clone)]
-struct SkillInstallProvenance {
-    source: String,
-    identifier: String,
-    trust_level: String,
-    metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Default)]
-struct SkillBootstrapPlan {
-    commands: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ParsedBootstrapCommand {
-    display: String,
-    executable: String,
-    args: Vec<String>,
-}
 
 #[derive(Debug, Deserialize)]
 struct HermesSkillsIndexResponse {
@@ -628,6 +648,11 @@ struct GitHubRepoInfo {
     default_branch: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubCommitResponse {
+    sha: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct GitHubTreeEntry {
     path: String,
@@ -652,7 +677,7 @@ fn parse_skill_tap_spec(raw: &str) -> Option<SkillTapSpec> {
         (trimmed, None)
     };
 
-    let (repo, mut path) = if let Some(rest) = base
+    let (repo, mut path, requested_ref) = if let Some(rest) = base
         .strip_prefix("https://github.com/")
         .or_else(|| base.strip_prefix("http://github.com/"))
     {
@@ -660,12 +685,16 @@ fn parse_skill_tap_spec(raw: &str) -> Option<SkillTapSpec> {
         if segments.len() < 2 {
             return None;
         }
-        let path = if segments.len() >= 5 && segments[2] == "tree" {
-            segments[4..].join("/")
+        let (path, requested_ref) = if segments.len() >= 5 && segments[2] == "tree" {
+            (segments[4..].join("/"), Some(segments[3].to_string()))
         } else {
-            "skills".to_string()
+            ("skills".to_string(), None)
         };
-        (format!("{}/{}", segments[0], segments[1]), path)
+        (
+            format!("{}/{}", segments[0], segments[1]),
+            path,
+            requested_ref,
+        )
     } else {
         let segments: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
         if segments.len() < 2 {
@@ -676,7 +705,7 @@ fn parse_skill_tap_spec(raw: &str) -> Option<SkillTapSpec> {
         } else {
             "skills".to_string()
         };
-        (format!("{}/{}", segments[0], segments[1]), path)
+        (format!("{}/{}", segments[0], segments[1]), path, None)
     };
 
     if let Some(override_path) = override_path {
@@ -686,6 +715,7 @@ fn parse_skill_tap_spec(raw: &str) -> Option<SkillTapSpec> {
     Some(SkillTapSpec {
         repo,
         path: path.trim_matches('/').to_string(),
+        requested_ref,
     })
 }
 
@@ -933,20 +963,20 @@ fn resolved_source_from_index(entry: &HermesSkillsIndexEntry) -> Option<Registry
         if path.is_empty() {
             return None;
         }
-        return Some(RegistryInstallSource::GitRepo(ResolvedSkillSource {
+        return Some(RegistryInstallSource::GitRepo {
             repo: OFFICIAL_SKILLS_REPO.to_string(),
-            branch: "main".to_string(),
+            requested_ref: None,
             skill_dir: path.to_string(),
-        }));
+        });
     }
 
     if let Some(resolved) = entry.resolved_github_id.as_deref() {
-        if let Some((repo, _, skill_dir)) = parse_explicit_github_skill(resolved) {
-            return Some(RegistryInstallSource::GitRepo(ResolvedSkillSource {
+        if let Some((repo, requested_ref, skill_dir)) = parse_explicit_github_skill(resolved) {
+            return Some(RegistryInstallSource::GitRepo {
                 repo,
-                branch: "main".to_string(),
+                requested_ref,
                 skill_dir,
-            }));
+            });
         }
     }
 
@@ -957,11 +987,11 @@ fn resolved_source_from_index(entry: &HermesSkillsIndexEntry) -> Option<Registry
             // claude-marketplace entries often point at repo root collections.
             "skills".to_string()
         };
-        return Some(RegistryInstallSource::GitRepo(ResolvedSkillSource {
+        return Some(RegistryInstallSource::GitRepo {
             repo: entry.repo.trim().to_string(),
-            branch: "main".to_string(),
+            requested_ref: None,
             skill_dir: dir,
-        }));
+        });
     }
 
     None
@@ -1102,255 +1132,6 @@ fn build_lobehub_skill_markdown(payload: &LobeHubAgentResponse, slug: &str) -> S
     md
 }
 
-fn default_trust_level_for_source(source: &str) -> &'static str {
-    match source {
-        "official" => "builtin",
-        "skills.sh" | "hermes-index" | "claude-marketplace" | "github" | "tap" => "trusted",
-        "lobehub" | "clawhub" => "community",
-        _ => "community",
-    }
-}
-
-fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339()
-}
-
-fn skills_hub_state_dir(skills_dir: &Path) -> PathBuf {
-    skills_dir.join(SKILLS_HUB_STATE_DIR)
-}
-
-fn skills_hub_lock_path(skills_dir: &Path) -> PathBuf {
-    skills_hub_state_dir(skills_dir).join(SKILLS_HUB_LOCK_FILE)
-}
-
-fn skills_hub_audit_path(skills_dir: &Path) -> PathBuf {
-    skills_hub_state_dir(skills_dir).join(SKILLS_HUB_AUDIT_FILE)
-}
-
-fn read_skills_hub_lock(skills_dir: &Path) -> SkillsHubLockFile {
-    let path = skills_hub_lock_path(skills_dir);
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return SkillsHubLockFile::default();
-    };
-    serde_json::from_str::<SkillsHubLockFile>(&raw).unwrap_or_default()
-}
-
-fn write_skills_hub_lock(skills_dir: &Path, lock: &SkillsHubLockFile) -> Result<(), AgentError> {
-    let state_dir = skills_hub_state_dir(skills_dir);
-    std::fs::create_dir_all(&state_dir).map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to create skills hub state dir '{}': {}",
-            state_dir.display(),
-            e
-        ))
-    })?;
-    let path = skills_hub_lock_path(skills_dir);
-    let body = serde_json::to_string_pretty(lock)
-        .map_err(|e| AgentError::Config(format!("Failed to serialize skills hub lock: {}", e)))?;
-    std::fs::write(&path, body).map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to write skills hub lock '{}': {}",
-            path.display(),
-            e
-        ))
-    })
-}
-
-fn append_skills_hub_audit(
-    skills_dir: &Path,
-    action: &str,
-    entry: &SkillHubInstalledEntry,
-) -> Result<(), AgentError> {
-    let state_dir = skills_hub_state_dir(skills_dir);
-    std::fs::create_dir_all(&state_dir).map_err(|e| {
-        AgentError::Io(format!(
-            "Failed to create skills hub state dir '{}': {}",
-            state_dir.display(),
-            e
-        ))
-    })?;
-    let path = skills_hub_audit_path(skills_dir);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| {
-            AgentError::Io(format!(
-                "Failed to open skills hub audit log '{}': {}",
-                path.display(),
-                e
-            ))
-        })?;
-    let line = serde_json::json!({
-        "timestamp": now_rfc3339(),
-        "action": action,
-        "name": entry.name,
-        "source": entry.source,
-        "identifier": entry.identifier,
-        "trust_level": entry.trust_level,
-        "scan_verdict": entry.scan_verdict,
-        "content_hash": entry.content_hash,
-    });
-    use std::io::Write as _;
-    writeln!(file, "{}", line)
-        .map_err(|e| AgentError::Io(format!("Failed to append skills hub audit log: {}", e)))
-}
-
-fn hash_skill_bundle(files: &[(String, Bytes)]) -> String {
-    let mut sorted: Vec<_> = files.iter().collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut h = Sha256::new();
-    for (rel_path, bytes) in sorted {
-        h.update(rel_path.as_bytes());
-        h.update([0]);
-        h.update(bytes.as_ref());
-        h.update([0xFF]);
-    }
-    format!("sha256:{:x}", h.finalize())
-}
-
-fn collect_skill_files_recursive(
-    root: &Path,
-    dir: &Path,
-    out: &mut Vec<(String, Vec<u8>)>,
-) -> Result<(), AgentError> {
-    for entry in std::fs::read_dir(dir)
-        .map_err(|e| AgentError::Io(format!("Failed to read dir '{}': {}", dir.display(), e)))?
-    {
-        let entry = entry.map_err(|e| {
-            AgentError::Io(format!(
-                "Failed to read dir entry '{}': {}",
-                dir.display(),
-                e
-            ))
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|e| {
-            AgentError::Io(format!(
-                "Failed to get file type for '{}': {}",
-                path.display(),
-                e
-            ))
-        })?;
-        if file_type.is_dir() {
-            collect_skill_files_recursive(root, &path, out)?;
-            continue;
-        }
-        if !file_type.is_file() {
-            continue;
-        }
-        let rel = path
-            .strip_prefix(root)
-            .map_err(|e| AgentError::Io(format!("Failed to compute relative path: {}", e)))?
-            .to_string_lossy()
-            .replace('\\', "/");
-        let bytes = std::fs::read(&path)
-            .map_err(|e| AgentError::Io(format!("Failed to read '{}': {}", path.display(), e)))?;
-        out.push((rel, bytes));
-    }
-    Ok(())
-}
-
-fn hash_installed_skill_dir(skill_dir: &Path) -> Result<String, AgentError> {
-    if !skill_dir.exists() {
-        return Err(AgentError::Config(format!(
-            "Installed skill path does not exist: {}",
-            skill_dir.display()
-        )));
-    }
-    let mut files = Vec::new();
-    collect_skill_files_recursive(skill_dir, skill_dir, &mut files)?;
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut h = Sha256::new();
-    for (rel_path, bytes) in files {
-        h.update(rel_path.as_bytes());
-        h.update([0]);
-        h.update(&bytes);
-        h.update([0xFF]);
-    }
-    Ok(format!("sha256:{:x}", h.finalize()))
-}
-
-fn record_skill_install_in_hub_lock(
-    skills_dir: &Path,
-    installed_name: &str,
-    install_path: &Path,
-    files: &[(String, Bytes)],
-    provenance: &SkillInstallProvenance,
-) -> Result<(), AgentError> {
-    let mut lock = read_skills_hub_lock(skills_dir);
-    let now = now_rfc3339();
-    let install_path_rel = install_path
-        .strip_prefix(skills_dir)
-        .unwrap_or(install_path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let content_hash = hash_installed_skill_dir(install_path)?;
-    let files_rel: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    let entry = SkillHubInstalledEntry {
-        name: installed_name.to_string(),
-        source: provenance.source.clone(),
-        identifier: provenance.identifier.clone(),
-        trust_level: provenance.trust_level.clone(),
-        scan_verdict: "clean".to_string(),
-        content_hash,
-        install_path: install_path_rel,
-        files: files_rel,
-        metadata: provenance.metadata.clone(),
-        installed_at: now.clone(),
-        updated_at: now,
-    };
-    lock.installed.retain(|item| item.name != installed_name);
-    lock.installed.push(entry.clone());
-    lock.installed.sort_by(|a, b| a.name.cmp(&b.name));
-    write_skills_hub_lock(skills_dir, &lock)?;
-    append_skills_hub_audit(skills_dir, "INSTALL", &entry)?;
-    Ok(())
-}
-
-fn record_skill_uninstall_in_hub_lock(
-    skills_dir: &Path,
-    skill_name: &str,
-) -> Result<Option<SkillHubInstalledEntry>, AgentError> {
-    let mut lock = read_skills_hub_lock(skills_dir);
-    let mut removed: Option<SkillHubInstalledEntry> = None;
-    lock.installed.retain(|entry| {
-        if entry.name == skill_name {
-            removed = Some(entry.clone());
-            false
-        } else {
-            true
-        }
-    });
-    write_skills_hub_lock(skills_dir, &lock)?;
-    if let Some(ref removed_entry) = removed {
-        append_skills_hub_audit(skills_dir, "UNINSTALL", removed_entry)?;
-    }
-    Ok(removed)
-}
-
-fn skill_guard_scan_bundle(files: &[(String, Bytes)]) -> Result<(), AgentError> {
-    let guard = hermes_skills::SkillGuard::default();
-    for (rel_path, bytes) in files {
-        // Skip binary files to avoid false positives from compressed payloads.
-        let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
-            continue;
-        };
-        let probe = hermes_core::types::Skill {
-            name: rel_path.clone(),
-            content: text.to_string(),
-            category: Some("external".to_string()),
-            description: None,
-        };
-        guard.scan_security_only(&probe).map_err(|e| {
-            AgentError::Config(format!(
-                "Security scan failed for skill bundle file '{}': {}",
-                rel_path, e
-            ))
-        })?;
-    }
-    Ok(())
-}
 
 fn github_request(client: &reqwest::Client, url: &str, accept: &str) -> reqwest::RequestBuilder {
     let mut req = client
@@ -1368,8 +1149,26 @@ fn github_request(client: &reqwest::Client, url: &str, accept: &str) -> reqwest:
     req
 }
 
-async fn github_default_branch(client: &reqwest::Client, repo: &str) -> Result<String, AgentError> {
-    let url = format!("{}/repos/{}", GITHUB_API_BASE, repo);
+fn github_api_base() -> String {
+    std::env::var("HERMES_SKILL_GITHUB_API_BASE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| GITHUB_API_BASE.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn github_raw_base() -> String {
+    std::env::var("HERMES_SKILL_GITHUB_RAW_BASE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://raw.githubusercontent.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+async fn github_default_ref(client: &reqwest::Client, repo: &str) -> Result<String, AgentError> {
+    let url = format!("{}/repos/{}", github_api_base(), repo);
     let resp = github_request(client, &url, "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(20))
         .send()
@@ -1387,18 +1186,99 @@ async fn github_default_branch(client: &reqwest::Client, repo: &str) -> Result<S
         .json::<GitHubRepoInfo>()
         .await
         .map_err(|e| AgentError::Config(format!("Invalid GitHub repo response: {}", e)))?;
-    Ok(payload.default_branch)
+    let reference = payload.default_branch.trim();
+    if reference.is_empty() {
+        return Err(AgentError::Config(format!(
+            "GitHub repo '{}' did not provide a default reference",
+            repo
+        )));
+    }
+    Ok(reference.to_string())
+}
+
+fn is_immutable_git_revision(value: &str) -> bool {
+    let value = value.trim();
+    (40..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+async fn github_resolve_immutable_revision(
+    client: &reqwest::Client,
+    repo: &str,
+    requested_ref: Option<&str>,
+) -> Result<String, AgentError> {
+    let requested_ref = match requested_ref.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(reference) => reference.to_string(),
+        None => github_default_ref(client, repo).await?,
+    };
+    let url = format!(
+        "{}/repos/{}/commits/{}",
+        github_api_base(),
+        repo,
+        urlencoding::encode(&requested_ref)
+    );
+    let resp = github_request(client, &url, "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| {
+            AgentError::Config(format!(
+                "GitHub immutable revision lookup failed for {}@{}: {}",
+                repo, requested_ref, e
+            ))
+        })?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "GitHub immutable revision lookup failed for {}@{} ({}): {}",
+            repo, requested_ref, status, body
+        )));
+    }
+    let payload = resp
+        .json::<GitHubCommitResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid GitHub commit payload: {}", e)))?;
+    let revision = payload.sha.trim();
+    if !is_immutable_git_revision(revision) {
+        return Err(AgentError::Config(format!(
+            "GitHub ref {}@{} did not resolve to an immutable commit revision",
+            repo, requested_ref
+        )));
+    }
+    Ok(revision.to_ascii_lowercase())
+}
+
+async fn resolve_github_skill_source(
+    client: &reqwest::Client,
+    repo: &str,
+    requested_ref: Option<&str>,
+    skill_dir: &str,
+) -> Result<ResolvedSkillSource, AgentError> {
+    ensure_safe_relative_path(skill_dir)?;
+    Ok(ResolvedSkillSource {
+        repo: repo.trim().to_string(),
+        immutable_revision: github_resolve_immutable_revision(client, repo, requested_ref).await?,
+        skill_dir: skill_dir.trim_matches('/').to_string(),
+    })
 }
 
 async fn github_repo_tree(
     client: &reqwest::Client,
     repo: &str,
-    branch: &str,
+    immutable_revision: &str,
 ) -> Result<Vec<GitHubTreeEntry>, AgentError> {
-    let encoded_branch = urlencoding::encode(branch);
+    if !is_immutable_git_revision(immutable_revision) {
+        return Err(AgentError::Config(format!(
+            "Refusing GitHub tree fetch for non-immutable revision '{}'",
+            immutable_revision
+        )));
+    }
+    let encoded_revision = urlencoding::encode(immutable_revision);
     let url = format!(
         "{}/repos/{}/git/trees/{}?recursive=1",
-        GITHUB_API_BASE, repo, encoded_branch
+        github_api_base(),
+        repo,
+        encoded_revision
     );
     let resp = github_request(client, &url, "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(30))
@@ -1409,7 +1289,7 @@ async fn github_repo_tree(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(AgentError::Config(format!(
-            "GitHub tree lookup failed for {repo}@{branch} ({status}): {body}"
+            "GitHub tree lookup failed for {repo}@{immutable_revision} ({status}): {body}"
         )));
     }
     let payload = resp

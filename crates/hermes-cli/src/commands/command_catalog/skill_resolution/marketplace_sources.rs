@@ -14,10 +14,12 @@ struct ClaudeMarketplacePlugin {
 
 async fn fetch_claude_marketplace_manifest(
     client: &reqwest::Client,
+    immutable_revision: &str,
 ) -> Result<ClaudeMarketplaceManifest, AgentError> {
     let url = format!(
-        "{}/repos/anthropics/skills/contents/.claude-plugin/marketplace.json",
-        GITHUB_API_BASE
+        "{}/repos/anthropics/skills/contents/.claude-plugin/marketplace.json?ref={}",
+        github_api_base(),
+        urlencoding::encode(immutable_revision)
     );
     let resp = github_request(client, &url, "application/vnd.github.v3.raw")
         .timeout(std::time::Duration::from_secs(20))
@@ -41,7 +43,9 @@ async fn resolve_claude_marketplace_skill(
     client: &reqwest::Client,
     requested: &str,
 ) -> Result<ResolvedSkillSource, AgentError> {
-    let manifest = fetch_claude_marketplace_manifest(client).await?;
+    let repo = "anthropics/skills";
+    let immutable_revision = github_resolve_immutable_revision(client, repo, None).await?;
+    let manifest = fetch_claude_marketplace_manifest(client, &immutable_revision).await?;
     let req = requested.trim().trim_matches('/').to_ascii_lowercase();
     let mut candidate_paths: Vec<String> = Vec::new();
     for plugin in manifest.plugins {
@@ -66,8 +70,8 @@ async fn resolve_claude_marketplace_skill(
                 || req == format!("{}/{}", plugin_name, normalized.to_ascii_lowercase())
             {
                 return Ok(ResolvedSkillSource {
-                    repo: "anthropics/skills".to_string(),
-                    branch: "main".to_string(),
+                    repo: repo.to_string(),
+                    immutable_revision,
                     skill_dir: normalized,
                 });
             }
@@ -111,8 +115,9 @@ async fn resolve_official_skill_source(
         ));
     }
 
-    let branch = github_default_branch(client, OFFICIAL_SKILLS_REPO).await?;
-    let tree = github_repo_tree(client, OFFICIAL_SKILLS_REPO, &branch).await?;
+    let immutable_revision =
+        github_resolve_immutable_revision(client, OFFICIAL_SKILLS_REPO, None).await?;
+    let tree = github_repo_tree(client, OFFICIAL_SKILLS_REPO, &immutable_revision).await?;
     let has_skill_dir = |dir: &str| -> bool {
         let target = format!("{}/SKILL.md", dir.trim_matches('/'));
         tree.iter()
@@ -138,18 +143,18 @@ async fn resolve_official_skill_source(
     for query in candidate_queries {
         if let Ok(record) = resolve_skill_via_registry_index(client, &query, Some("official")).await
         {
-            if let RegistryInstallSource::GitRepo(source) = record.install_source {
-                let mut candidates = official_skill_path_candidates(&source.skill_dir);
-                for c in official_skill_path_candidates(&normalized) {
-                    if !candidates.iter().any(|existing| existing == &c) {
-                        candidates.push(c);
+            if let RegistryInstallSource::GitRepo { skill_dir, .. } = record.install_source {
+                let mut candidates = official_skill_path_candidates(&skill_dir);
+                for candidate in official_skill_path_candidates(&normalized) {
+                    if !candidates.iter().any(|existing| existing == &candidate) {
+                        candidates.push(candidate);
                     }
                 }
                 for candidate in candidates {
                     if has_skill_dir(&candidate) {
                         return Ok(ResolvedSkillSource {
                             repo: OFFICIAL_SKILLS_REPO.to_string(),
-                            branch: branch.clone(),
+                            immutable_revision: immutable_revision.clone(),
                             skill_dir: candidate,
                         });
                     }
@@ -162,7 +167,7 @@ async fn resolve_official_skill_source(
         if has_skill_dir(&candidate) {
             return Ok(ResolvedSkillSource {
                 repo: OFFICIAL_SKILLS_REPO.to_string(),
-                branch: branch.clone(),
+                immutable_revision,
                 skill_dir: candidate,
             });
         }
@@ -202,19 +207,25 @@ async fn resolve_skills_sh_source(
             "Missing skills.sh skill identifier.".to_string(),
         ));
     }
-    if let Some((repo, _, skill_dir)) = parse_explicit_github_skill(req) {
-        let branch = github_default_branch(client, &repo).await?;
-        return Ok(ResolvedSkillSource {
-            repo,
-            branch,
-            skill_dir,
-        });
+    if let Some((repo, requested_ref, skill_dir)) = parse_explicit_github_skill(req) {
+        return resolve_github_skill_source(client, &repo, requested_ref.as_deref(), &skill_dir)
+            .await;
     }
 
     if let Ok(resolved) = resolve_skill_via_registry_index(client, req, Some("skills.sh")).await {
-        if let RegistryInstallSource::GitRepo(source) = resolved.install_source {
-            let branch = github_default_branch(client, &source.repo).await?;
-            return Ok(ResolvedSkillSource { branch, ..source });
+        if let RegistryInstallSource::GitRepo {
+            repo,
+            requested_ref,
+            skill_dir,
+        } = resolved.install_source
+        {
+            return resolve_github_skill_source(
+                client,
+                &repo,
+                requested_ref.as_deref(),
+                &skill_dir,
+            )
+            .await;
         }
     }
 
@@ -251,19 +262,15 @@ async fn resolve_skills_sh_source(
             hit.skill_id.trim().to_string()
         };
         let repo = source.to_string();
-        let branch = github_default_branch(client, &repo).await?;
         if let Ok(found) = resolve_skill_in_repo(client, &repo, &skill_id, Some("skills")).await {
             return Ok(found);
         }
         if let Ok(found) = resolve_skill_in_repo(client, &repo, &req_l, Some("skills")).await {
             return Ok(found);
         }
-        if let Some((repo2, _, dir)) = parse_explicit_github_skill(&hit.id) {
-            return Ok(ResolvedSkillSource {
-                repo: repo2,
-                branch,
-                skill_dir: dir,
-            });
+        if let Some((repo2, requested_ref, dir)) = parse_explicit_github_skill(&hit.id) {
+            return resolve_github_skill_source(client, &repo2, requested_ref.as_deref(), &dir)
+                .await;
         }
     }
 

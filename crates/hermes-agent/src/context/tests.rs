@@ -370,33 +370,148 @@ mod tests {
         assert_eq!(prompt, "Identity");
     }
 
+    fn builtin_subject(label: &str) -> (MemorySubject, MemorySubjectStorageKey) {
+        let subject =
+            MemorySubject::local_owner(hermes_core::MemorySurface::Local, label).unwrap();
+        let key =
+            subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes([17_u8; 32]));
+        (subject, key)
+    }
+
+    #[cfg(unix)]
+    fn owner_only(path: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = if path.is_dir() { 0o700 } else { 0o600 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .expect("owner-only permissions");
+    }
+
+    #[cfg(unix)]
+    fn owner_only_snapshot_tree(
+        base: &std::path::Path,
+        subjects: &std::path::Path,
+        alice: &std::path::Path,
+        bob: &std::path::Path,
+    ) {
+        for path in [base, subjects, alice, bob] {
+            owner_only(path);
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
-    fn test_load_builtin_memory_snapshot_reads_memories_dir() {
+    fn builtin_memory_snapshot_is_subject_scoped_and_quarantines_legacy_global_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let memories = tmp.path().join("memories");
-        std::fs::create_dir_all(&memories).unwrap();
+        let (alice, alice_key) = builtin_subject("alice");
+        let (bob, bob_key) = builtin_subject("bob");
+        let legacy_dir = tmp.path().join("memories");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        owner_only(&legacy_dir);
+        std::fs::write(legacy_dir.join("MEMORY.md"), "legacy global secret").unwrap();
+
+        let subjects_dir = legacy_dir.join("subjects");
+        let alice_dir = subjects_dir.join(alice_key.as_str());
+        let bob_dir = subjects_dir.join(bob_key.as_str());
+        std::fs::create_dir_all(&alice_dir).unwrap();
+        std::fs::create_dir_all(&bob_dir).unwrap();
+        owner_only_snapshot_tree(tmp.path(), &subjects_dir, &alice_dir, &bob_dir);
         std::fs::write(
-            memories.join("MEMORY.md"),
-            "Use ripgrep for search\n§\nUse ripgrep for search\n§\nWorkspace is Rust",
+            alice_dir.join("MEMORY.md"),
+            "Use ripgrep for search\n§\nWorkspace is Rust",
         )
         .unwrap();
-        std::fs::write(
-            memories.join("USER.md"),
-            "Name: Alice\n§\nPrefers concise Chinese",
+        std::fs::write(alice_dir.join("USER.md"), "Name: Alice").unwrap();
+        std::fs::write(bob_dir.join("MEMORY.md"), "Bob-only note").unwrap();
+        for path in [
+            legacy_dir.join("MEMORY.md"),
+            alice_dir.join("MEMORY.md"),
+            alice_dir.join("USER.md"),
+            bob_dir.join("MEMORY.md"),
+        ] {
+            owner_only(&path);
+        }
+
+        let (alice_memory, alice_user) = load_builtin_memory_snapshot(
+            Some(&alice),
+            Some(&alice_key),
+            Some(tmp.path().to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        let (bob_memory, bob_user) = load_builtin_memory_snapshot(
+            Some(&bob),
+            Some(&bob_key),
+            Some(tmp.path().to_string_lossy().as_ref()),
         )
         .unwrap();
 
-        let (memory_block, user_block) =
-            load_builtin_memory_snapshot(Some(tmp.path().to_string_lossy().as_ref()));
+        let alice_memory = alice_memory.unwrap();
+        assert!(alice_memory.contains("Use ripgrep for search"));
+        assert!(alice_memory.contains("Workspace is Rust"));
+        assert!(!alice_memory.contains("legacy global secret"));
+        assert!(!alice_memory.contains("Bob-only note"));
+        assert!(alice_user.unwrap().contains("Name: Alice"));
+        assert!(bob_memory.unwrap().contains("Bob-only note"));
+        assert!(bob_user.is_none());
+    }
 
-        let memory_block = memory_block.unwrap_or_default();
-        let user_block = user_block.unwrap_or_default();
-        assert!(memory_block.contains("MEMORY (your personal notes)"));
-        assert!(memory_block.contains("Use ripgrep for search"));
-        assert!(memory_block.contains("Workspace is Rust"));
-        assert_eq!(memory_block.matches("Use ripgrep for search").count(), 1);
-        assert!(user_block.contains("USER PROFILE (who the user is)"));
-        assert!(user_block.contains("Name: Alice"));
+    #[test]
+    fn builtin_memory_snapshot_requires_an_authenticated_binding() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            load_builtin_memory_snapshot(None, None, Some(tmp.path().to_string_lossy().as_ref())),
+            Err(BuiltinMemorySnapshotUnavailable::MissingSubjectBinding)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn builtin_memory_snapshot_rejects_symlinked_subject_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, "outside secret").unwrap();
+        let (subject, key) = builtin_subject("symlink");
+        let directory = tmp.path().join("memories").join("subjects").join(key.as_str());
+        std::fs::create_dir_all(&directory).unwrap();
+        owner_only(&tmp.path().join("memories"));
+        let subjects = directory.parent().expect("subjects directory");
+        owner_only_snapshot_tree(tmp.path(), subjects, &directory, &directory);
+        std::os::unix::fs::symlink(&outside, directory.join("MEMORY.md")).unwrap();
+
+        assert_eq!(
+            load_builtin_memory_snapshot(
+                Some(&subject),
+                Some(&key),
+                Some(tmp.path().to_string_lossy().as_ref()),
+            ),
+            Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn builtin_memory_snapshot_rejects_world_readable_subject_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (subject, key) = builtin_subject("world-readable");
+        let directory = tmp.path().join("memories").join("subjects").join(key.as_str());
+        std::fs::create_dir_all(&directory).unwrap();
+        let subjects = directory.parent().expect("subjects directory");
+        owner_only_snapshot_tree(tmp.path(), subjects, &directory, &directory);
+        owner_only(&tmp.path().join("memories"));
+        let memory_file = directory.join("MEMORY.md");
+        std::fs::write(&memory_file, "must not be read").unwrap();
+        std::fs::set_permissions(&memory_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(
+            load_builtin_memory_snapshot(
+                Some(&subject),
+                Some(&key),
+                Some(tmp.path().to_string_lossy().as_ref()),
+            ),
+            Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath)
+        );
     }
 
     #[test]

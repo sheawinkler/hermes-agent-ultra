@@ -260,20 +260,50 @@ fn test_hardline_disk_and_fork_bomb_variants() {
 }
 
 #[test]
-fn test_container_backends_bypass_host_guards() {
+fn test_backend_labels_are_host_sensitive_without_typed_isolation() {
     let manager = ApprovalManager::new();
-    for environment in ["docker", "singularity", "modal", "daytona"] {
+    for environment in ["docker", "singularity", "modal", "daytona", "ssh"] {
         assert_eq!(
             manager.check_approval_for_environment("rm -rf /", environment),
-            ApprovalDecision::Approved,
-            "container backend {environment} should bypass host guards"
+            ApprovalDecision::Denied,
+            "backend label {environment} must not bypass host guards"
         );
         assert_eq!(
             manager.check_approval_with_context("sudo -S whoami", environment, true, false),
-            ApprovalDecision::Approved,
-            "container backend {environment} should bypass sudo stdin guard"
+            ApprovalDecision::Denied,
+            "backend label {environment} must not bypass sudo stdin guard"
         );
     }
+
+    let backend = std::sync::Arc::new(
+        hermes_environments::docker::DockerBackend::new(
+            None,
+            Some(format!("registry.example/hermes@sha256:{}", "c".repeat(64))),
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            30,
+            1024,
+        ),
+    );
+    let context = backend
+        .closed_execution_context(hermes_core::ResolvedExecutionMode {
+            mode: hermes_core::ExecutionMode::Reviewed,
+            source: hermes_core::ExecutionModeSource::Cli,
+        })
+        .expect("exact hardened Docker certification");
+    let isolated = CommandExecutionEnvironment::from_containment_context(&context);
+    assert_eq!(
+        manager.check_approval_for_environment("rm -rf /", isolated),
+        ApprovalDecision::Approved,
+        "only a typed verified-isolation capability may bypass host guards"
+    );
 }
 
 #[test]

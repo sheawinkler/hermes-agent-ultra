@@ -8,9 +8,16 @@
 //! simplified but fully functional alternative.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::time::Duration;
+use hermes_core::{
+    MemoryAuditActor, MemoryExportCompletion, MemoryExportEvidenceDigest, MemoryExportPage,
+    MemoryExportReceipt, MemoryExportSink, MemoryExportSnapshot, MemoryForgetReceipt,
+    MemoryGovernanceOperation, MemoryProviderGovernanceError, MemoryReadbackReceipt,
+    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySubject, MemorySubjectStorageKey,
+};
 
-use rusqlite::{params, params_from_iter, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, Row, TransactionBehavior};
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
@@ -19,55 +26,69 @@ use crate::memory_manager::MemoryProviderPlugin;
 // SQLite schema
 // ---------------------------------------------------------------------------
 
+const HOLOGRAPHIC_SCHEMA_VERSION: i64 = 3;
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS facts (
     fact_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    content         TEXT NOT NULL UNIQUE,
+    subject_key     TEXT NOT NULL,
+    content         TEXT NOT NULL,
     category        TEXT DEFAULT 'general',
     tags            TEXT DEFAULT '',
     trust_score     REAL DEFAULT 0.5,
     retrieval_count INTEGER DEFAULT 0,
     helpful_count   INTEGER DEFAULT 0,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(subject_key, content)
 );
 
 CREATE TABLE IF NOT EXISTS entities (
-    entity_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL,
-    entity_type TEXT DEFAULT 'unknown',
-    aliases     TEXT DEFAULT '',
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    entity_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_key     TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    entity_type     TEXT DEFAULT 'unknown',
+    aliases         TEXT DEFAULT '',
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(subject_key, name)
 );
 
 CREATE TABLE IF NOT EXISTS fact_entities (
-    fact_id   INTEGER REFERENCES facts(fact_id),
-    entity_id INTEGER REFERENCES entities(entity_id),
-    PRIMARY KEY (fact_id, entity_id)
+    subject_key TEXT NOT NULL,
+    fact_id     INTEGER NOT NULL REFERENCES facts(fact_id) ON DELETE CASCADE,
+    entity_id   INTEGER NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    PRIMARY KEY (subject_key, fact_id, entity_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_facts_trust    ON facts(trust_score DESC);
-CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category);
-CREATE INDEX IF NOT EXISTS idx_entities_name  ON entities(name);
+CREATE INDEX IF NOT EXISTS idx_facts_subject_trust
+    ON facts(subject_key, trust_score DESC);
+CREATE INDEX IF NOT EXISTS idx_facts_subject_category
+    ON facts(subject_key, category);
+CREATE INDEX IF NOT EXISTS idx_facts_subject_updated
+    ON facts(subject_key, updated_at);
+CREATE INDEX IF NOT EXISTS idx_entities_subject_name
+    ON entities(subject_key, name);
+CREATE INDEX IF NOT EXISTS idx_fact_entities_subject_fact
+    ON fact_entities(subject_key, fact_id);
 ";
 
 const FTS_SCHEMA: &str = "
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
-    USING fts5(content, tags, content=facts, content_rowid=fact_id);
+    USING fts5(subject_key UNINDEXED, content, tags);
 
 CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-    INSERT INTO facts_fts(rowid, content, tags)
-    VALUES (new.fact_id, new.content, new.tags);
+    INSERT INTO facts_fts(rowid, subject_key, content, tags)
+    VALUES (new.fact_id, new.subject_key, new.content, new.tags);
 END;
 
 CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
-    DELETE FROM facts_fts WHERE rowid = old.fact_id;
+    DELETE FROM facts_fts WHERE rowid = old.fact_id AND subject_key = old.subject_key;
 END;
 
 CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-    DELETE FROM facts_fts WHERE rowid = old.fact_id;
-    INSERT INTO facts_fts(rowid, content, tags)
-    VALUES (new.fact_id, new.content, new.tags);
+    DELETE FROM facts_fts WHERE rowid = old.fact_id AND subject_key = old.subject_key;
+    INSERT INTO facts_fts(rowid, subject_key, content, tags)
+    VALUES (new.fact_id, new.subject_key, new.content, new.tags);
 END;
 ";
 
@@ -212,6 +233,177 @@ fn is_fts5_unavailable(error: &rusqlite::Error) -> bool {
     message.contains("no such module")
         || message.contains("unknown tokenizer")
         || message.contains("fts5")
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct HolographicMigrationReport {
+    schema_version: i64,
+    quarantined_facts: i64,
+    quarantined_entities: i64,
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|exists| exists != 0)
+    .map_err(|error| error.to_string())
+}
+
+fn sqlite_table_has_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, String> {
+    if !sqlite_table_exists(conn, table)? {
+        return Ok(false);
+    }
+    let table = match table {
+        "facts" | "entities" | "fact_entities" | "facts_fts" => table,
+        _ => return Err(format!("unsupported SQLite table lookup: {table}")),
+    };
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        let name = row.get::<_, String>(1).map_err(|error| error.to_string())?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn sqlite_table_row_count(conn: &Connection, table: &str) -> Result<i64, String> {
+    let table = match table {
+        "facts" | "entities" => table,
+        _ => return Err(format!("unsupported SQLite count table: {table}")),
+    };
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn drop_holographic_fts_objects(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "
+        DROP TRIGGER IF EXISTS facts_ai;
+        DROP TRIGGER IF EXISTS facts_ad;
+        DROP TRIGGER IF EXISTS facts_au;
+        DROP TABLE IF EXISTS facts_fts;
+        ",
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn backfill_holographic_fts(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "
+        INSERT INTO facts_fts(rowid, subject_key, content, tags)
+        SELECT fact_id, subject_key, content, tags
+        FROM facts
+        ",
+        [],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+fn migrate_holographic_schema(
+    conn: &mut Connection,
+) -> Result<(HolographicMigrationReport, bool), String> {
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|error| error.to_string())?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|error| error.to_string())?;
+
+    let has_facts = sqlite_table_exists(conn, "facts")?;
+    let scoped_facts = !has_facts || sqlite_table_has_column(conn, "facts", "subject_key")?;
+    let mut report = HolographicMigrationReport {
+        schema_version: HOLOGRAPHIC_SCHEMA_VERSION,
+        ..HolographicMigrationReport::default()
+    };
+
+    if has_facts && !scoped_facts {
+        report.quarantined_facts = sqlite_table_row_count(conn, "facts")?;
+        if sqlite_table_exists(conn, "entities")? {
+            report.quarantined_entities = sqlite_table_row_count(conn, "entities")?;
+        }
+        for legacy_table in [
+            "facts_legacy_quarantine_v1",
+            "entities_legacy_quarantine_v1",
+            "fact_entities_legacy_quarantine_v1",
+        ] {
+            if sqlite_table_exists(conn, legacy_table)? {
+                return Err(format!(
+                    "refusing to overwrite existing quarantined legacy table {legacy_table}"
+                ));
+            }
+        }
+
+        let has_entities = sqlite_table_exists(conn, "entities")?;
+        let has_fact_entities = sqlite_table_exists(conn, "fact_entities")?;
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        drop_holographic_fts_objects(&transaction)?;
+        if has_fact_entities {
+            transaction
+                .execute_batch(
+                    "ALTER TABLE fact_entities RENAME TO fact_entities_legacy_quarantine_v1;",
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if has_entities {
+            transaction
+                .execute_batch("ALTER TABLE entities RENAME TO entities_legacy_quarantine_v1;")
+                .map_err(|error| error.to_string())?;
+        }
+        transaction
+            .execute_batch("ALTER TABLE facts RENAME TO facts_legacy_quarantine_v1;")
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute_batch(SCHEMA)
+            .map_err(|error| error.to_string())?;
+        transaction
+            .pragma_update(None, "user_version", HOLOGRAPHIC_SCHEMA_VERSION)
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    } else {
+        conn.execute_batch(SCHEMA)
+            .map_err(|error| error.to_string())?;
+        conn.pragma_update(None, "user_version", HOLOGRAPHIC_SCHEMA_VERSION)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let fts_ready = sqlite_table_has_column(conn, "facts_fts", "subject_key")?;
+    if fts_ready {
+        return Ok((report, true));
+    }
+
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    drop_holographic_fts_objects(&transaction)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+
+    match conn.execute_batch(FTS_SCHEMA) {
+        Ok(()) => {
+            backfill_holographic_fts(conn)?;
+            Ok((report, true))
+        }
+        Err(error) if is_fts5_unavailable(&error) => {
+            tracing::warn!(
+                "SQLite FTS5 unavailable for holographic memory; falling back to LIKE search: {error}"
+            );
+            Ok((report, false))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn escape_like(raw: &str) -> String {
@@ -363,9 +555,9 @@ pub struct HolographicMemoryPlugin {
     conn: Mutex<Option<Connection>>,
     fts_enabled: Mutex<bool>,
     db_path: Mutex<Option<PathBuf>>,
+    migration_report: Mutex<HolographicMigrationReport>,
     default_trust: f64,
     min_trust: f64,
-    session_id: Mutex<String>,
 }
 
 impl HolographicMemoryPlugin {
@@ -374,106 +566,109 @@ impl HolographicMemoryPlugin {
             conn: Mutex::new(None),
             fts_enabled: Mutex::new(false),
             db_path: Mutex::new(None),
+            migration_report: Mutex::new(HolographicMigrationReport::default()),
             default_trust: 0.5,
             min_trust: 0.3,
-            session_id: Mutex::new(String::new()),
         }
     }
 
     fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> R) -> Option<R> {
-        let guard = self.conn.lock().ok()?;
+        let guard = self.conn.lock();
         guard.as_ref().map(f)
     }
 
-    fn add_fact(&self, content: &str, category: &str, tags: &str) -> Result<i64, String> {
-        let guard = self.conn.lock().map_err(|e| e.to_string())?;
-        let conn = guard.as_ref().ok_or("Not initialized")?;
-
+    fn add_fact(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        content: &str,
+        category: &str,
+        tags: &str,
+    ) -> Result<i64, String> {
+        let mut guard = self.conn.lock();
+        let conn = guard.as_mut().ok_or("Not initialized")?;
         let content = content.trim();
         if content.is_empty() {
-            return Err("content must not be empty".into());
+            return Err("content must not be empty".to_string());
         }
-
-        match conn.execute(
-            "INSERT INTO facts (content, category, tags, trust_score) VALUES (?1, ?2, ?3, ?4)",
-            params![content, category, tags, self.default_trust],
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        match transaction.execute(
+            "
+            INSERT INTO facts (subject_key, content, category, tags, trust_score)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ",
+            params![
+                filter.as_str(),
+                content,
+                category,
+                tags,
+                self.default_trust
+            ],
         ) {
             Ok(_) => {
-                let fact_id = conn.last_insert_rowid();
+                let fact_id = transaction.last_insert_rowid();
                 for name in extract_entities(content) {
-                    let entity_id = self.resolve_entity(conn, &name);
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO fact_entities (fact_id, entity_id) VALUES (?1, ?2)",
-                        params![fact_id, entity_id],
-                    );
+                    let entity_id = Self::resolve_entity(&transaction, filter, &name)?;
+                    transaction
+                        .execute(
+                            "
+                            INSERT OR IGNORE INTO fact_entities (subject_key, fact_id, entity_id)
+                            VALUES (?1, ?2, ?3)
+                            ",
+                            params![filter.as_str(), fact_id, entity_id],
+                        )
+                        .map_err(|error| error.to_string())?;
                 }
+                transaction.commit().map_err(|error| error.to_string())?;
                 Ok(fact_id)
             }
-            Err(rusqlite::Error::SqliteFailure(e, _))
-                if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                let existing: i64 = conn
+                let existing = transaction
                     .query_row(
-                        "SELECT fact_id FROM facts WHERE content = ?1",
-                        params![content],
-                        |row| row.get(0),
+                        "
+                        SELECT fact_id FROM facts
+                        WHERE subject_key = ?1 AND content = ?2
+                        ",
+                        params![filter.as_str(), content],
+                        |row| row.get::<_, i64>(0),
                     )
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|error| error.to_string())?;
+                transaction.commit().map_err(|error| error.to_string())?;
                 Ok(existing)
             }
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn ensure_fts_schema(conn: &Connection) -> Result<bool, String> {
-        match conn.execute_batch(FTS_SCHEMA) {
-            Ok(()) => {
-                if let Err(err) =
-                    conn.execute("INSERT INTO facts_fts(facts_fts) VALUES('rebuild')", [])
-                {
-                    tracing::debug!("Holographic memory FTS rebuild skipped: {}", err);
-                }
-                Ok(true)
-            }
-            Err(err) if is_fts5_unavailable(&err) => {
-                tracing::warn!(
-                    "SQLite FTS5 unavailable for holographic memory; falling back to LIKE search: {}",
-                    err
-                );
-                Ok(false)
-            }
-            Err(err) => Err(err.to_string()),
+            Err(error) => Err(error.to_string()),
         }
     }
 
     fn search_facts(
         &self,
+        filter: &MemorySubjectStorageKey,
         query: &str,
         category: Option<&str>,
         min_trust: f64,
         limit: usize,
     ) -> Vec<Value> {
-        let guard = match self.conn.lock() {
-            Ok(g) => g,
-            Err(_) => return Vec::new(),
-        };
-        let conn = match guard.as_ref() {
-            Some(c) => c,
+        let mut guard = self.conn.lock();
+        let conn = match guard.as_mut() {
+            Some(conn) => conn,
             None => return Vec::new(),
         };
         if query.trim().is_empty() || limit == 0 {
             return Vec::new();
         }
 
-        let fts_enabled = self.fts_enabled.lock().map(|g| *g).unwrap_or(false);
+        let fts_enabled = *self.fts_enabled.lock();
         let mut results = if fts_enabled {
-            self.search_facts_fts(conn, query, category, min_trust, limit * 3)
+            self.search_facts_fts(conn, filter, query, category, min_trust, limit * 3)
         } else {
             Vec::new()
         };
-
         if results.is_empty() {
-            results = self.search_facts_like(conn, query, category, min_trust, limit * 3);
+            results = self.search_facts_like(conn, filter, query, category, min_trust, limit * 3);
         }
 
         let query_tokens = tokenize_query(query);
@@ -487,31 +682,45 @@ impl HolographicMemoryPlugin {
             let trust = fact["trust_score"].as_f64().unwrap_or(0.0);
             fact["score"] = json!(((0.6 * fts_rank) + (0.4 * jaccard)) * trust);
         }
-        results.sort_by(|a, b| {
-            b["score"]
+        results.sort_by(|left, right| {
+            right["score"]
                 .as_f64()
                 .unwrap_or(0.0)
-                .partial_cmp(&a["score"].as_f64().unwrap_or(0.0))
+                .partial_cmp(&left["score"].as_f64().unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| {
-                    b["trust_score"]
+                    right["trust_score"]
                         .as_f64()
                         .unwrap_or(0.0)
-                        .partial_cmp(&a["trust_score"].as_f64().unwrap_or(0.0))
+                        .partial_cmp(&left["trust_score"].as_f64().unwrap_or(0.0))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
         });
         results.truncate(limit);
 
-        let ids: Vec<i64> = results
-            .iter()
-            .filter_map(|r| r["fact_id"].as_i64())
-            .collect();
-        for id in ids {
-            let _ = conn.execute(
-                "UPDATE facts SET retrieval_count = retrieval_count + 1 WHERE fact_id = ?1",
-                params![id],
-            );
+        if !results.is_empty() {
+            let transaction = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    tracing::warn!("Holographic retrieval count transaction failed: {error}");
+                    return results;
+                }
+            };
+            for id in results.iter().filter_map(|result| result["fact_id"].as_i64()) {
+                if let Err(error) = transaction.execute(
+                    "
+                    UPDATE facts
+                    SET retrieval_count = retrieval_count + 1
+                    WHERE fact_id = ?1 AND subject_key = ?2
+                    ",
+                    params![id, filter.as_str()],
+                ) {
+                    tracing::warn!("Holographic retrieval count update failed: {error}");
+                }
+            }
+            if let Err(error) = transaction.commit() {
+                tracing::warn!("Holographic retrieval count commit failed: {error}");
+            }
         }
         results
     }
@@ -519,6 +728,7 @@ impl HolographicMemoryPlugin {
     fn search_facts_fts(
         &self,
         conn: &Connection,
+        filter: &MemorySubjectStorageKey,
         query: &str,
         category: Option<&str>,
         min_trust: f64,
@@ -529,32 +739,40 @@ impl HolographicMemoryPlugin {
         };
         let mut values = vec![
             rusqlite::types::Value::Text(match_query),
+            rusqlite::types::Value::Text(filter.as_str().to_string()),
             rusqlite::types::Value::Real(min_trust),
         ];
         let category_clause = if let Some(category) = category {
             values.push(rusqlite::types::Value::Text(category.to_string()));
-            " AND f.category = ?3"
+            " AND f.category = ?4"
         } else {
             ""
         };
         values.push(rusqlite::types::Value::Integer(limit as i64));
         let limit_placeholder = values.len();
         let sql = format!(
-            "SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score, \
-                    f.retrieval_count, f.helpful_count, f.created_at, f.updated_at, \
-                    facts_fts.rank \
-             FROM facts_fts \
-             JOIN facts f ON f.fact_id = facts_fts.rowid \
-             WHERE facts_fts MATCH ?1 AND f.trust_score >= ?2{} \
-             ORDER BY facts_fts.rank, f.trust_score DESC \
-             LIMIT ?{}",
+            "
+            SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                   f.retrieval_count, f.helpful_count, f.created_at, f.updated_at,
+                   facts_fts.rank
+            FROM facts_fts
+            JOIN facts f
+              ON f.fact_id = facts_fts.rowid
+             AND f.subject_key = facts_fts.subject_key
+            WHERE facts_fts MATCH ?1
+              AND facts_fts.subject_key = ?2
+              AND f.subject_key = ?2
+              AND f.trust_score >= ?3{}
+            ORDER BY facts_fts.rank, f.trust_score DESC
+            LIMIT ?{}
+            ",
             category_clause, limit_placeholder
         );
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(stmt) => stmt,
+        let mut statement = match conn.prepare(&sql) {
+            Ok(statement) => statement,
             Err(_) => return Vec::new(),
         };
-        let rows = match stmt.query_map(params_from_iter(values.iter()), |row| {
+        let rows = match statement.query_map(params_from_iter(values.iter()), |row| {
             let mut fact = row_to_fact(row)?;
             let raw_rank = row.get::<_, f64>(9).unwrap_or(0.0).abs();
             fact["fts_rank"] = json!(1.0 / (1.0 + raw_rank));
@@ -569,6 +787,7 @@ impl HolographicMemoryPlugin {
     fn search_facts_like(
         &self,
         conn: &Connection,
+        filter: &MemorySubjectStorageKey,
         query: &str,
         category: Option<&str>,
         min_trust: f64,
@@ -583,32 +802,39 @@ impl HolographicMemoryPlugin {
         for keyword in keywords {
             let pattern = format!("%{}%", escape_like(&keyword));
             let mut values = vec![
+                rusqlite::types::Value::Text(filter.as_str().to_string()),
                 rusqlite::types::Value::Real(min_trust),
                 rusqlite::types::Value::Text(pattern),
             ];
             let category_clause = if let Some(category) = category {
                 values.push(rusqlite::types::Value::Text(category.to_string()));
-                " AND category = ?3"
+                " AND category = ?4"
             } else {
                 ""
             };
             values.push(rusqlite::types::Value::Integer(limit as i64));
             let limit_placeholder = values.len();
             let sql = format!(
-                "SELECT fact_id, content, category, tags, trust_score, retrieval_count, \
-                        helpful_count, created_at, updated_at \
-                 FROM facts \
-                 WHERE trust_score >= ?1 \
-                   AND (LOWER(content) LIKE ?2 ESCAPE '\\' OR LOWER(tags) LIKE ?2 ESCAPE '\\'){} \
-                 ORDER BY trust_score DESC \
-                 LIMIT ?{}",
+                "
+                SELECT fact_id, content, category, tags, trust_score, retrieval_count,
+                       helpful_count, created_at, updated_at
+                FROM facts
+                WHERE subject_key = ?1
+                  AND trust_score >= ?2
+                  AND (
+                    LOWER(content) LIKE ?3 ESCAPE '\\'
+                    OR LOWER(tags) LIKE ?3 ESCAPE '\\'
+                  ){}
+                ORDER BY trust_score DESC
+                LIMIT ?{}
+                ",
                 category_clause, limit_placeholder
             );
-            let mut stmt = match conn.prepare(&sql) {
-                Ok(stmt) => stmt,
+            let mut statement = match conn.prepare(&sql) {
+                Ok(statement) => statement,
                 Err(_) => continue,
             };
-            let rows = match stmt.query_map(params_from_iter(values.iter()), row_to_fact) {
+            let rows = match statement.query_map(params_from_iter(values.iter()), row_to_fact) {
                 Ok(rows) => rows,
                 Err(_) => continue,
             };
@@ -623,44 +849,70 @@ impl HolographicMemoryPlugin {
         results
     }
 
-    fn resolve_entity(&self, conn: &Connection, name: &str) -> i64 {
+    fn resolve_entity(
+        conn: &Connection,
+        filter: &MemorySubjectStorageKey,
+        name: &str,
+    ) -> Result<i64, String> {
         if let Ok(id) = conn.query_row(
-            "SELECT entity_id FROM entities WHERE name LIKE ?1",
-            params![name],
+            "
+            SELECT entity_id FROM entities
+            WHERE subject_key = ?1 AND name = ?2 COLLATE NOCASE
+            ",
+            params![filter.as_str(), name],
             |row| row.get::<_, i64>(0),
         ) {
-            return id;
+            return Ok(id);
         }
-
-        let _ = conn.execute("INSERT INTO entities (name) VALUES (?1)", params![name]);
-        conn.last_insert_rowid()
+        conn.execute(
+            "INSERT INTO entities (subject_key, name) VALUES (?1, ?2)",
+            params![filter.as_str(), name],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(conn.last_insert_rowid())
     }
 
-    fn record_feedback(&self, fact_id: i64, helpful: bool) -> Result<Value, String> {
-        let guard = self.conn.lock().map_err(|e| e.to_string())?;
-        let conn = guard.as_ref().ok_or("Not initialized")?;
-
-        let (old_trust, old_helpful): (f64, i64) = conn
+    fn record_feedback(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        fact_id: i64,
+        helpful: bool,
+    ) -> Result<Value, String> {
+        let mut guard = self.conn.lock();
+        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let (old_trust, old_helpful): (f64, i64) = transaction
             .query_row(
-                "SELECT trust_score, helpful_count FROM facts WHERE fact_id = ?1",
-                params![fact_id],
+                "
+                SELECT trust_score, helpful_count FROM facts
+                WHERE fact_id = ?1 AND subject_key = ?2
+                ",
+                params![fact_id, filter.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .map_err(|_| format!("fact_id {} not found", fact_id))?;
-
+            .map_err(|_| format!("fact_id {fact_id} not found"))?;
         let delta = if helpful {
             HELPFUL_DELTA
         } else {
             UNHELPFUL_DELTA
         };
         let new_trust = clamp_trust(old_trust + delta);
-        let helpful_inc: i64 = if helpful { 1 } else { 0 };
-
-        conn.execute(
-            "UPDATE facts SET trust_score = ?1, helpful_count = helpful_count + ?2, updated_at = CURRENT_TIMESTAMP WHERE fact_id = ?3",
-            params![new_trust, helpful_inc, fact_id],
-        ).map_err(|e| e.to_string())?;
-
+        let helpful_inc: i64 = i64::from(helpful);
+        transaction
+            .execute(
+                "
+                UPDATE facts
+                SET trust_score = ?1, helpful_count = helpful_count + ?2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE fact_id = ?3 AND subject_key = ?4
+                ",
+                params![new_trust, helpful_inc, fact_id, filter.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
         Ok(json!({
             "fact_id": fact_id,
             "old_trust": old_trust,
@@ -669,12 +921,150 @@ impl HolographicMemoryPlugin {
         }))
     }
 
-    fn fact_count(&self) -> i64 {
+    fn fact_count(&self, filter: &MemorySubjectStorageKey) -> i64 {
         self.with_conn(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM facts", [], |row| row.get::<_, i64>(0))
-                .unwrap_or(0)
+            conn.query_row(
+                "SELECT COUNT(*) FROM facts WHERE subject_key = ?1",
+                params![filter.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
         })
         .unwrap_or(0)
+    }
+
+    fn subject_residue_count(&self, filter: &MemorySubjectStorageKey) -> Result<u64, String> {
+        let guard = self.conn.lock();
+        let conn = guard.as_ref().ok_or("Not initialized")?;
+        let mut total = 0_u64;
+        for table in ["facts", "entities", "fact_entities"] {
+            let count = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE subject_key = ?1"),
+                    params![filter.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+            total = total.saturating_add(count.max(0) as u64);
+        }
+        if sqlite_table_exists(conn, "facts_fts")? {
+            let count = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM facts_fts WHERE subject_key = ?1",
+                    params![filter.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+            total = total.saturating_add(count.max(0) as u64);
+        }
+        Ok(total)
+    }
+
+    fn purge_subject(&self, filter: &MemorySubjectStorageKey) -> Result<u64, String> {
+        let mut guard = self.conn.lock();
+        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let fts_exists = sqlite_table_exists(conn, "facts_fts")?;
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let mut deleted = 0_u64;
+        for statement in [
+            "DELETE FROM fact_entities WHERE subject_key = ?1",
+            "DELETE FROM facts WHERE subject_key = ?1",
+            "DELETE FROM entities WHERE subject_key = ?1",
+        ] {
+            let changed = transaction
+                .execute(statement, params![filter.as_str()])
+                .map_err(|error| error.to_string())?;
+            deleted = deleted.saturating_add(changed as u64);
+        }
+        if fts_exists {
+            let changed = transaction
+                .execute(
+                    "DELETE FROM facts_fts WHERE subject_key = ?1",
+                    params![filter.as_str()],
+                )
+                .map_err(|error| error.to_string())?;
+            deleted = deleted.saturating_add(changed as u64);
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
+            .map_err(|error| error.to_string())?;
+        Ok(deleted)
+    }
+
+    fn apply_retention(
+        &self,
+        filter: &MemorySubjectStorageKey,
+        policy: &MemoryRetentionPolicy,
+    ) -> Result<u64, String> {
+        let mut guard = self.conn.lock();
+        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let mut deleted = 0_u64;
+        if let Some(max_age_days) = policy.max_age_days {
+            let age = format!("-{max_age_days} days");
+            let changed = transaction
+                .execute(
+                    "
+                    DELETE FROM facts
+                    WHERE subject_key = ?1
+                      AND created_at < datetime('now', ?2)
+                    ",
+                    params![filter.as_str(), age],
+                )
+                .map_err(|error| error.to_string())?;
+            deleted = deleted.saturating_add(changed as u64);
+        }
+        if let Some(max_records) = policy.max_records {
+            let changed = transaction
+                .execute(
+                    "
+                    DELETE FROM facts
+                    WHERE subject_key = ?1
+                      AND fact_id IN (
+                        SELECT fact_id FROM facts
+                        WHERE subject_key = ?1
+                        ORDER BY updated_at DESC, fact_id DESC
+                        LIMIT -1 OFFSET ?2
+                      )
+                    ",
+                    params![filter.as_str(), max_records as i64],
+                )
+                .map_err(|error| error.to_string())?;
+            deleted = deleted.saturating_add(changed as u64);
+        }
+        transaction
+            .execute(
+                "
+                DELETE FROM fact_entities
+                WHERE subject_key = ?1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM facts WHERE facts.fact_id = fact_entities.fact_id
+                  )
+                ",
+                params![filter.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "
+                DELETE FROM entities
+                WHERE subject_key = ?1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM fact_entities
+                    WHERE fact_entities.entity_id = entities.entity_id
+                  )
+                ",
+                params![filter.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|error| error.to_string())?;
+        Ok(deleted)
     }
 }
 
@@ -691,111 +1081,349 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
         true
     }
 
-    fn initialize(&self, session_id: &str, hermes_home: &str) {
+    fn initialize(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        hermes_home: &str,
+    ) -> Result<(), String> {
+        let _ = subject;
         let db_path = PathBuf::from(hermes_home).join("memory_store.db");
         if let Some(parent) = db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("create holographic memory directory: {error}"))?;
         }
-
-        match Connection::open(&db_path) {
-            Ok(conn) => {
-                let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
-                if let Err(e) = conn.execute_batch(SCHEMA) {
-                    tracing::warn!("Holographic memory schema init failed: {}", e);
-                    return;
-                }
-                let fts_enabled = match Self::ensure_fts_schema(&conn) {
-                    Ok(enabled) => enabled,
-                    Err(e) => {
-                        tracing::warn!("Holographic memory FTS schema init failed: {}", e);
-                        false
-                    }
-                };
-                *self.db_path.lock().unwrap() = Some(db_path);
-                *self.conn.lock().unwrap() = Some(conn);
-                *self.fts_enabled.lock().unwrap() = fts_enabled;
-                *self.session_id.lock().unwrap() = session_id.to_string();
-                tracing::info!(
-                    "Holographic memory plugin initialized for session {}",
-                    session_id
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Failed to open holographic memory DB: {}", e);
-            }
-        }
+        let mut conn = Connection::open(&db_path)
+            .map_err(|error| format!("open holographic memory database: {error}"))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|error| format!("enable holographic WAL: {error}"))?;
+        let (migration_report, fts_enabled) = migrate_holographic_schema(&mut conn)?;
+        *self.db_path.lock() = Some(db_path);
+        *self.conn.lock() = Some(conn);
+        *self.fts_enabled.lock() = fts_enabled;
+        *self.migration_report.lock() = migration_report;
+        tracing::info!(
+            "Holographic memory initialized (schema_version={}, quarantined_facts={}, quarantined_entities={}, fts_enabled={})",
+            migration_report.schema_version,
+            migration_report.quarantined_facts,
+            migration_report.quarantined_entities,
+            fts_enabled
+        );
+        let _ = filter;
+        Ok(())
     }
 
     fn system_prompt_block(&self) -> String {
-        let total = self.fact_count();
-        if total == 0 {
-            "# Holographic Memory\n\
-             Active. Empty fact store — proactively add facts the user would expect you to remember.\n\
-             Use fact_store(action='add') to store durable structured facts.\n\
-             Use fact_feedback to rate facts after using them."
-                .to_string()
-        } else {
-            format!(
-                "# Holographic Memory\n\
-                 Active. {} facts stored with entity resolution and trust scoring.\n\
-                 Use fact_store to search or add facts.\n\
-                 Use fact_feedback to rate facts after using them.",
-                total
-            )
-        }
+        "# Holographic Memory\n\
+         Active. Use fact_store to search or add subject-scoped facts and \
+         fact_feedback to rate facts after using them."
+            .to_string()
     }
 
-    fn prefetch(&self, query: &str, _session_id: &str) -> String {
+    fn prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        query: &str,
+    ) -> String {
+        let _ = subject;
         if query.trim().is_empty() {
             return String::new();
         }
-        let results = self.search_facts(query, None, self.min_trust, 5);
+        let results = self.search_facts(filter, query, None, self.min_trust, 5);
         if results.is_empty() {
             return String::new();
         }
-        let mut lines = Vec::new();
-        for r in &results {
-            let trust = r["trust_score"].as_f64().unwrap_or(0.0);
-            let content = r["content"].as_str().unwrap_or("");
-            lines.push(format!("- [{:.1}] {}", trust, content));
-        }
+        let lines = results
+            .iter()
+            .map(|result| {
+                let trust = result["trust_score"].as_f64().unwrap_or(0.0);
+                let content = result["content"].as_str().unwrap_or("");
+                format!("- [{trust:.1}] {content}")
+            })
+            .collect::<Vec<_>>();
         format!("## Holographic Memory\n{}", lines.join("\n"))
     }
 
-    fn sync_turn(&self, _user_content: &str, _assistant_content: &str, _session_id: &str) {
-        // Holographic memory stores explicit facts via tools, not auto-sync
+    fn sync_turn(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _user_content: &str,
+        _assistant_content: &str,
+    ) {
+        // Holographic memory stores explicit facts via tools, not auto-sync.
     }
 
     fn get_tool_schemas(&self) -> Vec<Value> {
         vec![fact_store_schema(), fact_feedback_schema()]
     }
 
-    fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
+    fn handle_tool_call(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        tool_name: &str,
+        args: &Value,
+    ) -> String {
         match tool_name {
-            "fact_store" => self.handle_fact_store(args),
-            "fact_feedback" => self.handle_fact_feedback(args),
-            _ => json!({"error": format!("Unknown tool: {}", tool_name)}).to_string(),
+            "fact_store" => self.handle_fact_store(subject, filter, args),
+            "fact_feedback" => self.handle_fact_feedback(subject, filter, args),
+            _ => json!({"error": format!("Unknown tool: {tool_name}")}).to_string(),
         }
     }
 
-    fn on_session_end(&self, _messages: &[Value]) {
+    fn on_session_end(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _messages: &[Value],
+    ) {
         tracing::debug!("Holographic memory session end");
     }
 
-    fn on_memory_write(&self, action: &str, target: &str, content: &str) {
+    fn on_memory_write(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        action: &str,
+        target: &str,
+        content: &str,
+    ) {
         if action == "add" && !content.is_empty() {
             let category = if target == "user" {
                 "user_pref"
             } else {
                 "general"
             };
-            let _ = self.add_fact(content, category, "");
+            if let Err(error) = self.add_fact(subject, filter, content, category, "") {
+                tracing::warn!("Holographic memory mirror failed: {error}");
+            }
+        }
+    }
+
+    fn export_subject(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _actor: &MemoryAuditActor,
+        sink: &mut dyn MemoryExportSink,
+    ) -> Result<MemoryExportReceipt, MemoryProviderGovernanceError> {
+        let mut guard = self.conn.lock();
+        let conn = guard.as_mut().ok_or_else(|| {
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Export)
+        })?;
+        // The immediate transaction freezes this complete ordered inventory
+        // before it is copied into an immutable, paginated snapshot.
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                tracing::warn!("Holographic export transaction failed: {error}");
+                MemoryProviderGovernanceError::failed(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                )
+            })?;
+        let records = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT fact_id, content, category, tags, trust_score, retrieval_count,
+                            helpful_count, created_at, updated_at
+                     FROM facts WHERE subject_key = ?1 ORDER BY fact_id ASC",
+                )
+                .map_err(|error| {
+                    tracing::warn!("Holographic export prepare failed: {error}");
+                    MemoryProviderGovernanceError::failed(
+                        self.name(),
+                        MemoryGovernanceOperation::Export,
+                    )
+                })?;
+            let rows = statement
+                .query_map(params![filter.as_str()], row_to_fact)
+                .map_err(|error| {
+                    tracing::warn!("Holographic export query failed: {error}");
+                    MemoryProviderGovernanceError::failed(
+                        self.name(),
+                        MemoryGovernanceOperation::Export,
+                    )
+                })?;
+            let collected = rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                tracing::warn!("Holographic export row failed: {error}");
+                MemoryProviderGovernanceError::failed(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                )
+            })?;
+            collected
+        };
+        transaction.commit().map_err(|error| {
+            tracing::warn!("Holographic export snapshot commit failed: {error}");
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Export)
+        })?;
+        // The immutable rows are copied; do not hold the provider mutex while
+        // an external transactional sink receives pages.
+        drop(guard);
+        let snapshot_bytes = serde_json::to_vec(&records).map_err(|error| {
+            tracing::warn!("Holographic export snapshot serialization failed: {error}");
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Export)
+        })?;
+        let mut revision_bytes = b"holographic-v3".to_vec();
+        revision_bytes.extend_from_slice(&snapshot_bytes);
+        let snapshot = MemoryExportSnapshot::new(
+            MemoryExportEvidenceDigest::sha256_bytes(&snapshot_bytes),
+            MemoryExportEvidenceDigest::sha256_bytes(&revision_bytes),
+            None,
+        );
+        if sink.begin_provider(snapshot.clone()).is_err() {
+            sink.abort();
+            return Err(MemoryProviderGovernanceError::failed(
+                self.name(),
+                MemoryGovernanceOperation::Export,
+            ));
+        }
+        let mut exported_records = 0_u64;
+        let mut page_count = 0_u64;
+        for start in (0..records.len()).step_by(100) {
+            let end = (start + 100).min(records.len());
+            let cursor = (start != 0).then(|| {
+                MemoryExportEvidenceDigest::sha256_bytes(
+                    format!("holographic-export:{}:{start}", snapshot.snapshot_digest.as_str())
+                        .as_bytes(),
+                )
+            });
+            let next_cursor = (end < records.len()).then(|| {
+                MemoryExportEvidenceDigest::sha256_bytes(
+                    format!("holographic-export:{}:{end}", snapshot.snapshot_digest.as_str())
+                        .as_bytes(),
+                )
+            });
+            let record_ids = records[start..end]
+                .iter()
+                .map(|record| {
+                    serde_json::to_vec(record)
+                        .map(|bytes| MemoryExportEvidenceDigest::sha256_bytes(&bytes))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    tracing::warn!("Holographic export record ID serialization failed: {error}");
+                    MemoryProviderGovernanceError::failed(
+                        self.name(),
+                        MemoryGovernanceOperation::Export,
+                    )
+                })?;
+            let page = MemoryExportPage::new(
+                cursor,
+                next_cursor,
+                record_ids,
+                records[start..end].to_vec(),
+            )
+            .map_err(|_| {
+                MemoryProviderGovernanceError::failed(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                )
+            })?;
+            if sink.append_page(page).is_err() {
+                sink.abort();
+                return Err(MemoryProviderGovernanceError::failed(
+                    self.name(),
+                    MemoryGovernanceOperation::Export,
+                ));
+            }
+            exported_records = exported_records.saturating_add((end - start) as u64);
+            page_count = page_count.saturating_add(1);
+        }
+        if sink
+            .finish_provider(MemoryExportCompletion::exhausted(exported_records, page_count))
+            .is_err()
+        {
+            sink.abort();
+            return Err(MemoryProviderGovernanceError::failed(
+                self.name(),
+                MemoryGovernanceOperation::Export,
+            ));
+        }
+        Ok(MemoryExportReceipt::exhausted(
+            self.name(),
+            filter.clone(),
+            snapshot,
+            exported_records,
+            page_count,
+        ))
+    }
+
+    fn forget_subject(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryForgetReceipt, MemoryProviderGovernanceError> {
+        let deleted_records = self.purge_subject(filter).map_err(|error| {
+            tracing::warn!("Holographic forget failed: {error}");
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Forget)
+        })?;
+        let residual_records = self.subject_residue_count(filter).map_err(|error| {
+            tracing::warn!("Holographic forget readback failed: {error}");
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Forget)
+        })?;
+        if residual_records != 0 {
+            tracing::warn!("Holographic forget left subject residue");
+            return Err(MemoryProviderGovernanceError::failed(
+                self.name(),
+                MemoryGovernanceOperation::Forget,
+            ));
+        }
+        Ok(MemoryForgetReceipt::new(
+            self.name(),
+            filter.clone(),
+            deleted_records,
+        ))
+    }
+
+    fn retention_sweep(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        policy: &MemoryRetentionPolicy,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryRetentionReceipt, MemoryProviderGovernanceError> {
+        let deleted_records = self.apply_retention(filter, policy).map_err(|error| {
+            tracing::warn!("Holographic retention sweep failed: {error}");
+            MemoryProviderGovernanceError::failed(
+                self.name(),
+                MemoryGovernanceOperation::RetentionSweep,
+            )
+        })?;
+        Ok(MemoryRetentionReceipt::new(
+            self.name(),
+            filter.clone(),
+            deleted_records,
+        ))
+    }
+
+    fn verify_subject_absent(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<MemoryReadbackReceipt, MemoryProviderGovernanceError> {
+        let residual_records = self.subject_residue_count(filter).map_err(|error| {
+            tracing::warn!("Holographic absence readback failed: {error}");
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Readback)
+        })?;
+        if residual_records == 0 {
+            Ok(MemoryReadbackReceipt::absent(self.name(), filter.clone()))
+        } else {
+            Ok(MemoryReadbackReceipt::residual(
+                self.name(),
+                filter.clone(),
+                residual_records,
+            ))
         }
     }
 
     fn shutdown(&self) {
-        *self.conn.lock().unwrap() = None;
-        *self.fts_enabled.lock().unwrap() = false;
+        *self.conn.lock() = None;
+        *self.fts_enabled.lock() = false;
         tracing::debug!("Holographic memory plugin shutdown");
     }
 
@@ -817,198 +1445,222 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
 // ---------------------------------------------------------------------------
 
 impl HolographicMemoryPlugin {
-    fn handle_fact_store(&self, args: &Value) -> String {
-        let action = match args.get("action").and_then(|a| a.as_str()) {
-            Some(a) => a,
+    fn handle_fact_store(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        args: &Value,
+    ) -> String {
+        let action = match args.get("action").and_then(Value::as_str) {
+            Some(action) => action,
             None => return json!({"error": "Missing required argument: action"}).to_string(),
         };
-
         match action {
             "add" => {
-                let content = match args.get("content").and_then(|c| c.as_str()) {
-                    Some(c) => c,
+                let content = match args.get("content").and_then(Value::as_str) {
+                    Some(content) => content,
                     None => {
                         return json!({"error": "Missing required argument: content"}).to_string()
                     }
                 };
                 let category = args
                     .get("category")
-                    .and_then(|c| c.as_str())
+                    .and_then(Value::as_str)
                     .unwrap_or("general");
-                let tags = args.get("tags").and_then(|t| t.as_str()).unwrap_or("");
-                match self.add_fact(content, category, tags) {
-                    Ok(id) => json!({"fact_id": id, "status": "added"}).to_string(),
-                    Err(e) => json!({"error": e}).to_string(),
+                let tags = args.get("tags").and_then(Value::as_str).unwrap_or("");
+                match self.add_fact(subject, filter, content, category, tags) {
+                    Ok(fact_id) => json!({"fact_id": fact_id, "status": "added"}).to_string(),
+                    Err(error) => json!({"error": error}).to_string(),
                 }
             }
             "search" => {
-                let query = match args.get("query").and_then(|q| q.as_str()) {
-                    Some(q) => q,
+                let query = match args.get("query").and_then(Value::as_str) {
+                    Some(query) => query,
                     None => {
                         return json!({"error": "Missing required argument: query"}).to_string()
                     }
                 };
-                let category = args.get("category").and_then(|c| c.as_str());
+                let category = args.get("category").and_then(Value::as_str);
                 let min_trust = args
                     .get("min_trust")
-                    .and_then(|m| m.as_f64())
+                    .and_then(Value::as_f64)
                     .unwrap_or(self.min_trust);
-                let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
-                let results = self.search_facts(query, category, min_trust, limit);
+                let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
+                let results = self.search_facts(filter, query, category, min_trust, limit);
                 json!({"results": results, "count": results.len()}).to_string()
             }
-            "update" => {
-                let fact_id = match args.get("fact_id").and_then(|f| f.as_i64()) {
-                    Some(id) => id,
-                    None => {
-                        return json!({"error": "Missing required argument: fact_id"}).to_string()
-                    }
-                };
-                let guard = match self.conn.lock() {
-                    Ok(g) => g,
-                    Err(e) => return json!({"error": e.to_string()}).to_string(),
-                };
-                let conn = match guard.as_ref() {
-                    Some(c) => c,
-                    None => return json!({"error": "Not initialized"}).to_string(),
-                };
-
-                let mut assignments = vec!["updated_at = CURRENT_TIMESTAMP".to_string()];
-                let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-                if let Some(content) = args.get("content").and_then(|c| c.as_str()) {
-                    assignments.push(format!("content = ?{}", sql_params.len() + 1));
-                    sql_params.push(Box::new(content.to_string()));
-                }
-                if let Some(tags) = args.get("tags").and_then(|t| t.as_str()) {
-                    assignments.push(format!("tags = ?{}", sql_params.len() + 1));
-                    sql_params.push(Box::new(tags.to_string()));
-                }
-                if let Some(cat) = args.get("category").and_then(|c| c.as_str()) {
-                    assignments.push(format!("category = ?{}", sql_params.len() + 1));
-                    sql_params.push(Box::new(cat.to_string()));
-                }
-                if let Some(delta) = args.get("trust_delta").and_then(|d| d.as_f64()) {
-                    let old_trust: f64 = conn
-                        .query_row(
-                            "SELECT trust_score FROM facts WHERE fact_id = ?1",
-                            params![fact_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or(0.5);
-                    let new_trust = clamp_trust(old_trust + delta);
-                    assignments.push(format!("trust_score = ?{}", sql_params.len() + 1));
-                    sql_params.push(Box::new(new_trust));
-                }
-
-                let sql = format!(
-                    "UPDATE facts SET {} WHERE fact_id = ?{}",
-                    assignments.join(", "),
-                    sql_params.len() + 1
-                );
-                sql_params.push(Box::new(fact_id));
-
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    sql_params.iter().map(|p| p.as_ref()).collect();
-                match conn.execute(&sql, param_refs.as_slice()) {
-                    Ok(n) => json!({"updated": n > 0}).to_string(),
-                    Err(e) => json!({"error": e.to_string()}).to_string(),
-                }
-            }
-            "remove" => {
-                let fact_id = match args.get("fact_id").and_then(|f| f.as_i64()) {
-                    Some(id) => id,
-                    None => {
-                        return json!({"error": "Missing required argument: fact_id"}).to_string()
-                    }
-                };
-                let guard = match self.conn.lock() {
-                    Ok(g) => g,
-                    Err(e) => return json!({"error": e.to_string()}).to_string(),
-                };
-                let conn = match guard.as_ref() {
-                    Some(c) => c,
-                    None => return json!({"error": "Not initialized"}).to_string(),
-                };
-                let _ = conn.execute(
-                    "DELETE FROM fact_entities WHERE fact_id = ?1",
-                    params![fact_id],
-                );
-                let n = conn
-                    .execute("DELETE FROM facts WHERE fact_id = ?1", params![fact_id])
-                    .unwrap_or(0);
-                json!({"removed": n > 0}).to_string()
-            }
-            "list" => {
-                let guard = match self.conn.lock() {
-                    Ok(g) => g,
-                    Err(e) => return json!({"error": e.to_string()}).to_string(),
-                };
-                let conn = match guard.as_ref() {
-                    Some(c) => c,
-                    None => return json!({"error": "Not initialized"}).to_string(),
-                };
-                let category = args.get("category").and_then(|c| c.as_str());
-                let min_trust = args
-                    .get("min_trust")
-                    .and_then(|m| m.as_f64())
-                    .unwrap_or(0.0);
-                let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as i64;
-
-                let (sql, param_list): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-                    if let Some(cat) = category {
-                        (
-                        "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
-                         FROM facts WHERE trust_score >= ?1 AND category = ?2 ORDER BY trust_score DESC LIMIT ?3".to_string(),
-                        vec![Box::new(min_trust) as Box<dyn rusqlite::types::ToSql>, Box::new(cat.to_string()), Box::new(limit)],
-                    )
-                    } else {
-                        (
-                        "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
-                         FROM facts WHERE trust_score >= ?1 ORDER BY trust_score DESC LIMIT ?2".to_string(),
-                        vec![Box::new(min_trust) as Box<dyn rusqlite::types::ToSql>, Box::new(limit)],
-                    )
-                    };
-
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    param_list.iter().map(|p| p.as_ref()).collect();
-                let mut stmt = match conn.prepare(&sql) {
-                    Ok(s) => s,
-                    Err(e) => return json!({"error": e.to_string()}).to_string(),
-                };
-
-                let rows = stmt.query_map(param_refs.as_slice(), |row| {
-                    Ok(json!({
-                        "fact_id": row.get::<_, i64>(0)?,
-                        "content": row.get::<_, String>(1)?,
-                        "category": row.get::<_, String>(2)?,
-                        "tags": row.get::<_, String>(3)?,
-                        "trust_score": row.get::<_, f64>(4)?,
-                        "retrieval_count": row.get::<_, i64>(5)?,
-                        "helpful_count": row.get::<_, i64>(6)?,
-                    }))
-                });
-
-                let facts: Vec<Value> = rows.map(|r| r.flatten().collect()).unwrap_or_default();
-                json!({"facts": facts, "count": facts.len()}).to_string()
-            }
-            _ => json!({"error": format!("Unknown action: {}", action)}).to_string(),
+            "update" => self.update_fact(filter, args),
+            "remove" => self.remove_fact(filter, args),
+            "list" => self.list_facts(filter, args),
+            _ => json!({"error": format!("Unknown action: {action}")}).to_string(),
         }
     }
 
-    fn handle_fact_feedback(&self, args: &Value) -> String {
-        let action = match args.get("action").and_then(|a| a.as_str()) {
-            Some(a) => a,
-            None => return json!({"error": "Missing required argument: action"}).to_string(),
-        };
-        let fact_id = match args.get("fact_id").and_then(|f| f.as_i64()) {
-            Some(id) => id,
+    fn update_fact(&self, filter: &MemorySubjectStorageKey, args: &Value) -> String {
+        let fact_id = match args.get("fact_id").and_then(Value::as_i64) {
+            Some(fact_id) => fact_id,
             None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
         };
-        let helpful = action == "helpful";
-        match self.record_feedback(fact_id, helpful) {
+        let mut guard = self.conn.lock();
+        let conn = match guard.as_mut() {
+            Some(conn) => conn,
+            None => return json!({"error": "Not initialized"}).to_string(),
+        };
+        let transaction = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+            Ok(transaction) => transaction,
+            Err(error) => return json!({"error": error.to_string()}).to_string(),
+        };
+        let mut assignments = vec!["updated_at = CURRENT_TIMESTAMP".to_string()];
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(content) = args.get("content").and_then(Value::as_str) {
+            if content.trim().is_empty() {
+                return json!({"error": "content must not be empty"}).to_string();
+            }
+            assignments.push(format!("content = ?{}", values.len() + 1));
+            values.push(Box::new(content.to_string()));
+        }
+        if let Some(tags) = args.get("tags").and_then(Value::as_str) {
+            assignments.push(format!("tags = ?{}", values.len() + 1));
+            values.push(Box::new(tags.to_string()));
+        }
+        if let Some(category) = args.get("category").and_then(Value::as_str) {
+            assignments.push(format!("category = ?{}", values.len() + 1));
+            values.push(Box::new(category.to_string()));
+        }
+        if let Some(delta) = args.get("trust_delta").and_then(Value::as_f64) {
+            let old_trust = match transaction.query_row(
+                "SELECT trust_score FROM facts WHERE fact_id = ?1 AND subject_key = ?2",
+                params![fact_id, filter.as_str()],
+                |row| row.get::<_, f64>(0),
+            ) {
+                Ok(trust) => trust,
+                Err(_) => return json!({"error": format!("fact_id {fact_id} not found")}).to_string(),
+            };
+            assignments.push(format!("trust_score = ?{}", values.len() + 1));
+            values.push(Box::new(clamp_trust(old_trust + delta)));
+        }
+        values.push(Box::new(fact_id));
+        values.push(Box::new(filter.as_str().to_string()));
+        let sql = format!(
+            "UPDATE facts SET {} WHERE fact_id = ?{} AND subject_key = ?{}",
+            assignments.join(", "),
+            values.len() - 1,
+            values.len()
+        );
+        let references = values
+            .iter()
+            .map(|value| value.as_ref())
+            .collect::<Vec<&dyn rusqlite::types::ToSql>>();
+        match transaction.execute(&sql, references.as_slice()) {
+            Ok(changed) => match transaction.commit() {
+                Ok(()) => json!({"updated": changed > 0}).to_string(),
+                Err(error) => json!({"error": error.to_string()}).to_string(),
+            },
+            Err(error) => json!({"error": error.to_string()}).to_string(),
+        }
+    }
+
+    fn remove_fact(&self, filter: &MemorySubjectStorageKey, args: &Value) -> String {
+        let fact_id = match args.get("fact_id").and_then(Value::as_i64) {
+            Some(fact_id) => fact_id,
+            None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
+        };
+        let mut guard = self.conn.lock();
+        let conn = match guard.as_mut() {
+            Some(conn) => conn,
+            None => return json!({"error": "Not initialized"}).to_string(),
+        };
+        let transaction = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+            Ok(transaction) => transaction,
+            Err(error) => return json!({"error": error.to_string()}).to_string(),
+        };
+        if let Err(error) = transaction.execute(
+            "DELETE FROM fact_entities WHERE subject_key = ?1 AND fact_id = ?2",
+            params![filter.as_str(), fact_id],
+        ) {
+            return json!({"error": error.to_string()}).to_string();
+        }
+        match transaction.execute(
+            "DELETE FROM facts WHERE subject_key = ?1 AND fact_id = ?2",
+            params![filter.as_str(), fact_id],
+        ) {
+            Ok(changed) => match transaction.commit() {
+                Ok(()) => json!({"removed": changed > 0}).to_string(),
+                Err(error) => json!({"error": error.to_string()}).to_string(),
+            },
+            Err(error) => json!({"error": error.to_string()}).to_string(),
+        }
+    }
+
+    fn list_facts(&self, filter: &MemorySubjectStorageKey, args: &Value) -> String {
+        let guard = self.conn.lock();
+        let conn = match guard.as_ref() {
+            Some(conn) => conn,
+            None => return json!({"error": "Not initialized"}).to_string(),
+        };
+        let category = args.get("category").and_then(Value::as_str);
+        let min_trust = args
+            .get("min_trust")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as i64;
+        let sql = if category.is_some() {
+            "
+            SELECT fact_id, content, category, tags, trust_score, retrieval_count,
+                   helpful_count, created_at, updated_at
+            FROM facts
+            WHERE subject_key = ?1 AND trust_score >= ?2 AND category = ?3
+            ORDER BY trust_score DESC
+            LIMIT ?4
+            "
+        } else {
+            "
+            SELECT fact_id, content, category, tags, trust_score, retrieval_count,
+                   helpful_count, created_at, updated_at
+            FROM facts
+            WHERE subject_key = ?1 AND trust_score >= ?2
+            ORDER BY trust_score DESC
+            LIMIT ?3
+            "
+        };
+        let mut statement = match conn.prepare(sql) {
+            Ok(statement) => statement,
+            Err(error) => return json!({"error": error.to_string()}).to_string(),
+        };
+        let rows = if let Some(category) = category {
+            statement.query_map(
+                params![filter.as_str(), min_trust, category, limit],
+                row_to_fact,
+            )
+        } else {
+            statement.query_map(params![filter.as_str(), min_trust, limit], row_to_fact)
+        };
+        match rows {
+            Ok(rows) => {
+                let facts = rows.flatten().collect::<Vec<_>>();
+                json!({"facts": facts, "count": facts.len()}).to_string()
+            }
+            Err(error) => json!({"error": error.to_string()}).to_string(),
+        }
+    }
+
+    fn handle_fact_feedback(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        args: &Value,
+    ) -> String {
+        let action = match args.get("action").and_then(Value::as_str) {
+            Some(action) => action,
+            None => return json!({"error": "Missing required argument: action"}).to_string(),
+        };
+        let fact_id = match args.get("fact_id").and_then(Value::as_i64) {
+            Some(fact_id) => fact_id,
+            None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
+        };
+        match self.record_feedback(subject, filter, fact_id, action == "helpful") {
             Ok(result) => result.to_string(),
-            Err(e) => json!({"error": e}).to_string(),
+            Err(error) => json!({"error": error}).to_string(),
         }
     }
 }
@@ -1016,199 +1668,411 @@ impl HolographicMemoryPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    #[derive(Default)]
+    struct TestExportSink {
+        snapshot: Option<hermes_core::MemoryExportSnapshot>,
+        pages: Vec<hermes_core::MemoryExportPage>,
+        completion: Option<hermes_core::MemoryExportCompletion>,
+        aborted: bool,
+    }
 
-    #[test]
-    fn test_plugin_name() {
-        let plugin = HolographicMemoryPlugin::new();
-        assert_eq!(plugin.name(), "holographic");
+    impl hermes_core::MemoryExportSink for TestExportSink {
+        fn begin_provider(
+            &mut self,
+            snapshot: hermes_core::MemoryExportSnapshot,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            self.snapshot = Some(snapshot);
+            Ok(())
+        }
+
+        fn append_page(
+            &mut self,
+            page: hermes_core::MemoryExportPage,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            self.pages.push(page);
+            Ok(())
+        }
+
+        fn finish_provider(
+            &mut self,
+            completion: hermes_core::MemoryExportCompletion,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            self.completion = Some(completion);
+            Ok(())
+        }
+
+        fn abort(&mut self) {
+            self.aborted = true;
+        }
+
+        fn commit(
+            self: Box<Self>,
+        ) -> Result<hermes_core::MemoryExportArtifact, hermes_core::MemoryExportSinkError> {
+            Err(hermes_core::MemoryExportSinkError::Incomplete)
+        }
+    }
+    struct MutatingExportSink {
+        plugin: Arc<HolographicMemoryPlugin>,
+        subject: MemorySubject,
+        filter: MemorySubjectStorageKey,
+        pages: Vec<hermes_core::MemoryExportPage>,
+        mutated: bool,
+    }
+
+    impl hermes_core::MemoryExportSink for MutatingExportSink {
+        fn begin_provider(
+            &mut self,
+            _snapshot: hermes_core::MemoryExportSnapshot,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            Ok(())
+        }
+
+        fn append_page(
+            &mut self,
+            page: hermes_core::MemoryExportPage,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            if !self.mutated {
+                self.plugin
+                    .add_fact(
+                        &self.subject,
+                        &self.filter,
+                        "written after export snapshot",
+                        "test",
+                        "",
+                    )
+                    .map_err(|_| hermes_core::MemoryExportSinkError::Rejected)?;
+                self.mutated = true;
+            }
+            self.pages.push(page);
+            Ok(())
+        }
+
+        fn finish_provider(
+            &mut self,
+            _completion: hermes_core::MemoryExportCompletion,
+        ) -> Result<(), hermes_core::MemoryExportSinkError> {
+            Ok(())
+        }
+
+        fn abort(&mut self) {}
+
+        fn commit(
+            self: Box<Self>,
+        ) -> Result<hermes_core::MemoryExportArtifact, hermes_core::MemoryExportSinkError> {
+            Err(hermes_core::MemoryExportSinkError::Incomplete)
+        }
+    }
+
+    fn subject(label: &str) -> (MemorySubject, MemorySubjectStorageKey) {
+        let subject = MemorySubject::local_owner(hermes_core::MemorySurface::Local, label)
+            .expect("explicit local subject");
+        let derivation = hermes_core::MemorySubjectDerivationKey::from_bytes([29_u8; 32]);
+        let key = subject.storage_key(&derivation);
+        (subject, key)
+    }
+
+    fn actor(subject: &MemorySubject) -> MemoryAuditActor {
+        hermes_core::MemorySubjectDerivationKey::from_bytes([31_u8; 32])
+            .actor_for_subject(subject)
+    }
+
+    fn initialize(
+        plugin: &HolographicMemoryPlugin,
+        subject: &MemorySubject,
+        key: &MemorySubjectStorageKey,
+        home: &std::path::Path,
+    ) {
+        MemoryProviderPlugin::initialize(plugin, subject, key, home.to_str().expect("home"))
+            .expect("initialize scoped database");
     }
 
     #[test]
-    fn test_plugin_is_available() {
+    fn facts_and_searches_are_subject_partitioned() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (alice, alice_key) = subject("alice-session");
+        let (bob, bob_key) = subject("bob-session");
         let plugin = HolographicMemoryPlugin::new();
-        assert!(plugin.is_available());
+        initialize(&plugin, &alice, &alice_key, home.path());
+
+        plugin
+            .add_fact(&alice, &alice_key, "Alice uses the blue theme", "preference", "theme")
+            .expect("alice fact");
+        plugin
+            .add_fact(&bob, &bob_key, "Bob uses the red theme", "preference", "theme")
+            .expect("bob fact");
+
+        let alice_results = plugin.search_facts(&alice_key, "theme", None, 0.0, 10);
+        let bob_results = plugin.search_facts(&bob_key, "theme", None, 0.0, 10);
+        assert_eq!(plugin.fact_count(&alice_key), 1);
+        assert_eq!(plugin.fact_count(&bob_key), 1);
+        assert_eq!(alice_results.len(), 1);
+        assert_eq!(bob_results.len(), 1);
+        assert_eq!(alice_results[0]["content"], "Alice uses the blue theme");
+        assert_eq!(bob_results[0]["content"], "Bob uses the red theme");
     }
 
     #[test]
-    fn test_tool_schemas() {
+    fn legacy_unscoped_rows_are_quarantined_at_schema_v3() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let db = home.path().join("memory_store.db");
+        let legacy = Connection::open(&db).expect("legacy database");
+        legacy
+            .execute_batch(
+                "
+                CREATE TABLE facts (
+                    fact_id INTEGER PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    category TEXT,
+                    tags TEXT,
+                    trust_score REAL
+                );
+                INSERT INTO facts (fact_id, content, category, tags, trust_score)
+                VALUES (1, 'unscoped secret', 'general', '', 0.5);
+                ",
+            )
+            .expect("legacy data");
+        drop(legacy);
+
+        let (subject, key) = subject("migration-session");
         let plugin = HolographicMemoryPlugin::new();
-        let schemas = plugin.get_tool_schemas();
-        assert_eq!(schemas.len(), 2);
-        let names: Vec<&str> = schemas
+        initialize(&plugin, &subject, &key, home.path());
+        assert_eq!(plugin.fact_count(&key), 0);
+        let report = *plugin.migration_report.lock();
+        assert_eq!(report.schema_version, HOLOGRAPHIC_SCHEMA_VERSION);
+        assert_eq!(report.quarantined_facts, 1);
+        plugin.with_conn(|conn| {
+            assert!(sqlite_table_exists(conn, "facts_legacy_quarantine_v1").expect("quarantine"));
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM facts_legacy_quarantine_v1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("legacy count"),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn concurrent_scoped_writers_preserve_every_fact() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (subject, key) = subject("concurrent-session");
+        let first = Arc::new(HolographicMemoryPlugin::new());
+        let second = Arc::new(HolographicMemoryPlugin::new());
+        initialize(&first, &subject, &key, home.path());
+        initialize(&second, &subject, &key, home.path());
+
+        let mut workers = Vec::new();
+        for worker in 0..2 {
+            let plugin = if worker == 0 {
+                Arc::clone(&first)
+            } else {
+                Arc::clone(&second)
+            };
+            let subject = subject.clone();
+            let key = key.clone();
+            workers.push(std::thread::spawn(move || {
+                for index in 0..12 {
+                    plugin
+                        .add_fact(
+                            &subject,
+                            &key,
+                            &format!("concurrent fact {worker}-{index}"),
+                            "test",
+                            "",
+                        )
+                        .expect("concurrent add");
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().expect("worker");
+        }
+        assert_eq!(first.fact_count(&key), 24);
+    }
+
+    #[test]
+    fn forget_clears_facts_entities_and_fts_then_readback_misses() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (subject, key) = subject("forget-session");
+        let plugin = HolographicMemoryPlugin::new();
+        initialize(&plugin, &subject, &key, home.path());
+        plugin
+            .add_fact(&subject, &key, "Ada maintains the deployment ledger", "project", "Ada")
+            .expect("fact");
+        let actor = actor(&subject);
+
+        let receipt = MemoryProviderPlugin::forget_subject(&plugin, &subject, &key, &actor)
+            .expect("forget");
+        assert!(receipt.deleted_records >= 1);
+        assert!(plugin.search_facts(&key, "deployment", None, 0.0, 10).is_empty());
+        assert!(
+            MemoryProviderPlugin::verify_subject_absent(&plugin, &subject, &key)
+                .expect("readback")
+                .is_absent()
+        );
+        plugin.with_conn(|conn| {
+            for table in ["facts", "entities", "fact_entities"] {
+                let count = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE subject_key = ?1"),
+                        params![key.as_str()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .expect("subject residue count");
+                assert_eq!(count, 0, "{table} residue");
+            }
+            if sqlite_table_exists(conn, "facts_fts").expect("fts table") {
+                let count = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM facts_fts WHERE subject_key = ?1",
+                        params![key.as_str()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .expect("fts residue count");
+                assert_eq!(count, 0);
+            }
+        });
+    }
+
+    #[test]
+    fn export_and_retention_only_affect_the_bound_subject() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (alice, alice_key) = subject("export-alice");
+        let (bob, bob_key) = subject("export-bob");
+        let plugin = HolographicMemoryPlugin::new();
+        initialize(&plugin, &alice, &alice_key, home.path());
+        plugin
+            .add_fact(&alice, &alice_key, "alice old record", "test", "")
+            .expect("old");
+        plugin
+            .add_fact(&alice, &alice_key, "alice new record", "test", "")
+            .expect("new");
+        plugin
+            .add_fact(&bob, &bob_key, "bob retained record", "test", "")
+            .expect("bob");
+        plugin.with_conn(|conn| {
+            conn.execute(
+                "UPDATE facts SET created_at = datetime('now', '-30 days') WHERE subject_key = ?1 AND content = 'alice old record'",
+                params![alice_key.as_str()],
+            )
+            .expect("age first record");
+        });
+        let alice_actor = actor(&alice);
+        let mut sink = TestExportSink::default();
+        let exported = MemoryProviderPlugin::export_subject(
+            &plugin,
+            &alice,
+            &alice_key,
+            &alice_actor,
+            &mut sink,
+        )
+        .expect("export");
+        assert_eq!(exported.exported_records, 2);
+        assert_eq!(sink.pages.len(), 1);
+        assert!(sink.completion.expect("completion").exhausted);
+
+        let policy = MemoryRetentionPolicy::new(Some(7), None).expect("retention policy");
+        let retained = MemoryProviderPlugin::retention_sweep(
+            &plugin,
+            &alice,
+            &alice_key,
+            &policy,
+            &alice_actor,
+        )
+        .expect("retention");
+        assert_eq!(retained.deleted_records, 1);
+        assert_eq!(plugin.fact_count(&alice_key), 1);
+        assert_eq!(plugin.fact_count(&bob_key), 1);
+        assert_eq!(
+            plugin.search_facts(&bob_key, "bob retained", None, 0.0, 10)[0]["content"],
+            "bob retained record"
+        );
+    }
+
+    #[test]
+    fn export_uses_exhaustive_pages_and_a_nonlooping_cursor_chain() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (subject, filter) = subject("paged-export");
+        let plugin = HolographicMemoryPlugin::new();
+        initialize(&plugin, &subject, &filter, home.path());
+        for index in 0..101 {
+            plugin
+                .add_fact(
+                    &subject,
+                    &filter,
+                    &format!("paged fact {index}"),
+                    "test",
+                    "",
+                )
+                .expect("fact");
+        }
+        let mut sink = TestExportSink::default();
+        let receipt = MemoryProviderPlugin::export_subject(
+            &plugin,
+            &subject,
+            &filter,
+            &actor(&subject),
+            &mut sink,
+        )
+        .expect("paged export");
+        assert_eq!(receipt.exported_records, 101);
+        assert_eq!(receipt.page_count, 2);
+        assert_eq!(sink.pages.len(), 2);
+        assert_eq!(sink.pages[0].records.len(), 100);
+        assert_eq!(sink.pages[1].records.len(), 1);
+        assert_eq!(sink.pages[0].cursor, None);
+        assert_eq!(sink.pages[0].next_cursor, sink.pages[1].cursor);
+        assert_eq!(sink.pages[1].next_cursor, None);
+        let record_ids = sink
+            .pages
             .iter()
-            .filter_map(|s| s.get("name").and_then(|n| n.as_str()))
-            .collect();
-        assert!(names.contains(&"fact_store"));
-        assert!(names.contains(&"fact_feedback"));
+            .flat_map(|page| page.record_ids.iter().map(|id| id.as_str()))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(record_ids.len(), 101);
     }
 
     #[test]
-    fn test_initialize_and_add_fact() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let result = plugin.add_fact("User prefers dark mode", "user_pref", "ui,theme");
-        assert!(result.is_ok());
-        let fact_id = result.unwrap();
-        assert!(fact_id > 0);
-
-        assert_eq!(plugin.fact_count(), 1);
-    }
-
-    #[test]
-    fn test_search_facts() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let _ = plugin.add_fact("User prefers dark mode", "user_pref", "ui");
-        let _ = plugin.add_fact("Project uses Rust", "project", "tech");
-
-        let results = plugin.search_facts("dark mode", None, 0.0, 10);
-        assert!(!results.is_empty());
-        assert!(results[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("dark mode"));
-    }
-
-    #[test]
-    fn test_search_facts_sanitizes_natural_language_fts_query() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let _ = plugin.add_fact(
-            "Deployment rollback failed because the gateway token cache was stale",
-            "project",
-            "deploy,rollback",
+    fn export_snapshot_is_stable_when_a_sink_causes_a_later_write() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let (subject, filter) = subject("snapshot-mutation");
+        let plugin = Arc::new(HolographicMemoryPlugin::new());
+        initialize(plugin.as_ref(), &subject, &filter, home.path());
+        for index in 0..101 {
+            plugin
+                .add_fact(
+                    &subject,
+                    &filter,
+                    &format!("snapshot fact {index}"),
+                    "test",
+                    "",
+                )
+                .expect("fact");
+        }
+        let mut sink = MutatingExportSink {
+            plugin: Arc::clone(&plugin),
+            subject: subject.clone(),
+            filter: filter.clone(),
+            pages: Vec::new(),
+            mutated: false,
+        };
+        let receipt = MemoryProviderPlugin::export_subject(
+            plugin.as_ref(),
+            &subject,
+            &filter,
+            &actor(&subject),
+            &mut sink,
+        )
+        .expect("snapshot export");
+        assert_eq!(receipt.exported_records, 101);
+        assert!(sink.mutated);
+        assert!(
+            sink.pages.iter().flat_map(|page| page.records.iter()).all(|record| {
+                record["content"] != "written after export snapshot"
+            })
         );
-
-        let results = plugin.search_facts(
-            "what happened with the deployment rollback?",
-            Some("project"),
-            0.0,
-            10,
-        );
-
-        assert_eq!(results.len(), 1);
-        assert!(results[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Deployment rollback"));
-        assert!(results[0]["score"].as_f64().unwrap() > 0.0);
-    }
-
-    #[test]
-    fn test_search_facts_handles_fts_special_characters_with_like_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let _ = plugin.add_fact(
-            "C++ build notes mention foo-bar and simulate.p2.test.ts",
-            "project",
-            "c++,foo-bar,simulate.p2.test.ts",
-        );
-
-        let results = plugin.search_facts("C++ foo-bar simulate.p2.test.ts", None, 0.0, 10);
-
-        assert_eq!(results.len(), 1);
-        assert!(results[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("C++ build"));
-    }
-
-    #[test]
-    fn test_search_facts_honors_category_filter() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let _ = plugin.add_fact("Rust gateway deploy note", "project", "gateway");
-        let _ = plugin.add_fact("Rust personal preference note", "user_pref", "gateway");
-
-        let results = plugin.search_facts("Rust gateway", Some("user_pref"), 0.0, 10);
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0]["category"].as_str(), Some("user_pref"));
-    }
-
-    #[test]
-    fn test_fact_store_search_uses_sanitized_search_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let _ = plugin.handle_tool_call(
-            "fact_store",
-            &json!({
-                "action": "add",
-                "content": "Natural recall should find the allocator regression",
-                "category": "project",
-                "tags": "allocator,regression"
-            }),
-        );
-        let output = plugin.handle_tool_call(
-            "fact_store",
-            &json!({
-                "action": "search",
-                "query": "can you recall the allocator regression?",
-                "category": "project"
-            }),
-        );
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(parsed["count"].as_u64(), Some(1));
-        assert!(parsed["results"][0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("allocator regression"));
-    }
-
-    #[test]
-    fn test_fact_feedback() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let fact_id = plugin.add_fact("Test fact", "general", "").unwrap();
-        let result = plugin.record_feedback(fact_id, true).unwrap();
-        assert!(result["new_trust"].as_f64().unwrap() > 0.5);
-    }
-
-    #[test]
-    fn test_extract_entities() {
-        let entities = extract_entities("John Doe works at Acme Corp using 'Python'");
-        assert!(entities.contains(&"John Doe".to_string()));
-        assert!(entities.contains(&"Acme Corp".to_string()));
-        assert!(entities.contains(&"Python".to_string()));
-    }
-
-    #[test]
-    fn test_deduplicate_facts() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-
-        let id1 = plugin.add_fact("Same fact", "general", "").unwrap();
-        let id2 = plugin.add_fact("Same fact", "general", "").unwrap();
-        assert_eq!(id1, id2);
-        assert_eq!(plugin.fact_count(), 1);
-    }
-
-    #[test]
-    fn test_shutdown_drops_sqlite_connection() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plugin = HolographicMemoryPlugin::new();
-        plugin.initialize("test-session", tmp.path().to_str().unwrap());
-        assert!(plugin.with_conn(|conn| conn.is_autocommit()).is_some());
-
-        plugin.shutdown();
-
-        assert!(plugin.with_conn(|conn| conn.is_autocommit()).is_none());
-        assert_eq!(plugin.fact_count(), 0);
+        assert_eq!(plugin.fact_count(&filter), 102);
     }
 }

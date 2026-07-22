@@ -57,7 +57,6 @@ fn canonical_toolset_token(token: &str) -> String {
             "mixture_of_agents".to_string()
         }
         "browser-use" | "browser_use" => "browser".to_string(),
-        "voice-mode" | "voice_mode" => "voice".to_string(),
         "hermes_cli" => "hermes-cli".to_string(),
         "hermes_acp" => "hermes-acp".to_string(),
         "hermes_api_server" => "hermes-api-server".to_string(),
@@ -396,7 +395,6 @@ mod tests {
         register(&reg, "video_generate", "video_gen");
         register(&reg, "mixture_of_agents", "mixture_of_agents");
         register(&reg, "transcription", "voice");
-        register(&reg, "voice_mode", "voice");
         register(&reg, "process_registry", "terminal");
         reg
     }
@@ -714,7 +712,6 @@ mod tests {
             "image_generate",
             "mixture_of_agents",
             "video_generate",
-            "voice_mode",
         ] {
             assert!(
                 all_names.contains(&expected.to_string()),
@@ -736,7 +733,6 @@ mod tests {
             vec![
                 "Image-Gen".to_string(),
                 "MOA".to_string(),
-                "voice_mode".to_string(),
                 "home-assistant".to_string(),
                 "Terminal".to_string(),
             ],
@@ -748,7 +744,6 @@ mod tests {
             "image_generate",
             "mixture_of_agents",
             "transcription",
-            "voice_mode",
             "ha_call_service",
             "terminal",
             "process",

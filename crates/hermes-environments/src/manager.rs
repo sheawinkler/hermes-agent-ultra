@@ -1,14 +1,19 @@
 //! Backend manager – orchestrates the active terminal backend.
 
 use std::sync::Arc;
-
 use hermes_config::{TerminalBackendType, TerminalConfig};
-use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+
+use hermes_core::{
+    AgentError, CommandOutput, ExecutionMode, ResolvedExecutionMode, TerminalBackend,
+};
+use crate::containment::{ExecutionContainmentAdmissionError, ExecutionContainmentContext};
 
 use crate::local::LocalBackend;
 
 #[cfg(feature = "docker")]
 use crate::docker::DockerBackend;
+#[cfg(feature = "docker")]
+use crate::docker::DockerContainmentCertificationError;
 
 #[cfg(feature = "ssh")]
 use crate::ssh::SshBackend;
@@ -21,6 +26,34 @@ use crate::modal::ModalBackend;
 
 #[cfg(feature = "singularity")]
 use crate::singularity::SingularityBackend;
+
+/// A terminal backend and the sole containment context allowed to govern it.
+///
+/// The pair prevents a closed-mode caller from certifying one backend and then
+/// dispatching tools through another.
+pub struct ExecutionBackendBinding {
+    pub terminal_backend: Arc<dyn TerminalBackend>,
+    pub containment_context: Arc<ExecutionContainmentContext>,
+}
+
+/// Typed startup failure for a requested execution-mode/backend binding.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionBackendBindingError {
+    #[error(
+        "closed execution mode {mode} requires a fresh hardened Docker backend, not configured backend {backend:?}"
+    )]
+    UnsupportedClosedBackend {
+        mode: ExecutionMode,
+        backend: TerminalBackendType,
+    },
+    #[error("closed execution Docker support is unavailable in this build")]
+    DockerSupportUnavailable,
+    #[error(transparent)]
+    ManualContext(#[from] ExecutionContainmentAdmissionError),
+    #[cfg(feature = "docker")]
+    #[error(transparent)]
+    DockerCertification(#[from] DockerContainmentCertificationError),
+}
 
 /// Manages the active terminal backend and provides a unified interface
 /// for command execution and file operations regardless of backend type.
@@ -42,6 +75,64 @@ impl BackendManager {
             current_backend: backend,
             active_backend_type,
             config,
+        }
+    }
+
+    /// Bind a terminal backend to the exact containment context that admitted
+    /// its resolved execution mode.
+    ///
+    /// Closed modes never call the legacy fallback factory: they require a
+    /// concrete fresh Docker backend so the context and dispatch backend are
+    /// the same `Arc`. Manual mode retains the explicit host-local context.
+    pub fn execution_backend_binding(
+        config: TerminalConfig,
+        mode: ResolvedExecutionMode,
+    ) -> Result<ExecutionBackendBinding, ExecutionBackendBindingError> {
+        if !mode.mode.requires_containment_certificate() {
+            let manager = Self::new(config);
+            return Ok(ExecutionBackendBinding {
+                terminal_backend: manager.terminal_backend(),
+                containment_context: Arc::new(ExecutionContainmentContext::manual(mode)?),
+            });
+        }
+
+        match config.backend {
+            TerminalBackendType::Docker => {
+                #[cfg(feature = "docker")]
+                {
+                    let backend = Arc::new(DockerBackend::new(
+                        config.docker_container_id,
+                        config.docker_image,
+                        config.docker_mount_cwd_to_workspace,
+                        config.docker_run_as_host_user,
+                        config.container_cpu,
+                        config.container_memory,
+                        config.container_disk,
+                        config.container_persistent,
+                        config.docker_env,
+                        config.docker_forward_env,
+                        config.docker_volumes,
+                        config.timeout,
+                        config.max_output_size,
+                    ));
+                    let containment_context =
+                        Arc::new(backend.closed_execution_context(mode)?);
+                    let terminal_backend: Arc<dyn TerminalBackend> = backend;
+                    return Ok(ExecutionBackendBinding {
+                        terminal_backend,
+                        containment_context,
+                    });
+                }
+                #[cfg(not(feature = "docker"))]
+                {
+                    let _ = mode;
+                    return Err(ExecutionBackendBindingError::DockerSupportUnavailable);
+                }
+            }
+            backend => Err(ExecutionBackendBindingError::UnsupportedClosedBackend {
+                mode: mode.mode,
+                backend,
+            }),
         }
     }
 
@@ -233,6 +324,66 @@ mod tests {
             manager.configured_backend_type(),
             TerminalBackendType::Local
         );
+    }
+
+    #[test]
+    fn closed_execution_binding_refuses_local_before_any_fallback_backend_is_built() {
+        let error = BackendManager::execution_backend_binding(
+            TerminalConfig::default(),
+            ResolvedExecutionMode {
+                mode: ExecutionMode::Reviewed,
+                source: hermes_core::ExecutionModeSource::Cli,
+            },
+        )
+        .err()
+        .expect("closed mode must not use the local fallback backend");
+        assert!(matches!(
+            error,
+            ExecutionBackendBindingError::UnsupportedClosedBackend {
+                mode: ExecutionMode::Reviewed,
+                backend: TerminalBackendType::Local,
+            }
+        ));
+    }
+
+    #[test]
+    fn manual_execution_binding_remains_explicit_host_local() {
+        let binding = BackendManager::execution_backend_binding(
+            TerminalConfig::default(),
+            ResolvedExecutionMode {
+                mode: ExecutionMode::Manual,
+                source: hermes_core::ExecutionModeSource::Cli,
+            },
+        )
+        .expect("manual host binding");
+        assert!(binding.containment_context.is_manual_host());
+        assert!(binding.containment_context.sandbox_digest().is_none());
+    }
+
+    #[cfg(feature = "docker")]
+    #[test]
+    fn closed_execution_binding_accepts_only_the_fresh_pinned_docker_factory() {
+        let binding = BackendManager::execution_backend_binding(
+            TerminalConfig {
+                backend: TerminalBackendType::Docker,
+                docker_image: Some(format!(
+                    "registry.example/hermes@sha256:{}",
+                    "e".repeat(64)
+                )),
+                ..TerminalConfig::default()
+            },
+            ResolvedExecutionMode {
+                mode: ExecutionMode::Reviewed,
+                source: hermes_core::ExecutionModeSource::Cli,
+            },
+        )
+        .expect("fresh pinned Docker binding");
+        assert!(binding.containment_context.is_certified_dispatch_context());
+        assert_eq!(
+            binding.containment_context.mode().mode,
+            ExecutionMode::Reviewed
+        );
+        assert!(binding.containment_context.sandbox_digest().is_some());
     }
 
     #[cfg(not(feature = "docker"))]

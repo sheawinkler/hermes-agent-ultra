@@ -163,6 +163,28 @@ def validate_case(
     for field in text_fields:
         if not str(case.get(field, "")).strip():
             issues.append(case_issue(case_id, "schema", f"{field} is required"))
+    evidence_scope = case.get("evidence_scope")
+    if evidence_scope is not None:
+        if not isinstance(evidence_scope, dict):
+            issues.append(case_issue(case_id, "schema", "evidence_scope must be an object"))
+        else:
+            if evidence_scope.get("coverage_kind") == "fixture_reference_regression":
+                if evidence_scope.get("capability_promotion_authoritative") is not False:
+                    issues.append(
+                        case_issue(
+                            case_id,
+                            "schema",
+                            "fixture-reference evidence must not authorize capability promotion",
+                        )
+                    )
+                if evidence_scope.get("production_complete") is not False:
+                    issues.append(
+                        case_issue(
+                            case_id,
+                            "schema",
+                            "fixture-reference evidence must not claim production completeness",
+                        )
+                    )
 
     score = 1.0 if classification in PASSING_CLASSIFICATIONS else 0.0
     row = dict(case)

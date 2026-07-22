@@ -84,8 +84,8 @@ pub const TOOLSET_HOMEASSISTANT: &[&str] = &[
 ];
 /// Text-to-speech tools.
 pub const TOOLSET_TTS: &[&str] = &["text_to_speech", "tts_premium"];
-/// Voice input/mode tools.
-pub const TOOLSET_VOICE: &[&str] = &["transcription", "voice_mode"];
+/// Voice transcription tools.
+pub const TOOLSET_VOICE: &[&str] = &["transcription"];
 /// Security helpers.
 pub const TOOLSET_SECURITY: &[&str] = &["osv_check", "url_safety"];
 /// System utility helpers.
@@ -98,7 +98,6 @@ pub const TOOLSET_SYSTEM: &[&str] = &[
     "mission_snapshot",
     "tool_policy_simulate",
     "raw_trace_control",
-    "replay_trace_control",
     "runbook_control",
     "telemetry_snapshot",
     "harness_cockpit",
@@ -754,6 +753,24 @@ mod tests {
                 "rl_training should include {expected}"
             );
         }
+    }
+
+    #[test]
+    fn test_system_toolset_excludes_retired_replay_trace_control() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("system").unwrap();
+        assert!(
+            tools.contains(&"raw_trace_control".to_string()),
+            "system should keep diagnostic raw_trace_control"
+        );
+        assert!(
+            !tools.contains(&"replay_trace_control".to_string()),
+            "system must not advertise retired replay_trace_control"
+        );
+        assert!(
+            !TOOLSET_SYSTEM.contains(&"replay_trace_control"),
+            "TOOLSET_SYSTEM must not list replay_trace_control"
+        );
     }
 
     #[test]

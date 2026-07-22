@@ -107,14 +107,52 @@ fn sota_workflow_replay_fixture_is_well_formed() {
         "tool_registry",
         "auth_status",
         "gateway_status",
-        "release_systems_status",
-        "release_gate",
+        "surface_availability",
+        "release_evidence_inventory",
         "provider_qos",
         "memory_fusion",
         "pty_diagnostic",
     ] {
         assert!(roles.contains(required), "missing snapshot role {required}");
     }
+
+    let availability = suite
+        .workflows
+        .iter()
+        .flat_map(|workflow| workflow.steps.iter())
+        .find(|step| step.id == "systems_a2a_availability_json")
+        .expect("fixture must snapshot A2A availability");
+    let expected_args = vec![
+        "systems".to_string(),
+        "a2a-availability".to_string(),
+        "show".to_string(),
+        "--json".to_string(),
+    ];
+    assert_eq!(availability.args, expected_args);
+    for expected in [
+        "\"kind\": \"hermes.a2a.availability\"",
+        "\"available\": false",
+        "\"production_complete\": false",
+    ] {
+        assert!(
+            availability.expected_stdout_contains.iter().any(|value| value == expected),
+            "A2A availability snapshot must require {expected:?}"
+        );
+    }
+
+    let release_evidence = suite
+        .workflows
+        .iter()
+        .flat_map(|workflow| workflow.steps.iter())
+        .find(|step| step.snapshot_role == "release_evidence_inventory")
+        .expect("fixture must retain release evidence inventory");
+    assert!(
+        release_evidence
+            .expected_stdout_contains
+            .iter()
+            .any(|value| value == "\"kind\": \"hermes.systems.release_evidence_inventory\""),
+        "release evidence snapshot must retain its report kind"
+    );
 }
 
 #[test]

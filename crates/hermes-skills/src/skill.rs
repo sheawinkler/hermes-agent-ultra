@@ -11,6 +11,7 @@ use tracing::{debug, info, instrument};
 use crate::guard::SkillGuard;
 use crate::hub::SkillsHubClient;
 use crate::store::SkillStore;
+use crate::trust::SkillQuarantineReason;
 
 pub const MAX_SKILL_CONTENT_CHARS: usize = 100_000;
 
@@ -35,6 +36,12 @@ pub enum SkillError {
 
     #[error("Guard violation: {0}")]
     GuardViolation(String),
+
+    #[error("Skill quarantined ({reason:?}): {detail}")]
+    Quarantined {
+        reason: SkillQuarantineReason,
+        detail: String,
+    },
 }
 
 impl From<SkillError> for AgentError {
@@ -65,7 +72,7 @@ pub struct SkillManager {
 
 impl SkillManager {
     /// Built-in skill names aligned with Python bundle footprint.
-    pub const BUILTIN_SKILLS: [&'static str; 26] = [
+    pub const BUILTIN_SKILLS: [&'static str; 25] = [
         "planning",
         "debugging",
         "refactoring",
@@ -86,7 +93,6 @@ impl SkillManager {
         "agent-orchestration",
         "mcp",
         "gateway",
-        "voice-mode",
         "cron",
         "memory",
         "session-search",
@@ -154,8 +160,10 @@ impl SkillManager {
         corrections: &[String],
     ) -> Result<Skill, AgentError> {
         let mut current = self
-            .get_skill(name)
-            .await?
+            .store
+            .load_for_mutation(name)
+            .await
+            .map_err(AgentError::from)?
             .ok_or_else(|| SkillError::NotFound(name.to_string()))?;
         current.content.push_str("\n\n## Feedback\n");
         current.content.push_str(feedback);
@@ -190,20 +198,14 @@ impl SkillManager {
         Ok(synced)
     }
 
-    /// Install baseline built-in skills into local store if absent.
+    /// Deliberately does not materialize or execute bootstrap templates.
+    ///
+    /// Builtins must arrive through the signed embedded-package/sync path,
+    /// whose lock entry is admitted by the active policy and sandbox before
+    /// prompt or tool use. Keeping this legacy convenience method inert
+    /// prevents startup from turning source strings into executable skills.
     pub async fn install_builtin_skills(&self) -> Result<usize, AgentError> {
-        let mut installed = 0usize;
-        for name in Self::BUILTIN_SKILLS {
-            if self.get_skill(name).await?.is_none() {
-                let template = format!(
-                    "# {}\n\n1. Understand user goal\n2. Plan concise steps\n3. Execute safely\n4. Report outcomes\n",
-                    name
-                );
-                self.create_skill(name, &template, Some("builtin")).await?;
-                installed += 1;
-            }
-        }
-        Ok(installed)
+        Ok(0)
     }
 }
 
@@ -221,7 +223,7 @@ impl SkillProvider for SkillManager {
 
         if self
             .store
-            .load(name)
+            .load_for_mutation(name)
             .await
             .map_err(AgentError::from)?
             .is_some()
@@ -277,7 +279,7 @@ impl SkillProvider for SkillManager {
         // Load existing skill to preserve category / description.
         let mut skill = self
             .store
-            .load(name)
+            .load_for_mutation(name)
             .await
             .map_err(AgentError::from)?
             .ok_or_else(|| SkillError::NotFound(name.to_string()))?;
@@ -321,16 +323,40 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
-    // Helper to create a manager backed by a temp dir.
-    fn make_manager(dir: &PathBuf) -> SkillManager {
-        let store = Arc::new(FileSkillStore::new(dir.clone()));
-        SkillManager::new(store)
+    const TEST_LOCAL_OWNER_SEED: [u8; 32] = [7; 32];
+
+    fn make_manager(dir: &PathBuf) -> (SkillManager, Arc<FileSkillStore>) {
+        let signer = crate::LocalOwnerSigningKey::from_seed(TEST_LOCAL_OWNER_SEED);
+        let store = Arc::new(
+            FileSkillStore::new(dir.clone()).with_trusted_local_owner_keys(vec![
+                signer.trusted_key("test-owner", "test-local-key", true),
+            ]),
+        );
+        (SkillManager::new(store.clone()), store)
+    }
+
+    fn attest(store: &FileSkillStore, name: &str) {
+        let signer = crate::LocalOwnerSigningKey::from_seed(TEST_LOCAL_OWNER_SEED);
+        let mut manifest = store
+            .pending_local_manifest(name)
+            .unwrap()
+            .expect("pending local candidate");
+        let attestation = signer
+            .sign_local_manifest(
+                &mut manifest,
+                "test-owner",
+                "test-local-key",
+                format!("test-{name}"),
+                "2026-07-20T00:00:00Z",
+            )
+            .unwrap();
+        store.attest_local_skill(name, attestation).unwrap();
     }
 
     #[tokio::test]
     async fn test_create_and_get_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, store) = make_manager(&dir.path().to_path_buf());
 
         let skill = mgr
             .create_skill("test-skill", "# Test Skill\nHello world", Some("general"))
@@ -340,6 +366,8 @@ mod tests {
         assert_eq!(skill.name, "test-skill");
         assert_eq!(skill.category.as_deref(), Some("general"));
 
+        assert!(mgr.get_skill("test-skill").await.is_err());
+        attest(&store, "test-skill");
         let loaded = mgr.get_skill("test-skill").await.unwrap().unwrap();
         assert_eq!(loaded.name, "test-skill");
         assert!(loaded.content.contains("Hello world"));
@@ -348,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_skills() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, store) = make_manager(&dir.path().to_path_buf());
 
         mgr.create_skill(
             "skill-a",
@@ -360,6 +388,8 @@ mod tests {
         mgr.create_skill("skill-b", "# Skill B\n- Step one\n- Step two", None)
             .await
             .unwrap();
+        attest(&store, "skill-a");
+        attest(&store, "skill-b");
 
         let list = mgr.list_skills().await.unwrap();
         assert_eq!(list.len(), 2);
@@ -368,7 +398,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_rejects_duplicate_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, _store) = make_manager(&dir.path().to_path_buf());
 
         mgr.create_skill("dup-skill", "# Skill\n1. First", None)
             .await
@@ -383,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_rejects_oversized_content() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, _store) = make_manager(&dir.path().to_path_buf());
         let oversized = format!("# Huge\n{}", "x".repeat(MAX_SKILL_CONTENT_CHARS + 1));
 
         let err = mgr
@@ -396,7 +426,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, store) = make_manager(&dir.path().to_path_buf());
 
         mgr.create_skill(
             "up-skill",
@@ -411,6 +441,8 @@ mod tests {
             .await
             .unwrap();
         assert!(updated.content.contains("# Updated"));
+        assert!(mgr.get_skill("up-skill").await.is_err());
+        attest(&store, "up-skill");
 
         let loaded = mgr.get_skill("up-skill").await.unwrap().unwrap();
         assert!(loaded.content.contains("# Updated"));
@@ -419,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, _store) = make_manager(&dir.path().to_path_buf());
 
         mgr.create_skill("del-skill", "# Bye\n- Step one\n- Step two", None)
             .await
@@ -433,7 +465,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_nonexistent_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, _store) = make_manager(&dir.path().to_path_buf());
 
         let result = mgr.get_skill("no-such-skill").await.unwrap();
         assert!(result.is_none());
@@ -442,10 +474,19 @@ mod tests {
     #[tokio::test]
     async fn test_delete_nonexistent_skill() {
         let dir = tempdir().unwrap();
-        let mgr = make_manager(&dir.path().to_path_buf());
+        let (mgr, _store) = make_manager(&dir.path().to_path_buf());
 
         let result = mgr.delete_skill("no-such-skill").await;
         // Deleting a non-existent skill should still succeed (idempotent).
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn builtin_bootstrap_is_inert_without_a_trusted_embedded_package() {
+        let directory = tempdir().unwrap();
+        let (manager, store) = make_manager(&directory.path().to_path_buf());
+        assert_eq!(manager.install_builtin_skills().await.unwrap(), 0);
+        assert!(store.list().await.unwrap().is_empty());
+        assert!(!directory.path().join(".hub/lock.json").exists());
     }
 }

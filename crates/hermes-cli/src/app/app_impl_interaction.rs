@@ -140,7 +140,7 @@ impl App {
         let Some(plugin_manager) = self.agent.plugin_manager.as_ref() else {
             return;
         };
-        let Ok(plugin_manager) = plugin_manager.lock() else {
+        let Ok(mut plugin_manager) = plugin_manager.lock() else {
             tracing::warn!(hook = hook.as_str(), "Plugin manager lock poisoned");
             return;
         };
@@ -170,7 +170,7 @@ impl App {
         let Some(plugin_manager) = self.agent.plugin_manager.as_ref() else {
             return;
         };
-        let Ok(plugin_manager) = plugin_manager.lock() else {
+        let Ok(mut plugin_manager) = plugin_manager.lock() else {
             tracing::warn!(
                 hook = HookType::OnSessionEnd.as_str(),
                 "Plugin manager lock poisoned"
@@ -222,7 +222,7 @@ impl App {
     fn notify_memory_session_switch(
         &self,
         new_session_id: &str,
-        parent_session_id: &str,
+        _parent_session_id: &str,
         reset: bool,
     ) {
         let Some(memory_manager) = self.agent.memory_manager.as_ref() else {
@@ -232,7 +232,20 @@ impl App {
             tracing::warn!("Memory manager lock poisoned during session switch");
             return;
         };
-        memory_manager.on_session_switch(new_session_id, parent_session_id, reset);
+        // A newly selected CLI session receives a freshly constructed agent
+        // below. Never turn this callback into a subject rebind for the
+        // outgoing manager; only a reset of its own immutable subject reaches
+        // provider hooks.
+        if memory_manager.subject().session_id().as_str() != new_session_id {
+            tracing::warn!("Refusing to rebind memory manager during session switch");
+            return;
+        }
+        if memory_manager
+            .on_session_switch(memory_manager.subject(), reset)
+            .is_err()
+        {
+            tracing::warn!("Memory manager rejected its session-switch binding");
+        }
     }
 
     /// Set or clear a durable session objective.
@@ -457,30 +470,44 @@ impl App {
             )));
         }
 
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || -> Result<Arc<AgentLoop>, AgentError> {
+            let memory_subject = hermes_agent::MemorySubject::local_owner(
+                hermes_agent::MemorySurface::Cli,
+                self.session_id.clone(),
+            )
+            .map_err(|_| AgentError::Config("invalid local memory subject".to_string()))?;
             let provider = build_provider(&self.config, provider_model);
-            let mut agent_config = build_agent_config(&self.config, provider_model);
+            let mut agent_config = build_agent_config(
+                &self.config,
+                provider_model,
+                self.agent.config.execution_mode,
+            );
             agent_config.session_id = Some(self.session_id.clone());
             let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
 
-            let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
-                agent_config,
-                agent_tool_registry,
-                provider,
-            ))
+            let agent_inner = hermes_agent::attach_discovered_memory(
+                AgentLoop::new(agent_config, agent_tool_registry, provider)
+                    .with_run_runtime(self.run_runtime.clone()),
+                memory_subject,
+            )
+            .map_err(|_| AgentError::Config("memory initialization failed".to_string()))?
             .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
             let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
                 &agent_inner,
                 self.state_root.clone(),
-            ));
-            Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator))
+            )?);
+            Ok(Arc::new(
+                agent_inner.with_sub_agent_orchestrator(orchestrator),
+            ))
         }));
 
-        result.map_err(|_| {
-            AgentError::Config(format!(
-                "model switch rebuild panicked for {provider_model}"
-            ))
-        })
+        result
+            .map_err(|_| {
+                AgentError::Config(format!(
+                    "model switch rebuild panicked for {provider_model}"
+                ))
+            })?
     }
 
     pub fn refresh_agent_tool_snapshot(&mut self) -> AgentToolSnapshotRefresh {
@@ -515,17 +542,14 @@ impl App {
         normalize_runtime_provider_name(provider_name.as_str())
     }
 
-    /// Refresh and verify runtime credentials for the active provider.
+    /// Read-only runtime credential status for the active provider.
     ///
-    /// This is the command-surface lifecycle helper used by `/auth`.
-    pub async fn verify_runtime_auth(&mut self, force_refresh: bool) -> Result<String, AgentError> {
+    /// OAuth mutation is deliberately unavailable from the in-app command
+    /// surface: use `hermes auth refresh <provider>` as the explicit
+    /// credential-management effect.
+    pub async fn verify_runtime_auth(&mut self, refresh_requested: bool) -> Result<String, AgentError> {
         let provider = self.current_runtime_provider();
-        let before_present = provider_api_key_from_env(&provider).is_some();
-        self.refresh_runtime_provider_credentials_if_needed(force_refresh)
-            .await;
-        let after = provider_api_key_from_env(&provider);
-        let after_present = after.is_some();
-        let status = if let Some(key) = after {
+        let status = if let Some(key) = provider_api_key_from_env(&provider) {
             format!(
                 "present (masked={} chars)",
                 key.chars().count().max(1).saturating_sub(8).max(1)
@@ -533,15 +557,14 @@ impl App {
         } else {
             "missing".to_string()
         };
-        let refresh_mode = if force_refresh { "forced" } else { "passive" };
-        let changed = if before_present == after_present {
-            "unchanged"
+        let next = if refresh_requested {
+            format!("run `hermes auth refresh {provider}` to perform an explicit refresh")
         } else {
-            "updated"
+            "read-only status check; use `hermes auth refresh <provider>` to refresh".to_string()
         };
         Ok(format!(
-            "Auth verify\nprovider: {}\nmode: {}\ncredential: {}\nstate: {}\nmodel: {}",
-            provider, refresh_mode, status, changed, self.current_model
+            "Auth verify\nprovider: {}\ncredential: {}\nstate: read-only\nmodel: {}\nnext: {}",
+            provider, status, self.current_model, next
         ))
     }
 
@@ -560,21 +583,60 @@ impl App {
         stream_enabled: bool,
         include_tools: bool,
     ) -> Result<hermes_core::AgentResult, AgentError> {
-        let tool_schemas = include_tools.then(|| self.tool_schemas.clone());
-        if stream_enabled && self.config.streaming.enabled {
-            let stream_handle = self.stream_handle.clone();
-            let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
-                stream_handle.map(|h| {
-                    Box::new(move |chunk: hermes_core::StreamChunk| {
-                        h.send_chunk(chunk);
-                    }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
+        // `None` means every registry schema to AgentLoop; an explicit empty
+        // list is required for provider-only execution.
+        let tool_schemas = Some(if include_tools {
+            self.tool_schemas.clone()
+        } else {
+            Vec::new()
+        });
+        let result = if stream_enabled && self.config.streaming.enabled {
+            if let Some(stream_handle) = self.stream_handle.clone() {
+                let (observer_sink, mut observer_rx) =
+                    hermes_agent::AgentObserverSink::channel(256);
+                let observer_handle = stream_handle.clone();
+                let mut observer_task = tokio::spawn(async move {
+                    while let Some(event) = observer_rx.recv().await {
+                        match event {
+                            hermes_agent::AgentObserverEvent::RenderDelta(delta) => {
+                                observer_handle.send_render_delta(delta);
+                            }
+                            hermes_agent::AgentObserverEvent::Usage(usage) => {
+                                observer_handle.send_usage(usage);
+                            }
+                            _ => {}
+                        }
+                    }
                 });
-            self.agent
-                .run_stream(messages, tool_schemas, stream_cb)
-                .await
+                let result = self
+                    .agent
+                    .run_stream(messages, tool_schemas, observer_sink.clone())
+                    .await;
+                let flushed = observer_sink.flush().await;
+                let dropped = observer_sink.dropped_event_count();
+                if dropped > 0 {
+                    stream_handle.record_upstream_drops(dropped);
+                }
+                drop(observer_sink);
+                if !flushed
+                    || tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        &mut observer_task,
+                    )
+                    .await
+                    .is_err()
+                {
+                    observer_task.abort();
+                }
+                result
+            } else {
+                self.agent.run(messages, tool_schemas).await
+            }
         } else {
             self.agent.run(messages, tool_schemas).await
-        }
+        };
+        let _ = self.agent.flush_observer().await;
+        result
     }
 
 }
@@ -596,16 +658,6 @@ impl App {
             5,
         );
         self.emit_contextlattice_connectivity_status().await;
-        let provider = self.current_runtime_provider();
-        let force_refresh = Self::should_force_preflight_auth_refresh(provider.as_str());
-        self.refresh_runtime_provider_credentials_if_needed(force_refresh)
-            .await;
-        if force_refresh {
-            Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
-                format!("preflight auth refresh forced for provider {}", provider),
-            );
-        }
         if let Some(policy) = self.quorum_mode_armed_for_turn() {
             self.quorum_armed_once = false;
             self.clear_quorum_system_hints_inplace();
@@ -624,8 +676,6 @@ impl App {
         );
         self.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
-        let mut auth_refresh_attempts = 0usize;
-        let auth_refresh_retry_limit = Self::auth_refresh_retry_limit();
         let mut transient_retry_attempts = 0usize;
         let transient_retry_limit = Self::transient_retry_limit();
         let mut objective_continuation_attempts = 0usize;
@@ -763,29 +813,6 @@ impl App {
                         "error handling + remediation",
                         60,
                     );
-                    if Self::is_provider_auth_or_session_error(&e) {
-                        if auth_refresh_attempts < auth_refresh_retry_limit {
-                            if self.force_auth_refresh_after_error().await {
-                                auth_refresh_attempts += 1;
-                                Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
-                                    format!(
-                                        "auth refresh retry {}/{}",
-                                        auth_refresh_attempts, auth_refresh_retry_limit
-                                    ),
-                                );
-                                continue;
-                            }
-                        } else {
-                            Self::emit_lifecycle_event(
-                                &self.stream_handle_shared,
-                                format!(
-                                    "auth refresh retries exhausted ({})",
-                                    auth_refresh_retry_limit
-                                ),
-                            );
-                        }
-                    }
                     if Self::is_transient_retryable_error(&e)
                         && transient_retry_attempts < transient_retry_limit
                     {

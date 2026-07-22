@@ -66,29 +66,49 @@ fn test_coverage_audit_gate_passes() {
 }
 
 #[test]
-fn test_sota_harness_matrix_gate_passes() {
+fn test_fixture_reference_matrix_gate_passes() {
     let payload = read_json("docs/parity/sota-harness-matrix.json");
+    assert_eq!(
+        payload["authority"]["capability_promotion_authoritative"].as_bool(),
+        Some(false),
+        "fixture/reference matrix must not authorize capability promotion"
+    );
+    assert_eq!(
+        payload["authority"]["production_complete"].as_bool(),
+        Some(false),
+        "fixture/reference matrix must not claim production completeness"
+    );
+    assert_eq!(
+        payload["scope"]["coverage_kind"].as_str(),
+        Some("fixture_reference_regression"),
+        "fixture/reference matrix scope must be explicit"
+    );
+    assert_eq!(
+        payload["gate"]["scope"].as_str(),
+        Some("fixture_reference_regression"),
+        "fixture/reference gate scope must be explicit"
+    );
     assert_eq!(
         payload["gate"]["pass"].as_bool(),
         Some(true),
-        "SOTA harness matrix gate must pass"
+        "fixture/reference regression gate must pass"
     );
     assert_eq!(
         payload["gate"]["critical_gaps"].as_u64(),
         Some(0),
-        "SOTA harness matrix must have zero critical gaps"
+        "fixture/reference matrix must have zero unresolved fixture-reference gaps"
     );
     assert_eq!(
         payload["gate"]["missing_rust_test_refs"].as_u64(),
         Some(0),
-        "SOTA harness matrix must have zero missing Rust test refs"
+        "fixture/reference matrix must have zero missing referenced Rust test refs"
     );
     let ratio = payload["summary"]["domain_coverage_ratio"]
         .as_f64()
         .expect("domain_coverage_ratio should be number");
     assert!(
         ratio >= 1.0,
-        "SOTA harness domain coverage ratio below gate: {}",
+        "fixture/reference category coverage ratio below gate: {}",
         ratio
     );
 }

@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::Utc;
+use hermes_agent::{CronScheduleSource, RunInvocationContext};
 use hermes_core::{AgentResult, MessageRole};
 use tokio::sync::{broadcast, Mutex, Notify};
 use tokio::time::{self, Duration};
@@ -37,7 +38,11 @@ const MAX_STORED_OUTPUT_CHARS: usize = 32_000;
 
 #[async_trait::async_trait]
 trait CronJobExecutor: Send + Sync {
-    async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError>;
+    async fn run_job(
+        &self,
+        job: &CronJob,
+        context: RunInvocationContext,
+    ) -> Result<AgentResult, CronError>;
     async fn deliver_error(
         &self,
         error_text: &str,
@@ -47,8 +52,12 @@ trait CronJobExecutor: Send + Sync {
 
 #[async_trait::async_trait]
 impl CronJobExecutor for CronRunner {
-    async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
-        CronRunner::run_job(self, job).await
+    async fn run_job(
+        &self,
+        job: &CronJob,
+        context: RunInvocationContext,
+    ) -> Result<AgentResult, CronError> {
+        CronRunner::run_job_with_context(self, job, context).await
     }
 
     async fn deliver_error(
@@ -319,12 +328,13 @@ impl CronScheduler {
         runner: Arc<dyn CronJobExecutor>,
         sequential_run_lock: Arc<Mutex<()>>,
         job: CronJob,
+        context: RunInvocationContext,
     ) -> Result<AgentResult, CronError> {
         if Self::requires_sequential_run(&job) {
             let _guard = sequential_run_lock.lock().await;
-            runner.run_job(&job).await
+            runner.run_job(&job, context).await
         } else {
-            runner.run_job(&job).await
+            runner.run_job(&job, context).await
         }
     }
 
@@ -447,6 +457,15 @@ impl CronScheduler {
 
         for due_run in due_jobs {
             let job_id = due_run.job.id.clone();
+            let schedule_time = due_run.job.next_run.unwrap_or(now);
+            let dispatch_time = Utc::now();
+            let run_context = RunInvocationContext::cron_scheduled(
+                &job_id,
+                CronScheduleSource::Local,
+                schedule_time.timestamp_millis(),
+                dispatch_time.timestamp_millis(),
+            )
+            .map_err(|error| CronError::InvalidJob(error.to_string()));
             tracing::info!(
                 "Dispatching cron job '{}' ({})",
                 due_run.job.name.as_deref().unwrap_or(&due_run.job.id),
@@ -471,14 +490,18 @@ impl CronScheduler {
                     runner: runner.clone(),
                     managed_provider,
                 };
-                let run_result = Self::execute_with_optional_sequential_guard(
-                    runner.clone(),
-                    sequential_run_lock,
-                    runnable_job,
-                )
-                .await;
+                let run_result = match run_context {
+                    Ok(context) => Self::execute_with_optional_sequential_guard(
+                        runner.clone(),
+                        sequential_run_lock,
+                        runnable_job,
+                        context,
+                    )
+                    .await,
+                    Err(error) => Err(error),
+                };
 
-                Self::finish_scheduled_job(finish_ctx, job, now, run_result).await;
+                Self::finish_scheduled_job(finish_ctx, job, dispatch_time, run_result).await;
                 Self::clear_running(&running_job_ids, &job_id).await;
             });
         }
@@ -810,6 +833,12 @@ impl CronScheduler {
             (job, runnable_job)
         };
 
+        let run_context = RunInvocationContext::cron_manual(
+            &job.id,
+            Utc::now().timestamp_millis(),
+        )
+        .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+
         if job.status == JobStatus::Completed {
             return Err(CronError::JobCompleted(id.to_string()));
         }
@@ -823,6 +852,7 @@ impl CronScheduler {
                 self.runner.clone(),
                 self.sequential_run_lock.clone(),
                 runnable_job,
+                run_context,
             )
             .await;
             match &run_result {
@@ -912,6 +942,15 @@ impl CronScheduler {
             (job, runnable_job, scheduled_at)
         };
 
+        let dispatch_time = Utc::now();
+        let run_context = RunInvocationContext::cron_scheduled(
+            &job.id,
+            CronScheduleSource::Managed,
+            scheduled_at.timestamp_millis(),
+            dispatch_time.timestamp_millis(),
+        )
+        .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+
         if !Self::mark_running_if_idle(&self.running_job_ids, id).await {
             tracing::info!(
                 job_id = id,
@@ -941,10 +980,11 @@ impl CronScheduler {
                 runner.clone(),
                 sequential_run_lock,
                 runnable_job,
+                run_context,
             )
             .await;
 
-            Self::finish_scheduled_job(finish_ctx, job, scheduled_at, run_result).await;
+            Self::finish_scheduled_job(finish_ctx, job, dispatch_time, run_result).await;
             Self::clear_running(&running_job_ids, &job_id).await;
         });
 
@@ -971,8 +1011,26 @@ mod tests {
     use crate::persistence::FileJobPersistence;
 
     fn make_test_scheduler() -> CronScheduler {
-        let dir = tempdir().expect("tempdir");
-        cron_scheduler_for_data_dir(dir.path().to_path_buf())
+        let root = tempdir().expect("tempdir").keep();
+        let run_runtime = Arc::new(
+            crate::RunRuntime::open_for_ephemeral_testing(&root)
+                .expect("ephemeral run runtime"),
+        );
+        let execution_mode = hermes_core::ResolvedExecutionMode::default();
+        let execution_containment = Arc::new(
+            hermes_environments::ExecutionContainmentContext::manual(execution_mode)
+                .expect("default mode must admit manual containment"),
+        );
+        let tool_registry = Arc::new(hermes_agent::agent_loop::ToolRegistry::new());
+        tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+        cron_scheduler_for_data_dir(
+            root.join("cron"),
+            tool_registry,
+            run_runtime,
+            execution_mode,
+            execution_containment,
+        )
+        .expect("test cron scheduler")
     }
 
     struct BlockingTestExecutor {
@@ -1048,7 +1106,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CronJobExecutor for BlockingTestExecutor {
-        async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
+        async fn run_job(
+            &self,
+            job: &CronJob,
+            _context: RunInvocationContext,
+        ) -> Result<AgentResult, CronError> {
             self.started.fetch_add(1, Ordering::SeqCst);
             self.record_prompt(&job.prompt);
             let permit = self

@@ -246,7 +246,7 @@ impl AnthropicProvider {
         }
     }
 
-    async fn send_with_dead_connection_recovery(
+    async fn send_once_with_client_recovery(
         &self,
         url: &str,
         api_key: &str,
@@ -254,24 +254,17 @@ impl AnthropicProvider {
     ) -> Result<reqwest::Response, AgentError> {
         self.maybe_refresh_stale_client(url).await;
         let client = self.current_client();
-        match self.build_request(&client, url, api_key, body).send().await {
-            Ok(resp) => Ok(resp),
-            Err(e) => {
-                if !GenericProvider::is_connection_recoverable(&e) {
-                    return Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+        self.build_request(&client, url, api_key, body)
+            .send()
+            .await
+            .map_err(|error| {
+                if GenericProvider::is_connection_recoverable(&error) {
+                    self.refresh_client(&format!(
+                        "recoverable transport error for the next governed attempt: {error}"
+                    ));
                 }
-                self.refresh_client(&format!("recoverable transport error: {e}"));
-                let retry_client = self.current_client();
-                self.build_request(&retry_client, url, api_key, body)
-                    .send()
-                    .await
-                    .map_err(|e2| {
-                        AgentError::LlmApi(format!(
-                            "HTTP request failed after reconnect retry: {e2}"
-                        ))
-                    })
-            }
-        }
+                map_reqwest_transport_error("HTTP request failed", error)
+            })
     }
 
     fn is_kimi_coding_endpoint(base_url: Option<&str>) -> bool {
@@ -592,7 +585,7 @@ impl LlmProvider for AnthropicProvider {
 
         let url = self.messages_url();
         let resp = self
-            .send_with_dead_connection_recovery(&url, &api_key, &body)
+            .send_once_with_client_recovery(&url, &api_key, &body)
             .await?;
 
         self.update_rate_limit(resp.headers());
@@ -608,10 +601,12 @@ impl LlmProvider for AnthropicProvider {
             )));
         }
 
-        let resp_json: Value = resp
-            .json()
+        let response_bytes = resp
+            .bytes()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("Failed to parse response: {e}")))?;
+            .map_err(|error| map_reqwest_body_error("Failed to read response body", error))?;
+        let resp_json: Value = serde_json::from_slice(&response_bytes)
+            .map_err(|error| AgentError::LlmApi(format!("Failed to parse response: {error}")))?;
 
         Self::parse_response(&resp_json)
     }
@@ -664,7 +659,7 @@ impl LlmProvider for AnthropicProvider {
 
             let url = provider.messages_url();
 
-            let resp = match provider.send_with_dead_connection_recovery(&url, &api_key, &body).await {
+            let resp = match provider.send_once_with_client_recovery(&url, &api_key, &body).await {
                 Ok(r) => r,
                 Err(e) => {
                     yield Err(e);
@@ -690,7 +685,7 @@ impl LlmProvider for AnthropicProvider {
                 let chunk_bytes = match chunk_result {
                     Ok(b) => b,
                     Err(e) => {
-                        yield Err(AgentError::LlmApi(format!("Stream read error: {e}")));
+                        yield Err(map_reqwest_body_error("Stream read error", e));
                         return;
                     }
                 };

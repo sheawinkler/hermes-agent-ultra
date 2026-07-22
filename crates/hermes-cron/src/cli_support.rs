@@ -8,9 +8,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
-use hermes_agent::agent_loop::ToolRegistry;
+use hermes_agent::{agent_loop::ToolRegistry, RunRuntime};
+use hermes_environments::ExecutionContainmentContext;
+use hermes_config::GatewayConfig;
 use hermes_core::{
-    AgentError, LlmProvider, LlmResponse, Message, StreamChunk, StreamDelta, ToolSchema,
+    AgentError, LlmProvider, LlmResponse, Message, ResolvedExecutionMode, StreamChunk, StreamDelta,
+    ToolSchema,
 };
 
 use crate::persistence::FileJobPersistence;
@@ -71,10 +74,28 @@ impl LlmProvider for MinimalCronLlm {
     }
 }
 
-/// Build a scheduler that persists jobs under `data_dir` (e.g. `$HERMES_HOME/cron`).
-pub fn cron_scheduler_for_data_dir(data_dir: PathBuf) -> CronScheduler {
+/// Build a CRUD/test scheduler that persists jobs under `data_dir`.
+///
+/// The caller must supply the process-resolved mode and the exact containment
+/// context already bound to its agent tool registry. This helper never creates
+/// a registry or execution backend.
+pub fn cron_scheduler_for_data_dir(
+    data_dir: PathBuf,
+    tool_registry: Arc<ToolRegistry>,
+    run_runtime: Arc<RunRuntime>,
+    execution_mode: ResolvedExecutionMode,
+    execution_containment: Arc<ExecutionContainmentContext>,
+) -> Result<CronScheduler, AgentError> {
     let persistence = Arc::new(FileJobPersistence::with_dir(data_dir));
     let llm: Arc<dyn LlmProvider> = Arc::new(MinimalCronLlm);
-    let runner = Arc::new(CronRunner::new(llm, Arc::new(ToolRegistry::new())));
-    CronScheduler::new(persistence, runner)
+    let config = GatewayConfig::default();
+    let runner = Arc::new(CronRunner::new(
+        llm,
+        tool_registry,
+        run_runtime,
+        execution_mode,
+        execution_containment,
+        &config,
+    )?);
+    Ok(CronScheduler::new(persistence, runner))
 }

@@ -1,12 +1,3 @@
-fn objective_eval_score(state: &str) -> f64 {
-    match state.trim().to_ascii_lowercase().as_str() {
-        "advancing" => 1.0,
-        "flat" => 0.5,
-        "regressing" => 0.0,
-        "unproven" => 0.25,
-        _ => 0.4,
-    }
-}
 
 fn claim_verifier_enabled_runtime() -> bool {
     if let Ok(raw) = std::env::var("HERMES_CLAIM_VERIFIER_ENABLED") {

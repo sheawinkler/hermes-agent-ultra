@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_tools::approval::{self, ApprovalChoice, GatewayApprovalRequest};
 
 use crate::adapter::{
@@ -534,6 +534,8 @@ pub struct IncomingMessage {
     pub chat_id: i64,
     pub user_id: Option<i64>,
     pub username: Option<String>,
+    /// Sender bot status as verified by Telegram's update payload.
+    pub is_bot: Option<bool>,
     pub text: Option<String>,
     pub message_id: i64,
     pub is_voice: bool,

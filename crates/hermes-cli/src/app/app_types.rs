@@ -1,12 +1,14 @@
-
 const SESSION_SNAPSHOT_MAX_FILES_DEFAULT: usize = 1500;
 const SESSION_SNAPSHOT_MAX_TOTAL_BYTES_DEFAULT: u64 = 1536 * 1024 * 1024;
 const SESSION_SNAPSHOT_MIN_FREE_BYTES_DEFAULT: u64 = 128 * 1024 * 1024;
 const QUORUM_HINT_PREFIX: &str = "[QUORUM_MODE] ";
 const QUORUM_MAX_VOTER_OUTPUT_CHARS: usize = 120_000;
 const QUORUM_DEFAULT_VOTER_PASSES: usize = 6;
-const QUORUM_AGENT_CONTRACT_DEFAULT_PATH: &str =
-    "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/QUORUM_AGENTS.md";
+const QUORUM_AGENT_CONTRACT_EMBEDDED_PATH: &str = "embedded/docs/QUORUM_AGENTS.md";
+const QUORUM_AGENT_CONTRACT_EMBEDDED: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/QUORUM_AGENTS.md"
+));
 const MOA_DEFAULT_REFERENCE_MODELS: &[&str] = &[
     "openai-codex:gpt-5.5",
     "openrouter:deepseek/deepseek-v4-pro",
@@ -228,6 +230,9 @@ pub struct App {
     /// The agent loop engine.
     pub agent: Arc<AgentLoop>,
 
+    /// Shared production run-record services for every agent rebuilt by this app.
+    pub run_runtime: Arc<RunRuntime>,
+
     /// The tool registry (shared with the agent).
     pub tool_registry: Arc<ToolRegistry>,
 
@@ -347,6 +352,7 @@ impl Clone for App {
             state_root: self.state_root.clone(),
             config: self.config.clone(),
             agent: self.agent.clone(),
+            run_runtime: self.run_runtime.clone(),
             tool_registry: self.tool_registry.clone(),
             cron_scheduler: self.cron_scheduler.clone(),
             tool_schemas: self.tool_schemas.clone(),

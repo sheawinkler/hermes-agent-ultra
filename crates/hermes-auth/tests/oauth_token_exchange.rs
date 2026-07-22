@@ -151,3 +151,66 @@ async fn exchange_refresh_token_supports_confidential_client_secret_post() {
     assert_eq!(cred.access_token, "at-post");
     assert_eq!(cred.refresh_token.as_deref(), Some("rt-post"));
 }
+
+#[tokio::test]
+async fn exchange_refresh_token_401_is_typed_and_redacted() {
+    let server = MockServer::start().await;
+    let sentinel = "response-sentinel-must-not-leak";
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": "invalid_grant",
+            "access_token": sentinel
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let endpoints = OAuth2Endpoints {
+        authorize_url: "https://id.example/authorize".to_string(),
+        token_url: format!("{}/oauth/token", server.uri()),
+        client_id: "public-client".to_string(),
+        redirect_uri: "http://127.0.0.1:9999/cb".to_string(),
+        scopes: vec![],
+        client_secret: None,
+        client_auth_method: OAuth2ClientAuthMethod::default(),
+    };
+
+    let error = exchange_refresh_token("acme", &endpoints, "refresh-sentinel")
+        .await
+        .expect_err("401 must fail");
+    assert!(matches!(error, hermes_core::AgentError::AuthFailed(_)));
+    assert!(error.to_string().contains("HTTP 401"));
+    assert!(!error.to_string().contains(sentinel));
+    assert!(!format!("{error:?}").contains(sentinel));
+}
+
+#[tokio::test]
+async fn exchange_refresh_token_rejects_malformed_token_json() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "",
+            "token_type": "Bearer",
+            "expires_in": 60
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let endpoints = OAuth2Endpoints {
+        authorize_url: "https://id.example/authorize".to_string(),
+        token_url: format!("{}/oauth/token", server.uri()),
+        client_id: "public-client".to_string(),
+        redirect_uri: "http://127.0.0.1:9999/cb".to_string(),
+        scopes: vec![],
+        client_secret: None,
+        client_auth_method: OAuth2ClientAuthMethod::default(),
+    };
+
+    let error = exchange_refresh_token("acme", &endpoints, "refresh-sentinel")
+        .await
+        .expect_err("malformed token response must fail");
+    assert!(matches!(error, hermes_core::AgentError::AuthFailed(_)));
+    assert!(error.to_string().contains("malformed"));
+    assert!(!error.to_string().contains("refresh-sentinel"));
+}

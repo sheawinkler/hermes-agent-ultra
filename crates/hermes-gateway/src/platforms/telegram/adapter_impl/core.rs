@@ -77,8 +77,8 @@ impl TelegramAdapter {
             return (chat_id, None);
         }
         match thread_id.parse::<i64>() {
-            Ok(0) | Err(_) => (chat_id, None),
-            Ok(thread_id) => (base_chat_id, Some(thread_id)),
+            Ok(thread_id) if thread_id > 0 => (base_chat_id, Some(thread_id)),
+            Ok(_) | Err(_) => (chat_id, None),
         }
     }
 

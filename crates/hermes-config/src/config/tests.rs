@@ -9,6 +9,7 @@ mod tests {
         assert!(!cfg.tools.is_empty());
         assert!(cfg.model.is_none());
         assert_eq!(cfg.tool_output, ToolOutputConfig::default());
+        assert!(!cfg.resource_limits_enabled);
         assert!(cfg.auxiliary.is_empty());
         assert!(cfg.delegation.max_spawn_depth.is_none());
         assert!(cfg.tts.is_null());
@@ -47,6 +48,7 @@ mod tests {
                 ..Default::default()
             },
         );
+        cfg.resource_limits_enabled = true;
         cfg.tts = serde_json::json!({
             "provider": "piper",
             "piper": {"voice": "en_US-lessac-medium"}
@@ -57,6 +59,79 @@ mod tests {
         assert_eq!(back.tools, cfg.tools);
         assert_eq!(back.auxiliary["vision"].model, "google/gemini-2.5-flash");
         assert_eq!(back.tts["provider"], "piper");
+        assert!(back.resource_limits_enabled);
+    }
+
+    #[test]
+    fn execution_mode_yaml_and_json_preserve_absent_null_and_empty_states() {
+        for (description, input, expected) in [
+            (
+                "YAML absent",
+                "{}",
+                ExecutionModeConfigValue::Absent,
+            ),
+            (
+                "YAML explicit null",
+                "execution_mode: null\n",
+                ExecutionModeConfigValue::ExplicitNull,
+            ),
+            (
+                "YAML bare null",
+                "execution_mode:\n",
+                ExecutionModeConfigValue::ExplicitNull,
+            ),
+            (
+                "YAML empty string",
+                "execution_mode: \"\"\n",
+                ExecutionModeConfigValue::value(""),
+            ),
+        ] {
+            let config: GatewayConfig =
+                serde_yaml::from_str(input).expect("YAML execution-mode config should deserialize");
+            assert_eq!(config.execution_mode, expected, "{description}");
+        }
+
+        for (description, input, expected) in [
+            (
+                "JSON absent",
+                "{}",
+                ExecutionModeConfigValue::Absent,
+            ),
+            (
+                "JSON explicit null",
+                r#"{"execution_mode":null}"#,
+                ExecutionModeConfigValue::ExplicitNull,
+            ),
+            (
+                "JSON empty string",
+                r#"{"execution_mode":""}"#,
+                ExecutionModeConfigValue::value(""),
+            ),
+        ] {
+            let config: GatewayConfig =
+                serde_json::from_str(input).expect("JSON execution-mode config should deserialize");
+            assert_eq!(config.execution_mode, expected, "{description}");
+        }
+
+        let absent = serde_json::to_value(GatewayConfig::default())
+            .expect("serialize absent execution-mode config");
+        assert!(absent.get("execution_mode").is_none());
+
+        let explicit_null = GatewayConfig {
+            execution_mode: ExecutionModeConfigValue::ExplicitNull,
+            ..GatewayConfig::default()
+        };
+        let explicit_null = serde_json::to_value(explicit_null)
+            .expect("serialize explicit-null execution-mode config");
+        assert_eq!(explicit_null["execution_mode"], serde_json::Value::Null);
+
+        let configured = GatewayConfig {
+            execution_mode: ExecutionModeConfigValue::value("reviewed"),
+            ..GatewayConfig::default()
+        };
+        let configured =
+            serde_json::to_value(configured).expect("serialize configured execution-mode config");
+        assert_eq!(configured["execution_mode"], "reviewed");
     }
 
     #[test]

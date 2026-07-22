@@ -571,7 +571,7 @@ async fn run_optional_setup_sections(
                 hermes_cli::commands::handle_cli_memory(
                     Some("setup".to_string()),
                     None,
-                    hermes_cli::commands::MemorySetupCliOptions::yes_only(false),
+                    hermes_cli::commands::MemoryCliOptions::setup_only(false),
                 )
                 .await?;
             }
@@ -594,6 +594,7 @@ async fn run_optional_setup_sections(
 }
 
 /// Handle `hermes config [action] [key] [value]`.
+
 async fn run_config(
     cli: Cli,
     action: Option<String>,
@@ -606,8 +607,7 @@ async fn run_config(
     match action.as_deref() {
         None => {
             // Show full config as JSON
-            let json = serde_json::to_string_pretty(&config)
-                .map_err(|e| AgentError::Config(e.to_string()))?;
+            let json = hermes_cli::commands::redacted_config_json(&config)?;
             println!("{}", json);
         }
         Some("get") => {
@@ -637,16 +637,15 @@ async fn run_config(
             match (outcome.config_path, outcome.env_path, outcome.env_key) {
                 (Some(cfg_path), Some(env_path), Some(env_key)) => {
                     println!(
-                        "Saved {} = {} -> {} and {} -> {}",
+                        "Saved {} -> {} and {} -> {}",
                         key,
-                        value,
                         cfg_path.display(),
                         env_key,
                         env_path.display()
                     );
                 }
                 (Some(cfg_path), _, _) => {
-                    println!("Saved {} = {} -> {}", key, value, cfg_path.display());
+                    println!("Saved {} -> {}", key, cfg_path.display());
                 }
                 (_, Some(env_path), Some(env_key)) => {
                     println!("Saved {} -> {}", env_key, env_path.display());
@@ -655,8 +654,7 @@ async fn run_config(
             }
         }
         Some("show") => {
-            let json = serde_json::to_string_pretty(&config)
-                .map_err(|e| AgentError::Config(e.to_string()))?;
+            let json = hermes_cli::commands::redacted_config_json(&config)?;
             println!("{}", json);
         }
         Some("path") => {

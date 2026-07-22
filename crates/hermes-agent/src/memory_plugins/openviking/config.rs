@@ -3,9 +3,6 @@ struct OpenVikingConfig {
     endpoint: String,
     api_key: String,
     api_key_type: String,
-    account: String,
-    user: String,
-    agent: String,
     recall: OpenVikingRecallConfig,
 }
 
@@ -69,9 +66,6 @@ impl OpenVikingConfig {
             api_key: std::env::var("OPENVIKING_API_KEY").unwrap_or_default(),
             api_key_type: std::env::var("OPENVIKING_API_KEY_TYPE")
                 .unwrap_or_else(|_| "user".to_string()),
-            account: std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "default".into()),
-            user: std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into()),
-            agent: std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| DEFAULT_AGENT.into()),
             recall: OpenVikingRecallConfig::from_env(),
         };
 
@@ -81,9 +75,6 @@ impl OpenVikingConfig {
 
         config.endpoint = normalize_openviking_endpoint(&config.endpoint);
         config.api_key_type = normalize_openviking_key_type(&config.api_key_type);
-        config.account = nonempty_or(&config.account, "default");
-        config.user = nonempty_or(&config.user, "default");
-        config.agent = nonempty_or(&config.agent, DEFAULT_AGENT);
         config
     }
 }
@@ -157,15 +148,8 @@ fn apply_openviking_config_map(
     {
         config.api_key_type = key_type.to_string();
     }
-    if let Some(account) = raw.get("account").and_then(Value::as_str) {
-        config.account = account.to_string();
-    }
-    if let Some(user) = raw.get("user").and_then(Value::as_str) {
-        config.user = user.to_string();
-    }
-    if let Some(agent) = raw.get("agent").and_then(Value::as_str) {
-        config.agent = agent.to_string();
-    }
+    // Account/user/agent configuration is intentionally ignored. Provider
+    // identity derives only from the authenticated opaque subject key.
     apply_recall_usize_map(&mut config.recall.limit, raw, "recall_limit");
     apply_recall_f64_map(
         &mut config.recall.score_threshold,

@@ -54,6 +54,14 @@ impl OpenRouterProvider {
         }
     }
 
+    /// Set a custom base URL.
+    pub fn with_base_url(self, base_url: impl Into<String>) -> Self {
+        Self {
+            inner: self.inner.with_base_url(base_url),
+            ..self
+        }
+    }
+
     /// Set an optional total request timeout used by this provider and rebuilds.
     pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
@@ -321,7 +329,7 @@ impl LlmProvider for OpenRouterProvider {
         );
 
         let resp = provider
-            .send_with_dead_connection_recovery(&url, &api_key, &body)
+            .send_once_with_client_recovery(&url, &api_key, &body)
             .await?;
 
         provider.update_rate_limit(resp.headers());
@@ -337,10 +345,12 @@ impl LlmProvider for OpenRouterProvider {
             )));
         }
 
-        let resp_json: Value = resp
-            .json()
+        let response_bytes = resp
+            .bytes()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("Failed to parse response: {e}")))?;
+            .map_err(|error| map_reqwest_body_error("Failed to read response body", error))?;
+        let resp_json: Value = serde_json::from_slice(&response_bytes)
+            .map_err(|error| AgentError::LlmApi(format!("Failed to parse response: {error}")))?;
         let parsed = Self::parse_openrouter_response(&resp_json)?;
         if let Some(key) = cache_key {
             Self::response_cache_insert(key, &parsed, cache_control.ttl_secs);
@@ -607,4 +617,23 @@ fn summarize_openai_response_shape(json: &Value) -> String {
         parts.push(format!("keys={}", truncate_chars(&keys, 240)));
     }
     parts.join("; ")
+}
+
+#[cfg(test)]
+mod openrouter_tests {
+    use super::*;
+
+    #[test]
+    fn custom_base_url_overrides_default_without_mutating_default() {
+        let default = OpenRouterProvider::new("test-key");
+        let overridden = default
+            .clone()
+            .with_base_url("http://127.0.0.1:9000/openrouter");
+
+        assert_eq!(default.inner.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(
+            overridden.inner.base_url,
+            "http://127.0.0.1:9000/openrouter"
+        );
+    }
 }

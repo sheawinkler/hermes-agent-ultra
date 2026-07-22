@@ -391,14 +391,11 @@ unauthorized_dm_behavior: "pair"
 
 The platform-specific setting under `slack:` takes precedence over the global setting.
 
-### Voice Transcription
+### Voice / audio attachments
 
-```yaml
-# Global setting — enable/disable automatic transcription of incoming voice messages
-stt_enabled: true
-```
+Inbound Slack audio is **not** automatically run through STT before the agent turn. The gateway may surface the attachment and a **`[transcription_candidate]`** hint; a transcript requires a successful **`transcription`** tool call (OpenAI/Nous-managed, Groq, or Mistral). See [Voice & TTS](/docs/user-guide/features/tts#transcription-tool-stt).
 
-When `true` (the default), incoming audio messages are automatically transcribed using the configured STT provider before being processed by the agent.
+Legacy `stt_enabled` knobs from older docs do **not** mean deterministic auto-transcription in this Rust runtime.
 
 ### Full Example
 
@@ -406,7 +403,7 @@ When `true` (the default), incoming audio messages are automatically transcribed
 # Global gateway settings
 group_sessions_per_user: true
 unauthorized_dm_behavior: "pair"
-stt_enabled: true
+# stt_enabled is not a deterministic auto-STT switch in the Rust runtime
 
 # Slack-specific settings
 slack:
@@ -500,8 +497,8 @@ Tokens from this file are merged with any tokens specified via `SLACK_BOT_TOKEN`
 
 Hermes supports voice on Slack:
 
-- **Incoming:** Voice/audio messages are automatically transcribed using the configured STT provider: local `faster-whisper`, Groq Whisper (`GROQ_API_KEY`), or OpenAI Whisper (`VOICE_TOOLS_OPENAI_KEY`)
-- **Outgoing:** TTS responses are sent as audio file attachments
+- **Incoming:** Voice/audio attachments may be labeled `[transcription_candidate]`. STT runs only if the agent calls `transcription` (OpenAI/Nous-managed, Groq, or Mistral) — not local faster-whisper auto-STT.
+- **Outgoing:** When `text_to_speech` runs, gateways may attach the resulting audio file (not an always-on speak engine)
 
 ---
 

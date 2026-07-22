@@ -272,7 +272,7 @@ The registry of record is `hermes_cli/commands.py` — every consumer
 /personality [name]  Set personality
 /reasoning [level]   Set reasoning (none|minimal|low|medium|high|xhigh|show|hide)
 /verbose             Cycle: off → new → all → verbose
-/voice [on|off|tts]  Voice mode
+/voice               Show voice capability status (no separate Rust TUI engine)
 /yolo                Toggle approval bypass
 /busy [sub]          Control what Enter does while Hermes is working (CLI)
                      (subcommands: queue, steer, interrupt, status)
@@ -366,7 +366,7 @@ Edit with `hermes-ultra config edit` or `hermes-ultra config set section.key val
 | `compression` | `enabled`, `threshold` (0.50), `target_ratio` (0.20) |
 | `display` | `skin`, `tool_progress`, `show_reasoning`, `show_cost` |
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral) |
-| `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts) |
+| `tts` | `provider` (`openai`/`elevenlabs`/`minimax`/`piper` or a configured command provider) |
 | `memory` | `memory_enabled`, `user_profile_enabled`, `provider` |
 | `security` | `tirith_enabled`, `website_blocklist` |
 | `delegation` | `model`, `provider`, `base_url`, `api_key`, `max_iterations` (50), `reasoning_effort` |
@@ -558,35 +558,31 @@ To keep the model away from network or media tools entirely, open `hermes-ultra 
 
 ### STT (Voice → Text)
 
-Voice messages from messaging platforms are auto-transcribed.
+STT is the callable **`transcription`** HTTP tool only (`TranscriptionHandler`). Messaging does **not** auto-transcribe voice notes; ingress may prepend `[transcription_candidate]`, and the model must call the tool.
 
-Provider priority (auto-detected):
-1. **Local faster-whisper** — free, no API key: `pip install faster-whisper`
-2. **Groq Whisper** — free tier: set `GROQ_API_KEY`
-3. **OpenAI Whisper** — paid: set `VOICE_TOOLS_OPENAI_KEY`
-4. **Mistral Voxtral** — set `MISTRAL_API_KEY`
+Implemented providers (credentials / env — **not** an `stt:` block in `config.yaml`):
+1. **OpenAI / Nous-managed OpenAI audio** — `VOICE_TOOLS_OPENAI_KEY` / `HERMES_OPENAI_API_KEY` / `OPENAI_API_KEY`, or managed gateway
+2. **Groq** — `GROQ_API_KEY`
+3. **Mistral Voxtral** — `MISTRAL_API_KEY`
 
-Config:
-```yaml
-stt:
-  enabled: true
-  provider: local        # local, groq, openai, mistral
-  local:
-    model: base          # tiny, base, small, medium, large-v3
-```
+There is no local faster-whisper, whisper CLI, `stt.enabled`, or `HERMES_LOCAL_STT_COMMAND` path in this runtime.
+
+Tool params: `audio_path` (required), optional `provider`, `model`, `response_format`, `language`.
+Optional env defaults: `HERMES_STT_PROVIDER` / `STT_PROVIDER`, `STT_OPENAI_MODEL`, `STT_GROQ_MODEL`, `STT_MISTRAL_MODEL`, and matching `STT_*_BASE_URL` / `*_BASE_URL` overrides.
 
 ### TTS (Text → Voice)
 
-| Provider | Env var | Free? |
-|----------|---------|-------|
-| Edge TTS | None | Yes (default) |
-| ElevenLabs | `ELEVENLABS_API_KEY` | Free tier |
-| OpenAI | `VOICE_TOOLS_OPENAI_KEY` | Paid |
-| MiniMax | `MINIMAX_API_KEY` | Paid |
-| Mistral (Voxtral) | `MISTRAL_API_KEY` | Paid |
-| NeuTTS (local) | None (`pip install neutts[all]` + `espeak-ng`) | Free |
+| Provider | Requirement |
+|----------|-------------|
+| ElevenLabs | `ELEVENLABS_API_KEY` |
+| OpenAI | Managed Nous access, `VOICE_TOOLS_OPENAI_KEY`, `HERMES_OPENAI_API_KEY`, or `OPENAI_API_KEY` |
+| MiniMax | `MINIMAX_API_KEY` |
+| Piper | Local `piper` executable plus `PIPER_MODEL` |
+| Custom command | `tts.providers.<name>.command` configuration |
 
-Voice commands: `/voice on` (voice-to-voice), `/voice tts` (always voice), `/voice off`.
+Upstream-only TTS names (`edge`, `xai`, `mistral`, `gemini`, `neutts`, `kittentts`) are not implemented by the Rust runtime and fail closed. See https://hermes-agent.nousresearch.com/docs/user-guide/features/tts.
+
+CLI `/voice` returns fixed status that no separate interactive voice engine is active (does not inspect provider config). Use the `text_to_speech` tool for synthesis and the `transcription` tool for speech-to-text. https://hermes-agent.nousresearch.com/docs/user-guide/features/voice-mode
 
 ---
 
@@ -852,10 +848,11 @@ and logs — avoids shell-escaping backslashes in bash.
 
 ## Troubleshooting
 
-### Voice not working
-1. Check `stt.enabled: true` in config.yaml
-2. Verify provider: `pip install faster-whisper` or set API key
-3. In gateway: `/restart`. In CLI: exit and relaunch.
+### Voice / speech tools not working
+1. Interactive mic/`/voice on` mode is **not** shipped — use the `text_to_speech` and `transcription` tools
+2. For TTS: set a supported `tts.provider` and credentials (`VOICE_TOOLS_OPENAI_KEY` / `ELEVENLABS_API_KEY` / `MINIMAX_API_KEY` / `PIPER_MODEL`)
+3. For STT: set `VOICE_TOOLS_OPENAI_KEY` / `GROQ_API_KEY` / `MISTRAL_API_KEY` (or Nous-managed openai-audio); call the `transcription` tool — there is no `stt.enabled` or local faster-whisper path
+4. `/voice` only prints status (no separate engine)
 
 ### Tool not available
 1. `hermes-ultra tools` — check if toolset is enabled for your platform

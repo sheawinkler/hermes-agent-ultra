@@ -6,7 +6,7 @@ description: "Set up Hermes Agent as a Telegram bot"
 
 # Telegram Setup
 
-Hermes Agent integrates with Telegram as a full-featured conversational bot. Once connected, you can chat with your agent from any device, send voice memos that get auto-transcribed, receive scheduled task results, and use the agent in group chats. The integration is built on [python-telegram-bot](https://python-telegram-bot.org/) and supports text, voice, images, and file attachments.
+Hermes Agent integrates with Telegram as a full-featured conversational bot. Once connected, you can chat with your agent from any device, send voice memos (audio may be labeled `[transcription_candidate]`; STT only if `transcription` is called), receive scheduled task results, and use the agent in group chats. The integration is built on [python-telegram-bot](https://python-telegram-bot.org/) and supports text, voice, images, and file attachments.
 
 ## Step 1: Create a Bot via BotFather
 
@@ -270,30 +270,13 @@ Group chat IDs are negative numbers (e.g., `-1001234567890`). Your personal DM c
 
 ### Incoming Voice (Speech-to-Text)
 
-Voice messages you send on Telegram are automatically transcribed by Hermes's configured STT provider and injected as text into the conversation.
-
-- `local` uses `faster-whisper` on the machine running Hermes — no API key required
-- `groq` uses Groq Whisper and requires `GROQ_API_KEY`
-- `openai` uses OpenAI Whisper and requires `VOICE_TOOLS_OPENAI_KEY`
+Inbound Telegram voice/audio is **not** automatically transcribed by the gateway. Messaging may attach the audio and prepend a **`[transcription_candidate]`** hint. Text appears only if the model (or another explicit consumer) calls the callable **`transcription`** tool with a configured HTTP provider: **OpenAI / Nous-managed**, **Groq**, or **Mistral**. There is no local faster-whisper auto path in this Rust runtime. Details: [Transcription tool](../features/tts.md#transcription-tool-stt).
 
 ### Outgoing Voice (Text-to-Speech)
 
-When the agent generates audio via TTS, it's delivered as native Telegram **voice bubbles** — the round, inline-playable kind.
+When the agent runs the shipped **`text_to_speech`** tool, Hermes delivers a media file with the reply. There is no automatic “speak every reply” `/voice tts` mode in this runtime. Ordinary provider output is an **audio attachment**. Native Telegram **voice bubbles** (round, inline-playable) require a command provider with `voice_compatible: true` after successful Opus/OGG conversion via `ffmpeg` — built-in OpenAI/ElevenLabs/MiniMax/Piper paths do not claim native Opus by default.
 
-- **OpenAI and ElevenLabs** produce Opus natively — no extra setup needed
-- **Edge TTS** (the default free provider) outputs MP3 and requires **ffmpeg** to convert to Opus:
-
-```bash
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
-```
-
-Without ffmpeg, Edge TTS audio is sent as a regular audio file (still playable, but uses the rectangular player instead of a voice bubble).
-
-Configure the TTS provider in your `config.yaml` under the `tts.provider` key.
+Configure a supported provider under `tts.provider` in `config.yaml`: **openai**, **elevenlabs**, **minimax**, **piper**, or a custom command provider. Upstream-only names (`edge`, `xai`, `mistral`, `gemini`, `neutts`, `kittentts`) fail closed. See [Voice & TTS](../features/tts.md) and [Voice Mode](../features/voice-mode.md) (honest status).
 
 ## Group Chat Usage
 
@@ -430,7 +413,7 @@ Topics created outside of the config (e.g., by manually calling the Telegram API
 
 ## Multi-session DM mode (`/topic`)
 
-A ChatGPT-style multi-session DM — one bot, many parallel conversations. In the Rust gateway, Telegram topic isolation is native: any non-General `message_thread_id` is encoded into the gateway chat key as `chat_id:thread_id`, so each topic has its own session history and runtime state without a Python SQLite binding table.
+A ChatGPT-style multi-session DM — one bot, many parallel conversations. In the Rust gateway, Telegram topic isolation is native: each non-General `message_thread_id` is an explicit topic scope beneath its parent chat, so each topic has its own session history and runtime state without a Python SQLite binding table.
 
 ### `/topic` subcommands
 
@@ -452,7 +435,7 @@ Only authorized users (allowlist via `TELEGRAM_ALLOWED_USERS` / platform auth co
 | Topic names | Chosen by operator | Chosen by user |
 | Root DM behavior | Unchanged — normal chat | Unchanged — normal chat |
 | Primary use case | Permanent workspaces with optional skill binding | Ad-hoc parallel sessions |
-| Persistence | `extra.dm_topics` in config | Rust session keys scoped by `chat_id:thread_id` |
+| Persistence | `extra.dm_topics` in config | Rust sessions scoped by parent chat and platform topic ID |
 
 Both features can coexist on the same bot — you'd run `/topic` from a user's DM, and `extra.dm_topics` continues to manage operator-declared topics for other chats.
 
@@ -801,8 +784,8 @@ Numeric YAML keys are automatically normalized to strings.
 | Bot not responding at all | Verify `TELEGRAM_BOT_TOKEN` is correct. Check `hermes gateway` logs for errors. |
 | Bot responds with "unauthorized" | Your user ID is not in `TELEGRAM_ALLOWED_USERS`. Double-check with @userinfobot. |
 | Bot ignores group messages | Privacy mode is likely on. Disable it (Step 3) or make the bot a group admin. **Remember to remove and re-add the bot after changing privacy.** |
-| Voice messages not transcribed | Verify STT is available: install `faster-whisper` for local transcription, or set `GROQ_API_KEY` / `VOICE_TOOLS_OPENAI_KEY` in `~/.hermes/.env`. |
-| Voice replies are files, not bubbles | Install `ffmpeg` (needed for Edge TTS Opus conversion). |
+| Voice not transcribed | Expected unless the agent calls `transcription`. Configure OpenAI/Groq/Mistral keys for that tool; there is no local faster-whisper auto-STT. See [Voice & TTS](../features/tts.md#transcription-tool-stt). |
+| Voice replies are files, not bubbles | Expected for ordinary built-in TTS attachments. For voice-bubble delivery, use a command provider with `voice_compatible: true` and working `ffmpeg` Opus conversion — see [Voice & TTS](../features/tts.md). |
 | Bot token revoked/invalid | Generate a new token via `/revoke` then `/newbot` or `/token` in BotFather. Update your `.env` file. |
 | Webhook not receiving updates | Verify `TELEGRAM_WEBHOOK_URL` is publicly reachable (test with `curl`). Ensure your platform/reverse proxy routes inbound HTTPS traffic from the URL's port to the local listen port configured by `TELEGRAM_WEBHOOK_PORT` (they do not need to be the same number). Ensure SSL/TLS is active — Telegram only sends to HTTPS URLs. Check firewall rules. |
 

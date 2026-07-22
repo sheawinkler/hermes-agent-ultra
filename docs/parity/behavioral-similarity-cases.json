@@ -349,10 +349,15 @@
     {
       "id": "fault-and-protocol-resilience",
       "domain": "protocol-and-fault-tolerance",
-      "classification": "superior",
+      "classification": "intentional_divergence",
       "upstream_behavior": "Protocol adapters and runtime loops should behave deterministically under transport failures, malformed tool payloads, auth expiry, and stream interruptions.",
-      "ultra_behavior": "Ultra has a SOTA harness matrix with workflow replay, protocol differential contracts, and chaos scenarios covering timeouts, 5xx, rate limits, connection resets, auth expiry, malformed tool payloads, and partial stream drops.",
-      "why": "This turns resilience into a measured behavior surface rather than relying on happy-path parity.",
+      "ultra_behavior": "Ultra maintains a fixture-reference regression matrix for workflow, protocol, and fault categories. Its registry/fixtures and referenced Rust test names are non-authoritative for capability promotion and do not establish executable protocol, client, or external chaos behavior.",
+      "why": "This preserves useful fixture-reference regression hygiene; it is not a production-resilience proof or product-completeness claim.",
+      "evidence_scope": {
+        "capability_promotion_authoritative": false,
+        "coverage_kind": "fixture_reference_regression",
+        "production_complete": false
+      },
       "source_artifacts": [
         "docs/parity/sota-harness-matrix.json",
         "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
@@ -361,15 +366,15 @@
       "rust_tests": [
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "sota_harness_matrix_gate_passes_and_references_real_tests"
+          "name": "fixture_reference_matrix_gate_passes_and_references_real_tests"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "fault_injection_matrix_covers_required_classes"
+          "name": "fault_injection_fixture_reference_matrix_covers_required_categories"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/global_parity_governance.rs",
-          "name": "test_sota_harness_matrix_gate_passes"
+          "name": "test_fixture_reference_matrix_gate_passes"
         }
       ]
     }

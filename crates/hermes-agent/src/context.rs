@@ -9,8 +9,12 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
-use hermes_core::{BudgetConfig, Message, MessageRole};
+use hermes_core::{
+    BudgetConfig, MemorySubject, MemorySubjectStorageKey, Message, MessageRole,
+};
 
 /// Number of recent messages to preserve during compression.
 const DEFAULT_RECENT_MESSAGES: usize = 4;
@@ -799,35 +803,103 @@ fn render_memory_block(target: &str, entries: &[String]) -> Option<String> {
     ))
 }
 
-/// Load the built-in memory snapshot used in the system prompt.
+/// An authenticated subject was not available or its owner-only directory is
+/// unsafe to read. Neither state permits a global-memory fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuiltinMemorySnapshotUnavailable {
+    MissingSubjectBinding,
+    UnsafeSubjectPath,
+}
+
+/// Built-in subject memory is only read from the same owner-only filesystem
+/// shape enforced by the writer. On platforms without POSIX owner-only modes,
+/// the writer is unavailable and reads fail closed as well.
+fn is_owner_only(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o077 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
+fn subject_memory_directory(
+    base: &Path,
+    filter: &MemorySubjectStorageKey,
+) -> Result<PathBuf, BuiltinMemorySnapshotUnavailable> {
+    let memories = base.join("memories");
+    let subjects = memories.join("subjects");
+    let subject_dir = subjects.join(filter.as_str());
+
+    for directory in [base, memories.as_path(), subjects.as_path(), subject_dir.as_path()] {
+        match std::fs::symlink_metadata(directory) {
+            Ok(metadata)
+                if metadata.file_type().is_symlink()
+                    || !metadata.is_dir()
+                    || !is_owner_only(&metadata) =>
+            {
+                return Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath),
+        }
+    }
+
+    Ok(subject_dir)
+}
+
+fn read_subject_memory_entries(
+    directory: &Path,
+    file_name: &str,
+) -> Result<Vec<String>, BuiltinMemorySnapshotUnavailable> {
+    let path = directory.join(file_name);
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata)
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || !is_owner_only(&metadata) =>
+        {
+            Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath)
+        }
+        Ok(_) => std::fs::read_to_string(path)
+            .map(|raw| dedup_entries(parse_memory_entries(&raw)))
+            .map_err(|_| BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(_) => Err(BuiltinMemorySnapshotUnavailable::UnsafeSubjectPath),
+    }
+}
+
+/// Load the subject-scoped built-in memory snapshot used in the system prompt.
 ///
-/// This mirrors Python's MemoryStore snapshot semantics at session start:
-/// the returned blocks are read once and treated as a frozen prompt view.
-pub fn load_builtin_memory_snapshot(
+/// The caller must supply the immutable authenticated subject/filter binding
+/// established by `MemoryManager`; unbound loops deliberately receive no
+/// built-in memory. Shared legacy `memories/{MEMORY,USER}.md` files are never
+/// consulted.
+pub(crate) fn load_builtin_memory_snapshot(
+    subject: Option<&MemorySubject>,
+    filter: Option<&MemorySubjectStorageKey>,
     hermes_home_override: Option<&str>,
-) -> (Option<String>, Option<String>) {
+) -> Result<(Option<String>, Option<String>), BuiltinMemorySnapshotUnavailable> {
+    let (_subject, filter) = subject
+        .zip(filter)
+        .ok_or(BuiltinMemorySnapshotUnavailable::MissingSubjectBinding)?;
     let base = hermes_home_override
         .map(PathBuf::from)
         .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
         .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
         .unwrap_or_else(|| PathBuf::from(".hermes"));
-    let memory_dir = base.join("memories");
-    let memory_path = memory_dir.join("MEMORY.md");
-    let user_path = memory_dir.join("USER.md");
+    let memory_dir = subject_memory_directory(&base, filter)?;
+    let memory_entries = read_subject_memory_entries(&memory_dir, "MEMORY.md")?;
+    let user_entries = read_subject_memory_entries(&memory_dir, "USER.md")?;
 
-    let memory_entries = std::fs::read_to_string(&memory_path)
-        .ok()
-        .map(|s| dedup_entries(parse_memory_entries(&s)))
-        .unwrap_or_default();
-    let user_entries = std::fs::read_to_string(&user_path)
-        .ok()
-        .map(|s| dedup_entries(parse_memory_entries(&s)))
-        .unwrap_or_default();
-
-    (
+    Ok((
         render_memory_block("memory", &memory_entries),
         render_memory_block("user", &user_entries),
-    )
+    ))
 }
 
 // ---------------------------------------------------------------------------

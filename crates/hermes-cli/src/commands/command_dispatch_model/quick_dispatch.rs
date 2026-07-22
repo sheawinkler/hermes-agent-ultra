@@ -539,7 +539,7 @@ fn handle_hatch_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
         .find(|mood| description_lc.contains(**mood))
     {
         settings.mood = (*mood).to_string();
-    } else if ["energetic", "excited", "spark", "chaos", "sigma"]
+    } else if ["energetic", "excited", "spark", "chaos"]
         .iter()
         .any(|needle| description_lc.contains(needle))
     {

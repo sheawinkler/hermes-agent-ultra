@@ -15,23 +15,27 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     bridge_tool_registry_excluding(tools, &[])
 }
 
+/// Bridge runtime tools while preserving the exact startup containment admission.
+pub fn bridge_tool_registry_with_execution_context(
+    tools: &ToolRegistry,
+    execution_containment: Arc<hermes_environments::ExecutionContainmentContext>,
+) -> AgentToolRegistry {
+    let agent_registry = bridge_tool_registry(tools);
+    agent_registry.set_execution_containment_context(execution_containment);
+    agent_registry
+}
+
 fn bridge_tool_registry_excluding(tools: &ToolRegistry, excluded: &[&str]) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
-    for schema in tools.get_definitions() {
-        if excluded.iter().any(|name| schema.name == *name) {
+    let tools = Arc::new(tools.clone());
+    for definition in tools.runtime_definitions() {
+        if excluded
+            .iter()
+            .any(|name| definition.schema().name == *name)
+        {
             continue;
         }
-        let name = schema.name.clone();
-        let tools_clone = tools.clone();
-        agent_registry.register(
-            name.clone(),
-            schema,
-            Arc::new(
-                move |params: Value| -> Result<String, hermes_core::ToolError> {
-                    Ok(tools_clone.dispatch(&name, params))
-                },
-            ),
-        );
+        agent_registry.register_runtime_tool(Arc::clone(&tools), definition);
     }
     agent_registry
 }
@@ -44,7 +48,10 @@ pub fn build_runtime_cron_scheduler(
     model: &str,
     data_dir: PathBuf,
     tools: &ToolRegistry,
-) -> CronScheduler {
+    run_runtime: Arc<RunRuntime>,
+    execution_mode: hermes_core::ResolvedExecutionMode,
+    execution_containment: Arc<hermes_environments::ExecutionContainmentContext>,
+) -> Result<CronScheduler, AgentError> {
     let persistence = Arc::new(FileJobPersistence::with_dir(data_dir));
     let model = select_startup_model_with_fallback_and_auth_resolver(
         config,
@@ -53,11 +60,17 @@ pub fn build_runtime_cron_scheduler(
     )
     .selected_model;
     let provider = build_provider(config, &model);
+    let agent_tools = Arc::new(bridge_tool_registry_excluding(tools, &["cronjob"]));
+    agent_tools.set_execution_containment_context(Arc::clone(&execution_containment));
     let runner = Arc::new(CronRunner::new(
         provider,
-        Arc::new(bridge_tool_registry_excluding(tools, &["cronjob"])),
-    ));
-    CronScheduler::new(persistence, runner)
+        agent_tools,
+        run_runtime,
+        execution_mode,
+        execution_containment,
+        config,
+    )?);
+    Ok(CronScheduler::new(persistence, runner))
 }
 
 fn resolve_startup_model(config: &GatewayConfig, configured_model: &str) -> String {

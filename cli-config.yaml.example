@@ -6,6 +6,10 @@
 model: "openai-codex:dynamic"
 max_turns: 250
 
+# Closed startup posture. Precedence (low → high): built-in `manual`, profile,
+# config file, `HERMES_EXECUTION_MODE`, then `--execution-mode`.
+execution_mode: "manual"
+
 model_switch:
   persist_switch_by_default: true
 
@@ -44,7 +48,6 @@ terminal:
   backend: "local"
   cwd: "."
   timeout: 180
-  lifetime_seconds: 300
   home_mode: "auto"
   docker_mount_cwd_to_workspace: false
 

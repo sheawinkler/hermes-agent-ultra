@@ -1,60 +1,67 @@
 impl App {
     fn stream_callbacks(shared: Arc<StdMutex<Option<StreamHandle>>>) -> AgentCallbacks {
-        let thinking_shared = shared.clone();
-        let tool_start_shared = shared.clone();
-        let tool_done_shared = shared.clone();
-        let status_shared = shared;
+        let (observer_sink, mut observer_rx) =
+            hermes_agent::AgentObserverSink::channel(256);
+        let _ = std::thread::Builder::new()
+            .name("hermes-app-observer".to_string())
+            .spawn(move || {
+                while let Some(event) = observer_rx.blocking_recv() {
+                    match event {
+                        hermes_agent::AgentObserverEvent::Thinking(thinking) => {
+                            let preview = App::preview_for_status(&thinking, 220);
+                            if !preview.is_empty() {
+                                App::push_stream_ui_event(
+                                    &shared,
+                                    crate::tui::StreamUiEvent::Thinking(preview),
+                                );
+                            }
+                        }
+                        hermes_agent::AgentObserverEvent::ToolStarted {
+                            name,
+                            args_preview,
+                        } => {
+                            let arg_preview = App::preview_for_status(&args_preview, 140);
+                            App::push_stream_ui_event(
+                                &shared,
+                                crate::tui::StreamUiEvent::ToolStarted {
+                                    name,
+                                    args_preview: arg_preview,
+                                },
+                            );
+                        }
+                        hermes_agent::AgentObserverEvent::ToolCompleted {
+                            name,
+                            result_preview,
+                        } => {
+                            let preview = App::preview_for_status(&result_preview, 160);
+                            App::push_stream_ui_event(
+                                &shared,
+                                crate::tui::StreamUiEvent::ToolCompleted {
+                                    name,
+                                    result_preview: preview,
+                                },
+                            );
+                        }
+                        hermes_agent::AgentObserverEvent::Status { kind, message } => {
+                            let preview = App::preview_for_status(&message, 200);
+                            if !preview.is_empty() {
+                                App::push_stream_ui_event(
+                                    &shared,
+                                    crate::tui::StreamUiEvent::Status {
+                                        kind,
+                                        message: preview,
+                                    },
+                                );
+                            }
+                        }
+                        hermes_agent::AgentObserverEvent::StepCompleted(_)
+                        | hermes_agent::AgentObserverEvent::RenderDelta(_)
+                        | hermes_agent::AgentObserverEvent::Usage(_) => {}
+                    }
+                }
+            });
         AgentCallbacks {
-            on_thinking: Some(Box::new(move |thinking: &str| {
-                let preview = App::preview_for_status(thinking, 220);
-                if preview.is_empty() {
-                    return;
-                }
-                App::push_stream_extra_event(
-                    &thinking_shared,
-                    serde_json::json!({
-                        "ui_event": "thinking",
-                        "text": preview,
-                    }),
-                );
-            })),
-            on_tool_start: Some(Box::new(move |tool: &str, args: &Value| {
-                let arg_preview = App::preview_for_status(&args.to_string(), 140);
-                App::push_stream_extra_event(
-                    &tool_start_shared,
-                    serde_json::json!({
-                        "ui_event": "tool_start",
-                        "tool": tool,
-                        "args_preview": arg_preview,
-                    }),
-                );
-            })),
-            on_tool_complete: Some(Box::new(move |tool: &str, content: &str| {
-                let preview = App::preview_for_status(content, 160);
-                App::push_stream_extra_event(
-                    &tool_done_shared,
-                    serde_json::json!({
-                        "ui_event": "tool_complete",
-                        "tool": tool,
-                        "result_preview": preview,
-                    }),
-                );
-            })),
-            status_callback: Some(Arc::new(move |event_type: &str, message: &str| {
-                let preview = App::preview_for_status(message, 200);
-                if preview.is_empty() {
-                    return;
-                }
-                App::push_stream_extra_event(
-                    &status_shared,
-                    serde_json::json!({
-                        "ui_event": "status",
-                        "event_type": event_type,
-                        "message": preview,
-                    }),
-                );
-            })),
-            ..AgentCallbacks::default()
+            observer_sink: Some(observer_sink),
         }
     }
 
@@ -69,12 +76,9 @@ impl App {
         if App::oneshot_lifecycle_stdout_enabled(shared) {
             println!("[lifecycle] {}", preview);
         }
-        App::push_stream_extra_event(
+        App::push_stream_ui_event(
             shared,
-            serde_json::json!({
-                "ui_event": "lifecycle",
-                "message": preview,
-            }),
+            crate::tui::StreamUiEvent::Lifecycle(preview),
         );
     }
 
@@ -92,14 +96,13 @@ impl App {
         if App::oneshot_lifecycle_stdout_enabled(shared) {
             println!("[phase {:>3}%] {}: {}", progress_pct.min(100), phase, label);
         }
-        App::push_stream_extra_event(
+        App::push_stream_ui_event(
             shared,
-            serde_json::json!({
-                "ui_event": "phase",
-                "phase": phase,
-                "label": label,
-                "progress_pct": progress_pct.min(100),
-            }),
+            crate::tui::StreamUiEvent::Phase {
+                phase: phase.to_string(),
+                label,
+                progress_pct: progress_pct.min(100),
+            },
         );
     }
 
@@ -118,16 +121,14 @@ impl App {
         if App::oneshot_lifecycle_stdout_enabled(shared) {
             println!("[moa reference {}/{}] {}: {}", index, count, label, text);
         }
-        App::push_stream_extra_event(
+        App::push_stream_ui_event(
             shared,
-            serde_json::json!({
-                "ui_event": "moa_reference",
-                "index": index,
-                "count": count,
-                "label": label,
-                "model": model,
-                "text": text,
-            }),
+            crate::tui::StreamUiEvent::MoaReference {
+                index: u64::try_from(index).unwrap_or(u64::MAX),
+                count: u64::try_from(count).unwrap_or(u64::MAX),
+                label,
+                text,
+            },
         );
     }
 

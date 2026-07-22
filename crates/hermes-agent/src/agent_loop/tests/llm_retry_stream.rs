@@ -64,8 +64,7 @@
         let mut ctx = ContextManager::new(32);
         ctx.add_message(Message::user("hello"));
 
-        let resp = agent
-            .call_llm_with_retry_inner(&ctx, &[], None, None)
+        let resp = agent.call_llm_with_retry_inner(&ctx, &[], None, None, None)
             .await
             .expect("fallback should recover");
         assert_eq!(resp.message.content.as_deref(), Some("ok"));
@@ -177,8 +176,7 @@
         let mut ctx = ContextManager::new(32);
         ctx.add_message(Message::user("hello"));
 
-        let _ = agent
-            .call_llm_with_retry_inner(&ctx, &[], None, None)
+        let _ = agent.call_llm_with_retry_inner(&ctx, &[], None, None, None)
             .await
             .expect("probe should recover");
         let seen = seen_models.lock().expect("seen model lock").clone();
@@ -455,8 +453,7 @@
             Vec::new()
         };
 
-        match agent
-            .call_llm_with_retry_inner(&ctx, &tool_schemas, None, None)
+        match agent.call_llm_with_retry_inner(&ctx, &tool_schemas, None, None, None)
             .await
         {
             Ok(_) => ChaosHarnessRun {
@@ -627,7 +624,7 @@
         ctx.add_message(Message::user("hit turn limit"));
 
         let _ = agent
-            .handle_max_iterations(&mut ctx)
+            .handle_max_iterations(&mut ctx, None)
             .await
             .expect("max iterations summary should succeed");
         let seen = seen_model.lock().expect("seen model lock").clone();
@@ -635,7 +632,7 @@
     }
 
     #[tokio::test]
-    async fn status_callback_receives_empty_response_retry_notice() {
+    async fn status_observer_receives_empty_response_retry_notice() {
         use futures::stream::BoxStream;
 
         #[derive(Default)]
@@ -687,33 +684,25 @@
             }
         }
 
-        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
-        let cap_ref = captured.clone();
-        let callbacks = AgentCallbacks {
-            status_callback: Some(Arc::new(move |kind, msg| {
-                cap_ref
-                    .lock()
-                    .expect("status callback lock")
-                    .push((kind.to_string(), msg.to_string()));
-            })),
-            ..Default::default()
-        };
+        let (callbacks, mut observer) = observer_callbacks();
 
         let cfg = AgentConfig {
             max_turns: 1,
             empty_content_max_retries: 1,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(
-            cfg,
-            Arc::new(ToolRegistry::new()),
-            Arc::new(RetryDummyProvider::default()),
-        )
-        .with_callbacks(callbacks);
+        let (agent, _run_state) = attach_test_run_runtime(
+            AgentLoop::new(
+                cfg,
+                Arc::new(ToolRegistry::new()),
+                Arc::new(RetryDummyProvider::default()),
+            )
+            .with_callbacks(callbacks),
+        );
 
         let result = agent.run(vec![Message::user("hello")], None).await;
         assert!(result.is_ok());
-        let rows = captured.lock().expect("captured lock");
+        let rows = drain_status_events(&mut observer);
         assert!(rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
         }));
@@ -762,17 +751,7 @@
             }
         }
 
-        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
-        let cap_ref = captured.clone();
-        let callbacks = AgentCallbacks {
-            status_callback: Some(Arc::new(move |kind, msg| {
-                cap_ref
-                    .lock()
-                    .expect("status callback lock")
-                    .push((kind.to_string(), msg.to_string()));
-            })),
-            ..Default::default()
-        };
+        let (callbacks, mut observer) = observer_callbacks();
 
         let provider = Arc::new(EmptyStopProvider::default());
         let cfg = AgentConfig {
@@ -780,13 +759,15 @@
             empty_content_max_retries: 3,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone())
-            .with_callbacks(callbacks);
+        let (agent, _run_state) = attach_test_run_runtime(
+            AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone())
+                .with_callbacks(callbacks),
+        );
 
         let result = agent.run(vec![Message::user("hello")], None).await;
         assert!(result.is_ok());
         assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
-        let rows = captured.lock().expect("captured lock");
+        let rows = drain_status_events(&mut observer);
         assert!(!rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
         }));
@@ -853,8 +834,10 @@
     #[derive(Clone, Copy)]
     enum StreamRetryScenario {
         RecoverOnSecondAttempt,
-        AlwaysFailMidToolCall,
-        TextOnlyDrop,
+        EmptyEof,
+        PartialTextEof,
+        PartialToolArgsEof,
+        TerminalFrame,
         MemoryContextLeak,
         MalformedToolArgs,
     }
@@ -903,17 +886,12 @@
             let events: Vec<Result<StreamChunk, AgentError>> = match self.scenario {
                 StreamRetryScenario::RecoverOnSecondAttempt => {
                     if attempt == 1 {
-                        vec![
-                            Ok(stream_chunk_content("Let me write the audit: ")),
-                            Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
-                            Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/x\",")),
-                            Err(AgentError::LlmApi(
-                                "Stream read error: peer closed connection".to_string(),
-                            )),
-                        ]
+                        vec![Err(AgentError::LlmApi(
+                            "Stream read error: connection closed before provider response"
+                                .to_string(),
+                        ))]
                     } else {
                         vec![
-                            Ok(stream_chunk_content("Let me write the audit: ")),
                             Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
                             Ok(stream_chunk_tool_args(
                                 0,
@@ -923,19 +901,17 @@
                         ]
                     }
                 }
-                StreamRetryScenario::AlwaysFailMidToolCall => vec![
-                    Ok(stream_chunk_content("Working...")),
+                StreamRetryScenario::EmptyEof => vec![],
+                StreamRetryScenario::PartialTextEof => {
+                    vec![Ok(stream_chunk_content("Partial text"))]
+                }
+                StreamRetryScenario::PartialToolArgsEof => vec![
                     Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
                     Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
-                    Err(AgentError::LlmApi(
-                        "Stream read error: connection reset by peer".to_string(),
-                    )),
                 ],
-                StreamRetryScenario::TextOnlyDrop => vec![
-                    Ok(stream_chunk_content("Partial text")),
-                    Err(AgentError::LlmApi(
-                        "Stream read error: connection lost".to_string(),
-                    )),
+                StreamRetryScenario::TerminalFrame => vec![
+                    Ok(stream_chunk_content("complete")),
+                    Ok(stream_chunk_finish("stop")),
                 ],
                 StreamRetryScenario::MemoryContextLeak => vec![
                     Ok(stream_chunk_content("Hello\n")),
@@ -956,6 +932,29 @@
 
             futures::stream::iter(events).boxed()
         }
+    }
+
+    fn assert_premature_stream_close(err: AgentError, chunk_count: u64) {
+        match err {
+            AgentError::Io(message) => {
+                assert!(
+                    message.contains("connection closed before terminal finish reason"),
+                    "unexpected premature-close error: {message}"
+                );
+                assert!(
+                    message.contains(&format!("received {chunk_count} chunks")),
+                    "unexpected chunk count in premature-close error: {message}"
+                );
+            }
+            other => panic!("expected typed premature stream-close error, got {other:?}"),
+        }
+    }
+
+    fn stream_test_context() -> ContextManager {
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+        ctx
     }
 
     #[test]
@@ -990,7 +989,7 @@
         ctx.add_message(Message::user("run"));
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &|_| {})
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
             .await
             .expect("stream should collect");
 
@@ -1010,32 +1009,22 @@
     }
 
     #[tokio::test]
-    async fn stream_mid_tool_call_silent_retry_recovers_tool_call() {
+    async fn stream_retry_before_visible_output_recovers() {
         let provider = Arc::new(StreamRetryProvider::new(
             StreamRetryScenario::RecoverOnSecondAttempt,
         ));
         let cfg = AgentConfig {
-            stream_read_max_retries: 2,
+            stream_read_max_retries: 1,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let seen_ref = seen.clone();
+        let ctx = stream_test_context();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
-                    }
-                }
-            })
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
             .await;
 
-        let StreamCollectOutcome::Complete(resp) = out.expect("stream should recover") else {
+        let StreamCollectOutcome::Complete(resp) = out.expect("safe retry should recover") else {
             panic!("expected complete response");
         };
         let tc = resp
@@ -1046,84 +1035,219 @@
             .expect("missing tool call");
         assert_eq!(tc.function.name, "write_file");
         assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
-        assert!(seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
     }
 
     #[tokio::test]
-    async fn stream_mid_tool_call_exhausted_retries_returns_error() {
-        let provider = Arc::new(StreamRetryProvider::new(
-            StreamRetryScenario::AlwaysFailMidToolCall,
-        ));
+    async fn stream_empty_eof_is_typed_premature_close() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
         let cfg = AgentConfig {
-            stream_read_max_retries: 1,
+            stream_read_max_retries: 0,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let seen_ref = seen.clone();
+        let ctx = stream_test_context();
 
-        let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
-                    }
-                }
-            })
-            .await;
-
-        let err = match out {
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
             Err(err) => err,
-            Ok(_) => panic!("should fail after retries"),
+            Ok(_) => panic!("empty EOF must not synthesize a response"),
         };
-        assert!(err.to_string().contains("Stream read error"));
-        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
-        assert!(seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
+
+        assert_premature_stream_close(err, 0);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
     }
 
     #[tokio::test]
-    async fn stream_text_only_drop_does_not_retry() {
-        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::TextOnlyDrop));
+    async fn stream_partial_text_eof_is_typed_premature_close() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::PartialTextEof,
+        ));
         let cfg = AgentConfig {
             stream_read_max_retries: 2,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
+        let ctx = stream_test_context();
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen_ref = seen.clone();
 
-        let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
+        let err = match agent
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                None,
+                &move |chunk| {
+                    if let Some(delta) = chunk.delta {
+                        if let Some(text) = delta.content {
+                            seen_ref.lock().expect("seen lock").push(text);
+                        }
                     }
-                }
-            })
-            .await;
-
-        let err = match out {
+                },
+            )
+            .await
+        {
             Err(err) => err,
-            Ok(_) => panic!("text-only stream drops should not retry silently"),
+            Ok(_) => panic!("partial text EOF must not synthesize a response"),
         };
-        assert!(err.to_string().contains("Stream read error"));
+
+        assert_premature_stream_close(err, 1);
         assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
-        assert!(!seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
+        assert_eq!(seen.lock().expect("seen lock").join(""), "Partial text");
+    }
+
+    #[tokio::test]
+    async fn stream_partial_tool_args_eof_is_typed_and_does_not_retry() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::PartialToolArgsEof,
+        ));
+        let cfg = AgentConfig {
+            stream_read_max_retries: 2,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
+        let ctx = stream_test_context();
+        let tool_call_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let tool_call_chunks_ref = tool_call_chunks.clone();
+
+        let err = match agent
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                None,
+                &move |chunk| {
+                    let emits_tool_call = chunk
+                        .delta
+                        .as_ref()
+                        .and_then(|delta| delta.tool_calls.as_ref())
+                        .is_some_and(|calls| !calls.is_empty());
+                    if emits_tool_call {
+                        tool_call_chunks_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                },
+            )
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("partial tool args EOF must not synthesize a tool call"),
+        };
+
+        assert_premature_stream_close(err, 2);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+        assert_eq!(
+            tool_call_chunks.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_terminal_frame_completes_successfully() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::TerminalFrame,
+        ));
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+        let ctx = stream_test_context();
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+            .expect("terminal frame should complete the stream");
+
+        let StreamCollectOutcome::Complete(resp) = out else {
+            panic!("expected complete response");
+        };
+        assert_eq!(resp.message.content.as_deref(), Some("complete"));
+        assert_eq!(resp.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_empty_eof_retries_until_budget_exhausted() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let cfg = AgentConfig {
+            stream_read_max_retries: 1,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("retry exhaustion must not synthesize a response"),
+        };
+
+        assert_premature_stream_close(err, 0);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
+    }
+
+    #[tokio::test]
+    async fn stream_cancellation_wins_over_simultaneous_eof() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let interrupt = InterruptController::new();
+        interrupt.interrupt(Some("cancel stream".to_string()));
+        let agent = AgentLoop::with_interrupt(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+            interrupt,
+        );
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("cancellation must win over EOF"),
+        };
+
+        assert!(matches!(
+            err,
+            AgentError::Interrupted { message } if message.as_deref() == Some("cancel stream")
+        ));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_timeout_wins_over_simultaneous_eof() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let interrupt = InterruptController::new();
+        interrupt.interrupt_timeout(Some("stream deadline".to_string()));
+        let agent = AgentLoop::with_interrupt(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+            interrupt,
+        );
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("timeout must win over EOF"),
+        };
+
+        assert!(matches!(
+            err,
+            AgentError::Timeout(message) if message == "stream deadline"
+        ));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
     }
 
     #[tokio::test]
@@ -1143,7 +1267,7 @@
         let seen_ref = seen.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &move |chunk| {
                 if let Some(delta) = chunk.delta {
                     if let Some(text) = delta.content {
                         seen_ref.lock().expect("seen lock").push(text);

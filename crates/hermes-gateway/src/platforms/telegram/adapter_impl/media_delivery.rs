@@ -172,7 +172,15 @@ impl TelegramAdapter {
 
     async fn send_multipart_with_options(
         &self,
+        request: TelegramMultipartRequest<'_>,
+    ) -> Result<i64, GatewayError> {
+        self.send_multipart_with_thread_policy(request, true).await
+    }
+
+    async fn send_multipart_with_thread_policy(
+        &self,
         mut request: TelegramMultipartRequest<'_>,
+        allow_thread_fallback: bool,
     ) -> Result<i64, GatewayError> {
         let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(request.chat_id);
         request.chat_id = chat_id;
@@ -180,7 +188,8 @@ impl TelegramAdapter {
         match self.send_multipart_once(request).await {
             Ok(id) => Ok(id),
             Err(err)
-                if Self::gateway_error_thread_or_reply_missing(&err)
+                if allow_thread_fallback
+                    && Self::gateway_error_thread_or_reply_missing(&err)
                     && request.has_thread_context() =>
             {
                 if let Some(thread_id) = request.message_thread_id {
@@ -243,7 +252,8 @@ impl TelegramAdapter {
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let body_text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::RateLimited {
-                retry_after_secs: Self::retry_after_from_telegram_body(&body_text),
+                retry_after: Self::retry_after_from_telegram_body(&body_text)
+                    .map(std::time::Duration::from_secs),
             });
         }
 

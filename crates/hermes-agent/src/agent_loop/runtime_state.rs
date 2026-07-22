@@ -29,30 +29,300 @@ pub struct EvolutionCounters {
 // AgentLoop
 // ---------------------------------------------------------------------------
 
-/// Callbacks invoked during tool execution for progress reporting.
+/// Closed, render-only stream observation. Tool inputs and provider metadata
+/// never cross this boundary. Stateful controls are repeated on text events so
+/// a dropped control-only update cannot leave a renderer permanently stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRenderDelta {
+    pub text: Option<String>,
+    pub mute_post_response: Option<bool>,
+    pub break_before: bool,
+}
+
+/// Typed, non-blocking observations emitted by a governed agent run.
+#[derive(Debug, Clone)]
+pub enum AgentObserverEvent {
+    Thinking(String),
+    ToolStarted { name: String, args_preview: String },
+    ToolCompleted { name: String, result_preview: String },
+    RenderDelta(AgentRenderDelta),
+    Usage(UsageStats),
+    StepCompleted(u32),
+    Status { kind: String, message: String },
+}
+
+#[derive(Debug)]
+enum AgentObserverMessage {
+    Event(AgentObserverEvent),
+    Barrier(tokio::sync::oneshot::Sender<()>),
+}
+
+/// Closed channel boundary for progress observers.
+///
+/// Event delivery is non-blocking. `flush` is an explicit post-run barrier:
+/// callers use it only after governed work has stopped emitting observations.
+#[derive(Debug, Clone)]
+pub struct AgentObserverSink {
+    sender: tokio::sync::mpsc::Sender<AgentObserverMessage>,
+    dropped_events: Arc<std::sync::atomic::AtomicU64>,
+    render_muted: Arc<AtomicBool>,
+    render_break_pending: Arc<AtomicBool>,
+}
+
+pub struct AgentObserverReceiver {
+    receiver: tokio::sync::mpsc::Receiver<AgentObserverMessage>,
+}
+
+impl AgentObserverReceiver {
+    pub async fn recv(&mut self) -> Option<AgentObserverEvent> {
+        loop {
+            match self.receiver.recv().await? {
+                AgentObserverMessage::Event(event) => return Some(event),
+                AgentObserverMessage::Barrier(ack) => {
+                    let _ = ack.send(());
+                }
+            }
+        }
+    }
+
+    pub fn try_recv(&mut self) -> Option<AgentObserverEvent> {
+        loop {
+            match self.receiver.try_recv() {
+                Ok(AgentObserverMessage::Event(event)) => return Some(event),
+                Ok(AgentObserverMessage::Barrier(ack)) => {
+                    let _ = ack.send(());
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    pub fn blocking_recv(&mut self) -> Option<AgentObserverEvent> {
+        loop {
+            match self.receiver.blocking_recv()? {
+                AgentObserverMessage::Event(event) => return Some(event),
+                AgentObserverMessage::Barrier(ack) => {
+                    let _ = ack.send(());
+                }
+            }
+        }
+    }
+}
+
+impl AgentObserverSink {
+    pub fn channel(capacity: usize) -> (Self, AgentObserverReceiver) {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity.max(1));
+        (
+            Self {
+                sender,
+                dropped_events: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                render_muted: Arc::new(AtomicBool::new(false)),
+                render_break_pending: Arc::new(AtomicBool::new(false)),
+            },
+            AgentObserverReceiver { receiver },
+        )
+    }
+
+    fn emit(&self, event: AgentObserverEvent) -> bool {
+        if self
+            .sender
+            .try_send(AgentObserverMessage::Event(event))
+            .is_err()
+        {
+            self.dropped_events.fetch_add(1, Ordering::Relaxed);
+            false
+        } else {
+            true
+        }
+    }
+
+    fn emit_render_text_with_state(
+        &self,
+        text: &str,
+        mute_post_response: Option<bool>,
+        break_before: bool,
+    ) -> bool {
+        const MAX_RENDER_DELTA_BYTES: usize = 4 * 1024;
+        if text.is_empty() {
+            return false;
+        }
+        let mut pending_break = break_before;
+        let mut break_delivered = false;
+        let mut chunk = String::with_capacity(MAX_RENDER_DELTA_BYTES);
+        for character in text.chars() {
+            if !chunk.is_empty()
+                && chunk.len().saturating_add(character.len_utf8()) > MAX_RENDER_DELTA_BYTES
+            {
+                let accepted = self.emit(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                    text: Some(std::mem::take(&mut chunk)),
+                    mute_post_response,
+                    break_before: pending_break,
+                }));
+                if accepted && pending_break {
+                    pending_break = false;
+                    break_delivered = true;
+                }
+                chunk = String::with_capacity(MAX_RENDER_DELTA_BYTES);
+            }
+            chunk.push(character);
+        }
+        if !chunk.is_empty() {
+            let accepted = self.emit(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                text: Some(chunk),
+                mute_post_response,
+                break_before: pending_break,
+            }));
+            if accepted && pending_break {
+                break_delivered = true;
+            }
+        }
+        break_delivered
+    }
+
+    pub(crate) fn emit_render_text(&self, text: &str) {
+        let _ = self.emit_render_text_with_state(text, None, false);
+    }
+
+    pub(crate) fn emit_stream_chunk(&self, chunk: &StreamChunk) {
+        if let Some(usage) = chunk.usage.as_ref() {
+            self.emit(AgentObserverEvent::Usage(usage.clone()));
+        }
+        let Some(delta) = chunk.delta.as_ref() else {
+            return;
+        };
+        let mut control_update = None;
+        if let Some(control) = delta
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("control"))
+            .and_then(Value::as_str)
+        {
+            match control {
+                "mute_post_response" => {
+                    let enabled = delta
+                        .extra
+                        .as_ref()
+                        .and_then(|extra| extra.get("enabled"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    self.render_muted.store(enabled, Ordering::Release);
+                    control_update = Some(enabled);
+                }
+                "stream_break" => {
+                    self.render_break_pending.store(true, Ordering::Release);
+                }
+                _ => {}
+            }
+        }
+        if let Some(text) = delta.content.as_deref() {
+            let muted = self.render_muted.load(Ordering::Acquire);
+            if muted {
+                if let Some(enabled) = control_update {
+                    self.emit(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                        text: None,
+                        mute_post_response: Some(enabled),
+                        break_before: false,
+                    }));
+                }
+                return;
+            }
+            let break_before = self.render_break_pending.swap(false, Ordering::AcqRel);
+            let break_delivered =
+                self.emit_render_text_with_state(text, Some(muted), break_before);
+            if break_before && !break_delivered {
+                self.render_break_pending.store(true, Ordering::Release);
+            }
+        } else if let Some(enabled) = control_update {
+            self.emit(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                text: None,
+                mute_post_response: Some(enabled),
+                break_before: false,
+            }));
+        }
+    }
+
+    pub async fn flush(&self) -> bool {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            if self
+                .sender
+                .send(AgentObserverMessage::Barrier(ack_tx))
+                .await
+                .is_err()
+            {
+                return false;
+            }
+            ack_rx.await.is_ok()
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    pub fn dropped_event_count(&self) -> u64 {
+        self.dropped_events.load(Ordering::Relaxed)
+    }
+
+    pub fn take_dropped_event_count(&self) -> u64 {
+        self.dropped_events.swap(0, Ordering::AcqRel)
+    }
+}
+
+/// Best-effort, data-only observation capability for an agent run.
 #[derive(Default)]
 pub struct AgentCallbacks {
-    /// Called when the LLM is "thinking" (reasoning tokens).
-    pub on_thinking: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    /// Called when a tool call begins.
-    pub on_tool_start: Option<Box<dyn Fn(&str, &Value) + Send + Sync>>,
-    /// Called when a tool call finishes.
-    pub on_tool_complete: Option<Box<dyn Fn(&str, &str) + Send + Sync>>,
-    /// Called for each stream delta.
-    pub on_stream_delta: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    /// Called after each completed LLM step (full response assembled).
-    pub on_step_complete: Option<Box<dyn Fn(u32) + Send + Sync>>,
-    /// Called when background memory/skill review completes or fails.
-    ///
-    /// Payload is a user-friendly summary string suitable for direct UI output.
-    pub background_review_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
-    /// Called when `delegate_task(background=true)` completes out-of-band.
-    ///
-    /// Payload is a self-contained summary suitable for reinjection into the
-    /// originating UI or platform conversation.
-    pub background_delegation_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
-    /// Called for lifecycle/status notices (context pressure, retries, etc.).
-    pub status_callback: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+    pub observer_sink: Option<AgentObserverSink>,
+}
+
+impl AgentCallbacks {
+    pub(crate) fn emit_thinking(&self, thinking: &str) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit(AgentObserverEvent::Thinking(
+                crate::sealed_artifact::credential_free_observer_text_preview(thinking, 1_024),
+            ));
+        }
+    }
+
+    pub(crate) fn emit_tool_start(&self, name: &str, args: &Value) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit(AgentObserverEvent::ToolStarted {
+                name: name.to_string(),
+                args_preview: crate::sealed_artifact::credential_free_observer_preview(args, 512),
+            });
+        }
+    }
+
+    pub(crate) fn emit_tool_complete(&self, name: &str, result: &str) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit(AgentObserverEvent::ToolCompleted {
+                name: name.to_string(),
+                result_preview:
+                    crate::sealed_artifact::credential_free_observer_text_preview(result, 1_024),
+            });
+        }
+    }
+
+    pub(crate) fn emit_stream_delta(&self, delta: &str) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit_render_text(delta);
+        }
+    }
+
+    pub(crate) fn emit_step_complete(&self, turn: u32) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit(AgentObserverEvent::StepCompleted(turn));
+        }
+    }
+
+    pub(crate) fn emit_status(&self, kind: &str, message: &str) {
+        if let Some(sink) = self.observer_sink.as_ref() {
+            sink.emit(AgentObserverEvent::Status {
+                kind: crate::sealed_artifact::credential_free_observer_text_preview(kind, 64),
+                message: crate::sealed_artifact::credential_free_observer_text_preview(
+                    message, 1_024,
+                ),
+            });
+        }
+    }
 }
 
 /// Classify an API error for retry/failover decisions.
@@ -127,6 +397,9 @@ fn maybe_nous_401_diagnostic(
 
 fn classify_error(err: &str) -> ErrorClass {
     let lower = err.to_lowercase();
+    if lower.contains("run-record evidence failure") {
+        return ErrorClass::Fatal;
+    }
     let model_not_found = lower.contains("model not found")
         || lower.contains("invalid model")
         || lower.contains("no such model")
@@ -268,6 +541,7 @@ fn is_transient_stream_error(err: &AgentError) -> bool {
         | AgentError::InvalidToolCall(msg) => has_transient_phrase(msg),
         AgentError::RateLimited { .. } => true,
         AgentError::Interrupted { .. }
+        | AgentError::PolicyBlocked(_)
         | AgentError::MaxTurnsExceeded
         | AgentError::ContextTooLong => false,
     }
@@ -337,7 +611,7 @@ struct RepoReviewBudgetState {
     last_signal_score: f64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 struct RouteLearningStats {
     samples: u32,
     success_rate: f64,
@@ -346,174 +620,8 @@ struct RouteLearningStats {
     updated_at_unix_ms: i64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct RouteLearningState {
-    schema_version: u32,
-    saved_at_unix_ms: i64,
-    entries: HashMap<String, RouteLearningStats>,
-}
 
-#[derive(Debug, Clone)]
-struct ReplayRecorder {
-    path: Option<PathBuf>,
-    state: Option<Arc<Mutex<ReplayState>>>,
-}
 
-#[derive(Debug, Clone)]
-struct ReplayState {
-    seq: u64,
-    prev_hash: String,
-    trace_root: String,
-}
-
-impl ReplayRecorder {
-    fn for_session(config: &AgentConfig, session_id: &str) -> Self {
-        let enabled = std::env::var("HERMES_REPLAY_ENABLED")
-            .map(|v| {
-                matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-            .unwrap_or(false);
-        if !enabled {
-            return Self {
-                path: None,
-                state: None,
-            };
-        }
-        let root = config
-            .hermes_home
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
-            })
-            .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"));
-        let dir = root.join("logs").join("replay");
-        if std::fs::create_dir_all(&dir).is_err() {
-            return Self {
-                path: None,
-                state: None,
-            };
-        }
-        let sid = if session_id.trim().is_empty() {
-            format!("session-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"))
-        } else {
-            session_id
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect::<String>()
-        };
-        let initial_prev_hash = short_sha256_hex(&format!("session:{sid}:v1"));
-        let trace_root = short_sha256_hex(&format!("trace:{sid}:v1"));
-        Self {
-            path: Some(dir.join(format!("{sid}.jsonl"))),
-            state: Some(Arc::new(Mutex::new(ReplayState {
-                seq: 0,
-                prev_hash: initial_prev_hash,
-                trace_root,
-            }))),
-        }
-    }
-
-    fn record(&self, event: &str, payload: Value) {
-        let Some(path) = self.path.as_ref() else {
-            return;
-        };
-        let Some(state) = self.state.as_ref() else {
-            return;
-        };
-        let mut redacted = payload;
-        redact_json_value(&mut redacted);
-        let canonical_payload =
-            serde_json::to_string(&redacted).unwrap_or_else(|_| "{}".to_string());
-        let (seq, prev_hash, event_hash, trace_id) = {
-            let mut guard = state.lock().unwrap();
-            guard.seq = guard.seq.saturating_add(1);
-            let seq = guard.seq;
-            let prev_hash = guard.prev_hash.clone();
-            let event_hash =
-                short_sha256_hex(&format!("{seq}|{event}|{prev_hash}|{canonical_payload}"));
-            let trace_id = format!("{}-{:08x}", guard.trace_root, seq);
-            guard.prev_hash = event_hash.clone();
-            (seq, prev_hash, event_hash, trace_id)
-        };
-        let line = serde_json::json!({
-            "ts": chrono::Utc::now().to_rfc3339(),
-            "seq": seq,
-            "trace_id": trace_id,
-            "event": event,
-            "prev_hash": prev_hash,
-            "event_hash": event_hash,
-            "payload": redacted,
-        })
-        .to_string();
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
-            let _ = writeln!(f, "{line}");
-        }
-    }
-}
-
-fn replay_sensitive_key(key: &str) -> bool {
-    let k = key.to_ascii_lowercase();
-    k.contains("api_key")
-        || k.contains("token")
-        || k.contains("secret")
-        || k.contains("password")
-        || k.contains("authorization")
-        || k.contains("cookie")
-        || k.contains("session")
-}
-
-fn short_sha256_hex(input: &str) -> String {
-    let digest = Sha256::digest(input.as_bytes());
-    let mut out = String::with_capacity(16);
-    for b in digest.iter().take(8) {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{:02x}", b);
-    }
-    out
-}
-
-fn redact_sensitive_text(value: &str) -> Option<String> {
-    lazy_static::lazy_static! {
-        static ref SECRET_PATTERNS: Vec<regex::Regex> = vec![
-            regex::Regex::new(r"(?i)bearer\\s+[A-Za-z0-9._\\-]{8,}").unwrap(),
-            regex::Regex::new(r"sk-[A-Za-z0-9]{8,}").unwrap(),
-            regex::Regex::new(r"gh[pousr]_[A-Za-z0-9]{12,}").unwrap(),
-            regex::Regex::new(r"xox[baprs]-[A-Za-z0-9\\-]{10,}").unwrap(),
-            regex::Regex::new(r"(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*[A-Za-z0-9._\\-]{6,}").unwrap(),
-        ];
-    }
-    let mut redacted = value.to_string();
-    let mut changed = false;
-    for pattern in SECRET_PATTERNS.iter() {
-        let next = pattern.replace_all(&redacted, "[redacted]").to_string();
-        if next != redacted {
-            changed = true;
-            redacted = next;
-        }
-    }
-    if changed {
-        Some(redacted)
-    } else {
-        None
-    }
-}
 
 fn truncate_hook_preview(text: &str, max_chars: usize) -> String {
     let total = text.chars().count();
@@ -526,30 +634,6 @@ fn truncate_hook_preview(text: &str, max_chars: usize) -> String {
     format!("{head}\n...[truncated {omitted} chars]...")
 }
 
-fn redact_json_value(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            for (k, v) in map.iter_mut() {
-                if replay_sensitive_key(k) {
-                    *v = Value::String("[redacted]".to_string());
-                } else {
-                    redact_json_value(v);
-                }
-            }
-        }
-        Value::Array(arr) => {
-            for v in arr {
-                redact_json_value(v);
-            }
-        }
-        Value::String(raw) => {
-            if let Some(redacted) = redact_sensitive_text(raw) {
-                *raw = redacted;
-            }
-        }
-        _ => {}
-    }
-}
 
 fn governor_enabled() -> bool {
     std::env::var("HERMES_PERFORMANCE_GOVERNOR")
@@ -761,30 +845,6 @@ fn now_unix_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-fn default_route_learning_home(config: &AgentConfig) -> PathBuf {
-    config
-        .hermes_home
-        .as_deref()
-        .map(PathBuf::from)
-        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-        .or_else(|| {
-            std::env::var("HERMES_AGENT_ULTRA_HOME")
-                .ok()
-                .map(PathBuf::from)
-        })
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
-        })
-        .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"))
-}
-
-fn route_learning_state_path(config: &AgentConfig) -> PathBuf {
-    default_route_learning_home(config)
-        .join("logs")
-        .join("route-learning.json")
-}
 
 fn push_window_u64(window: &mut VecDeque<u64>, value: u64, limit: usize) {
     window.push_back(value);
@@ -905,4 +965,116 @@ fn governor_for_turn(
 fn runtime_provider_allows_no_api_key(provider: &str, base_url: Option<&str>) -> bool {
     crate::local_backends::is_local_backend_provider(provider)
         || base_url.is_some_and(crate::local_backends::is_local_or_private_base_url)
+}
+
+#[cfg(test)]
+mod observer_tests {
+    use super::*;
+
+    fn stream_chunk(content: Option<&str>, extra: Option<Value>) -> StreamChunk {
+        StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: content.map(str::to_string),
+                tool_calls: None,
+                extra,
+            }),
+            finish_reason: None,
+            usage: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn bounded_observer_counts_dropped_events() {
+        let (sink, mut receiver) = AgentObserverSink::channel(1);
+        let callbacks = AgentCallbacks {
+            observer_sink: Some(sink.clone()),
+        };
+        callbacks.emit_thinking("first");
+        callbacks.emit_status("busy", "second");
+
+        assert_eq!(sink.dropped_event_count(), 1);
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AgentObserverEvent::Thinking(text)) if text == "first"
+        ));
+        assert_eq!(sink.take_dropped_event_count(), 1);
+        assert_eq!(sink.dropped_event_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn renderer_boundary_suppresses_muted_text_and_preserves_break() {
+        let (sink, mut receiver) = AgentObserverSink::channel(8);
+        sink.emit_stream_chunk(&stream_chunk(
+            None,
+            Some(serde_json::json!({
+                "control": "mute_post_response",
+                "enabled": true
+            })),
+        ));
+        sink.emit_stream_chunk(&stream_chunk(Some("secret post-response text"), None));
+        sink.emit_stream_chunk(&stream_chunk(
+            None,
+            Some(serde_json::json!({
+                "control": "mute_post_response",
+                "enabled": false
+            })),
+        ));
+        sink.emit_stream_chunk(&stream_chunk(
+            None,
+            Some(serde_json::json!({"control": "stream_break"})),
+        ));
+        sink.emit_stream_chunk(&stream_chunk(Some("visible"), None));
+
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                text: None,
+                mute_post_response: Some(true),
+                break_before: false,
+            }))
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                text: None,
+                mute_post_response: Some(false),
+                break_before: false,
+            }))
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AgentObserverEvent::RenderDelta(AgentRenderDelta {
+                text: Some(text),
+                mute_post_response: Some(false),
+                break_before: true,
+            })) if text == "visible"
+        ));
+        assert!(receiver.try_recv().is_none());
+    }
+
+    #[tokio::test]
+    async fn flush_waits_until_prior_observations_are_received() {
+        let (sink, mut receiver) = AgentObserverSink::channel(4);
+        let callbacks = AgentCallbacks {
+            observer_sink: Some(sink.clone()),
+        };
+        callbacks.emit_step_complete(3);
+        let drain = tokio::spawn(async move {
+            let mut events = Vec::new();
+            while let Some(event) = receiver.recv().await {
+                events.push(event);
+            }
+            events
+        });
+
+        assert!(sink.flush().await);
+        drop(callbacks);
+        drop(sink);
+        let events = drain.await.expect("observer drain task");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events.first(),
+            Some(AgentObserverEvent::StepCompleted(3))
+        ));
+    }
 }

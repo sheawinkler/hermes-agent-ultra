@@ -358,27 +358,17 @@ mod tests {
         let mut app = build_test_app(tmp.path());
         let mut state = TuiState::default();
         state.begin_processing_cycle("moa:default");
-        let chunk = StreamChunk {
-            delta: Some(hermes_core::StreamDelta {
-                content: None,
-                tool_calls: None,
-                extra: Some(serde_json::json!({
-                    "ui_event": "moa_reference",
-                    "index": 1,
-                    "count": 2,
-                    "label": "ref-a",
-                    "text": "first reference answer"
-                })),
-            }),
-            finish_reason: None,
-            usage: None,
-        };
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = StreamHandle::new(tx);
+        handle.send_ui_event(StreamUiEvent::MoaReference {
+            index: 1,
+            count: 2,
+            label: "ref-a".to_string(),
+            text: "first reference answer".to_string(),
+        });
+        let event = rx.try_recv().expect("moa reference stream event");
 
-        assert!(process_stream_lane_event(
-            &mut app,
-            &mut state,
-            Event::StreamChunk(chunk)
-        ));
+        assert!(process_stream_lane_event(&mut app, &mut state, event));
         assert!(state
             .recent_activity
             .iter()
@@ -414,12 +404,18 @@ mod tests {
         assert_eq!(idx, 2);
     }
 
-    #[test]
-    fn test_stream_handle() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let handle: StreamHandle = tx.into();
-        handle.send_delta("test delta");
+    #[tokio::test]
+    async fn test_stream_handle_completion_survives_full_lane() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = StreamHandle::new(tx);
+        handle.send_delta("accepted");
+        handle.send_delta("dropped");
         handle.send_done();
+
+        assert!(matches!(rx.recv().await, Some(Event::StreamRender(_))));
+        assert!(matches!(rx.recv().await, Some(Event::StreamOverflow(1))));
+        handle.wait_for_done().await;
+        assert!(matches!(rx.recv().await, Some(Event::AgentDone)));
     }
 
     #[test]
@@ -884,20 +880,23 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_chunk_has_progress_for_extra_only_events() {
-        let chunk = StreamChunk {
-            delta: Some(hermes_core::StreamDelta {
-                content: None,
-                tool_calls: None,
-                extra: Some(serde_json::json!({
-                    "ui_event": "lifecycle",
-                    "message": "dispatching request"
-                })),
-            }),
-            finish_reason: None,
-            usage: None,
-        };
-        assert!(stream_chunk_has_progress(&chunk));
+    fn test_stream_ui_lifecycle_event_updates_activity() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_test_app(tmp.path());
+        let mut state = TuiState::default();
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = StreamHandle::new(tx);
+        handle.send_ui_event(StreamUiEvent::Lifecycle(
+            "dispatching request".to_string(),
+        ));
+        let event = rx.try_recv().expect("lifecycle stream event");
+
+        assert!(process_stream_lane_event(&mut app, &mut state, event));
+        assert!(state
+            .recent_activity
+            .iter()
+            .any(|line| line.contains("dispatching request")));
     }
 
     #[test]

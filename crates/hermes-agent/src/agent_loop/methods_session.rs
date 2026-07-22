@@ -20,6 +20,21 @@ impl AgentLoop {
         Ok(())
     }
 
+    fn initial_execution_containment(
+        config: &AgentConfig,
+    ) -> Option<Arc<ExecutionContainmentContext>> {
+        match config.execution_mode.mode {
+            ExecutionMode::Manual => Some(Arc::new(
+                ExecutionContainmentContext::manual(config.execution_mode)
+                    .expect("manual resolved mode must admit a host-local containment context"),
+            )),
+            ExecutionMode::Reviewed
+            | ExecutionMode::AutonomousLocal
+            | ExecutionMode::Ci
+            | ExecutionMode::RemoteWorker => None,
+        }
+    }
+
     /// Build [`AgentResult`] messages for return / persistence (applies `persist_user_message` override).
     fn messages_for_persisted_result(
         &self,
@@ -133,15 +148,21 @@ impl AgentLoop {
         tool_registry: Arc<ToolRegistry>,
         llm_provider: Arc<dyn LlmProvider>,
     ) -> Self {
-        let route_learning = Arc::new(Mutex::new(Self::load_route_learning_state(&config)));
+        let route_learning = Arc::new(Mutex::new(HashMap::new()));
         let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
+        let execution_containment = Self::initial_execution_containment(&config);
+        if let Some(context) = &execution_containment {
+            tool_registry.set_execution_containment_context(Arc::clone(context));
+        }
         Self {
             config,
             tool_registry,
             llm_provider,
             interrupt: InterruptController::new(),
             memory_manager: None,
+            memory_subject: None,
+            memory_subject_filter_key: None,
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -149,6 +170,10 @@ impl AgentLoop {
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
+            run_runtime: None,
+            execution_containment,
+            run_context: RunInvocationContext::default(),
+            parent_run_id: None,
             code_index,
             lsp_context,
             route_learning,
@@ -162,15 +187,21 @@ impl AgentLoop {
         llm_provider: Arc<dyn LlmProvider>,
         interrupt: InterruptController,
     ) -> Self {
-        let route_learning = Arc::new(Mutex::new(Self::load_route_learning_state(&config)));
+        let route_learning = Arc::new(Mutex::new(HashMap::new()));
         let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
+        let execution_containment = Self::initial_execution_containment(&config);
+        if let Some(context) = &execution_containment {
+            tool_registry.set_execution_containment_context(Arc::clone(context));
+        }
         Self {
             config,
             tool_registry,
             llm_provider,
             interrupt,
             memory_manager: None,
+            memory_subject: None,
+            memory_subject_filter_key: None,
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -178,10 +209,58 @@ impl AgentLoop {
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
+            run_runtime: None,
+            execution_containment,
+            run_context: RunInvocationContext::default(),
+            parent_run_id: None,
             code_index,
             lsp_context,
             route_learning,
         }
+    }
+
+    /// Attach reusable run-record services. A fresh run and owner lease are
+    /// created for every `run`/`run_stream` invocation.
+    pub fn with_run_runtime(mut self, runtime: Arc<RunRuntime>) -> Self {
+        self.run_runtime = Some(runtime);
+        self
+    }
+
+    /// Bind this loop to the exact backend context that admitted its resolved
+    /// execution mode. A mismatched context is rejected before any run record
+    /// or effect can begin.
+    pub fn with_execution_containment_context(
+        mut self,
+        context: Arc<ExecutionContainmentContext>,
+    ) -> Result<Self, AgentError> {
+        if context.mode() != self.config.execution_mode {
+            return Err(AgentError::Config(
+                "execution containment context does not match the resolved execution mode"
+                    .to_string(),
+            ));
+        }
+        self.tool_registry
+            .set_execution_containment_context(Arc::clone(&context));
+        self.execution_containment = Some(context);
+        Ok(self)
+    }
+
+    pub fn with_run_context(mut self, context: RunInvocationContext) -> Self {
+        self.run_context = context;
+        self
+    }
+
+    pub fn required_run_runtime(&self) -> Result<Arc<RunRuntime>, AgentError> {
+        self.run_runtime.clone().ok_or_else(|| {
+            AgentError::Config(
+                "agent execution requires an attached run-record runtime".to_string(),
+            )
+        })
+    }
+
+    pub(crate) fn with_parent_run_id(mut self, parent_run_id: RunId) -> Self {
+        self.parent_run_id = Some(parent_run_id);
+        self
     }
 
     fn init_code_index(config: &AgentConfig) -> Option<Arc<Mutex<CodeIndex>>> {
@@ -208,73 +287,6 @@ impl AgentLoop {
         cfg
     }
 
-    fn load_route_learning_state(config: &AgentConfig) -> HashMap<String, RouteLearningStats> {
-        if !smart_routing_learning_enabled() {
-            return HashMap::new();
-        }
-        let path = route_learning_state_path(config);
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(content) => content,
-            Err(_) => return HashMap::new(),
-        };
-        let parsed: RouteLearningState = match serde_json::from_str(&raw) {
-            Ok(state) => state,
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "failed to parse route-learning state; starting empty"
-                );
-                return HashMap::new();
-            }
-        };
-        let mut entries = parsed.entries;
-        let now_ms = now_unix_ms();
-        let _ = Self::prune_route_learning_locked(&mut entries, now_ms);
-        entries
-    }
-
-    fn save_route_learning_state(&self, entries: &HashMap<String, RouteLearningStats>) {
-        let path = route_learning_state_path(&self.config);
-        if let Some(parent) = path.parent() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                tracing::warn!(
-                    path = %parent.display(),
-                    error = %err,
-                    "failed to create route-learning state directory"
-                );
-                return;
-            }
-        }
-        let body = RouteLearningState {
-            schema_version: 1,
-            saved_at_unix_ms: now_unix_ms(),
-            entries: entries.clone(),
-        };
-        let serialized = match serde_json::to_vec_pretty(&body) {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to serialize route-learning state");
-                return;
-            }
-        };
-        let tmp = path.with_extension("json.tmp");
-        if let Err(err) = std::fs::write(&tmp, serialized) {
-            tracing::warn!(
-                path = %tmp.display(),
-                error = %err,
-                "failed to write route-learning state temp file"
-            );
-            return;
-        }
-        if let Err(err) = std::fs::rename(&tmp, &path) {
-            tracing::warn!(
-                path = %path.display(),
-                error = %err,
-                "failed to move route-learning state into place"
-            );
-        }
-    }
 
     fn route_learning_effective_stats(
         stats: &RouteLearningStats,
@@ -339,10 +351,80 @@ impl AgentLoop {
         self
     }
 
-    /// Set the memory manager.
+    /// Attach a subject-bound memory manager and retain its immutable binding
+    /// for internal provider helpers that must not inspect AgentConfig.
     pub fn with_memory(mut self, mm: Arc<std::sync::Mutex<MemoryManager>>) -> Self {
+        if let Ok(manager) = mm.lock() {
+            self.memory_subject = Some(manager.subject().clone());
+            self.memory_subject_filter_key = Some(manager.subject_filter_key().clone());
+        }
+        let registry = Arc::make_mut(&mut self.tool_registry);
+        if self.config.skip_memory {
+            registry.disable_canonical_memory();
+        } else if let Err(error) = registry.bind_canonical_memory_manager(Arc::clone(&mm)) {
+            tracing::error!(
+                error = %error,
+                "canonical memory tool binding failed closed; memory tool disabled"
+            );
+            registry.disable_canonical_memory();
+        }
         self.memory_manager = Some(mm);
         self
+    }
+
+    pub(crate) fn memory_subject_binding(
+        &self,
+    ) -> Option<(&MemorySubject, &MemorySubjectStorageKey)> {
+        self.memory_subject
+            .as_ref()
+            .zip(self.memory_subject_filter_key.as_ref())
+    }
+    /// Export only the immutable subject attached when this loop received its
+    /// memory manager. Callers cannot select a subject or audit actor.
+    pub fn export_bound_memory(&self) -> Result<MemoryExportReport, MemoryManagerError> {
+        self.with_bound_memory_manager(|manager, subject| {
+            manager.export_subject(subject, manager.audit_actor())
+        })
+    }
+
+    /// Return the verified export bytes through the exact descriptor validated
+    /// by the bound manager. The caller can choose only a previously-issued
+    /// opaque artifact descriptor; subject and audit actor stay immutable.
+    pub fn open_bound_memory_export(
+        &self,
+        artifact: &MemoryExportArtifact,
+    ) -> Result<std::fs::File, MemoryManagerError> {
+        self.with_bound_memory_manager(|manager, subject| {
+            manager.open_export_subject(subject, manager.audit_actor(), artifact)
+        })
+    }
+
+    /// Forget only the immutable subject attached when this loop received its
+    /// memory manager. A successful report has already passed provider
+    /// readback and durable terminal-audit checks in [`MemoryManager`].
+    pub fn forget_bound_memory(&self) -> Result<MemoryForgetReport, MemoryManagerError> {
+        self.with_bound_memory_manager(|manager, subject| {
+            manager.forget_subject(subject, manager.audit_actor())
+        })
+    }
+
+    fn with_bound_memory_manager<T>(
+        &self,
+        operation: impl FnOnce(&MemoryManager, &MemorySubject) -> Result<T, MemoryManagerError>,
+    ) -> Result<T, MemoryManagerError> {
+        let (subject, filter) = self
+            .memory_subject_binding()
+            .ok_or(MemoryManagerError::SubjectState)?;
+        let manager = self
+            .memory_manager
+            .as_ref()
+            .ok_or(MemoryManagerError::SubjectState)?
+            .lock()
+            .map_err(|_| MemoryManagerError::SubjectState)?;
+        if manager.subject() != subject || manager.subject_filter_key() != filter {
+            return Err(MemoryManagerError::SubjectMismatch);
+        }
+        operation(&manager, subject)
     }
 
     /// Set the plugin manager.
@@ -355,6 +437,22 @@ impl AgentLoop {
     pub fn with_callbacks(mut self, cb: AgentCallbacks) -> Self {
         self.callbacks = Arc::new(cb);
         self
+    }
+
+    /// Drain observations emitted before this call while the caller's receiver is live.
+    pub async fn flush_observer(&self) -> bool {
+        match self.callbacks.observer_sink.as_ref() {
+            Some(sink) => sink.flush().await,
+            None => true,
+        }
+    }
+
+    pub fn take_observer_dropped_event_count(&self) -> u64 {
+        self.callbacks
+            .observer_sink
+            .as_ref()
+            .map(AgentObserverSink::take_dropped_event_count)
+            .unwrap_or(0)
     }
 
     /// Set the delegate depth.

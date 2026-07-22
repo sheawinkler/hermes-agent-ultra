@@ -7,7 +7,7 @@
 //!
 //! Configuration:
 //!   - `HINDSIGHT_API_KEY` (required for cloud mode)
-//!   - `HINDSIGHT_BANK_ID` (default: "hermes")
+//!   - `HINDSIGHT_BANK_ID` (optional namespace; every effective bank is subject-scoped)
 //!   - `HINDSIGHT_BUDGET` (default: "mid")
 //!   - `HINDSIGHT_API_URL` (default: "https://api.hindsight.vectorize.io")
 //!   - `HINDSIGHT_MODE` (default: "cloud")
@@ -17,11 +17,17 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use parking_lot::Mutex;
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
+use hermes_core::{
+    MemoryAuditActor, MemoryExportReceipt, MemoryExportSink, MemoryForgetReceipt,
+    MemoryGovernanceOperation, MemoryProviderGovernanceError, MemoryReadbackReceipt,
+    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySubject, MemorySubjectStorageKey,
+};
 
 use crate::memory_manager::MemoryProviderPlugin;
 use crate::memory_plugins::config_io;
@@ -121,7 +127,7 @@ impl HindsightConfig {
         let mut config = Self {
             api_key: std::env::var("HINDSIGHT_API_KEY").unwrap_or_default(),
             api_url: std::env::var("HINDSIGHT_API_URL").ok().unwrap_or_default(),
-            bank_id: std::env::var("HINDSIGHT_BANK_ID").unwrap_or_else(|_| "hermes".into()),
+            bank_id: std::env::var("HINDSIGHT_BANK_ID").unwrap_or_else(|_| "subject".into()),
             bank_id_template: std::env::var("HINDSIGHT_BANK_ID_TEMPLATE").unwrap_or_default(),
             budget: std::env::var("HINDSIGHT_BUDGET").unwrap_or_else(|_| "mid".into()),
             mode: std::env::var("HINDSIGHT_MODE").unwrap_or_else(|_| "cloud".into()),
@@ -284,9 +290,9 @@ impl HindsightConfig {
 /// Hindsight long-term memory with knowledge graph and multi-strategy retrieval.
 pub struct HindsightPlugin {
     config: Mutex<Option<HindsightConfig>>,
-    session_id: Mutex<String>,
+    subject_key: Mutex<Option<MemorySubjectStorageKey>>,
     document_id: Mutex<String>,
-    prefetch_result: Arc<Mutex<String>>,
+    prefetch_result: Arc<Mutex<Option<(MemorySubjectStorageKey, String)>>>,
     turn_counter: Mutex<u32>,
     session_turns: Mutex<Vec<String>>,
     retain_batch_counter: Mutex<u64>,
@@ -296,9 +302,9 @@ impl HindsightPlugin {
     pub fn new() -> Self {
         Self {
             config: Mutex::new(None),
-            session_id: Mutex::new(String::new()),
+            subject_key: Mutex::new(None),
             document_id: Mutex::new(String::new()),
-            prefetch_result: Arc::new(Mutex::new(String::new())),
+            prefetch_result: Arc::new(Mutex::new(None)),
             turn_counter: Mutex::new(0),
             session_turns: Mutex::new(Vec::new()),
             retain_batch_counter: Mutex::new(0),
@@ -308,21 +314,31 @@ impl HindsightPlugin {
     fn memory_mode(&self) -> String {
         self.config
             .lock()
-            .unwrap()
             .as_ref()
-            .map(|c| c.memory_mode.clone())
+            .map(|config| config.memory_mode.clone())
             .unwrap_or_else(|| "hybrid".to_string())
     }
 
+    fn is_bound_to(&self, filter: &MemorySubjectStorageKey) -> bool {
+        self.subject_key.lock().as_ref() == Some(filter)
+    }
+
+    fn config_for(&self, filter: &MemorySubjectStorageKey) -> Option<HindsightConfig> {
+        if !self.is_bound_to(filter) {
+            return None;
+        }
+        self.config.lock().clone()
+    }
+
     fn next_retain_document_id(&self) -> String {
-        let document_id = self.document_id.lock().unwrap().clone();
-        let mut counter = self.retain_batch_counter.lock().unwrap();
+        let document_id = self.document_id.lock().clone();
+        let mut counter = self.retain_batch_counter.lock();
         *counter = counter.saturating_add(1);
-        format!("{}-batch-{}", document_id, *counter)
+        format!("{document_id}-batch-{}", *counter)
     }
 
     fn take_pending_turns(&self) -> Vec<String> {
-        let mut turns = self.session_turns.lock().unwrap();
+        let mut turns = self.session_turns.lock();
         if turns.is_empty() {
             Vec::new()
         } else {
@@ -330,20 +346,35 @@ impl HindsightPlugin {
         }
     }
 
+    fn clear_local_residue(&self) {
+        *self.prefetch_result.lock() = None;
+        self.session_turns.lock().clear();
+        *self.turn_counter.lock() = 0;
+        *self.retain_batch_counter.lock() = 0;
+    }
+
     fn flush_pending_turns(&self, reason: &'static str) {
-        let cfg = match self.config.lock().unwrap().clone() {
-            Some(c) => c,
+        let cfg = match self.config.lock().clone() {
+            Some(config) => config,
             None => return,
         };
         let turns = self.take_pending_turns();
         if turns.is_empty() {
             return;
         }
-        let sid = self.session_id.lock().unwrap().clone();
+        let Some(subject_key) = self.subject_key.lock().as_ref().cloned() else {
+            return;
+        };
         let fallback_document_id = self.next_retain_document_id();
-        std::thread::spawn(move || {
-            retain_hindsight_turns(&cfg, &sid, &fallback_document_id, &turns, reason);
-        });
+        if let Err(error) = retain_hindsight_turns(
+            &cfg,
+            subject_key.as_str(),
+            &fallback_document_id,
+            &turns,
+            reason,
+        ) {
+            tracing::warn!("Hindsight retain flush failed ({reason}): {error}");
+        }
     }
 }
 
@@ -353,9 +384,9 @@ impl MemoryProviderPlugin for HindsightPlugin {
     }
 
     fn backup_paths(&self) -> Vec<std::path::PathBuf> {
-        dirs::home_dir()
-            .map(|home| vec![home.join(".hindsight")])
-            .unwrap_or_default()
+        // Legacy ~/.hindsight may contain unpartitioned provider state. It is
+        // never treated as Hermes subject memory or included in a backup.
+        Vec::new()
     }
 
     fn is_available(&self) -> bool {
@@ -377,7 +408,6 @@ impl MemoryProviderPlugin for HindsightPlugin {
         {
             return true;
         }
-        // Cloud mode requires credentials (or explicit API URL for self-hosted).
         !api_key.is_empty()
             || !api_url.is_empty()
             || ["api_key", "apiKey", "api_url"].iter().any(|key| {
@@ -388,9 +418,14 @@ impl MemoryProviderPlugin for HindsightPlugin {
             })
     }
 
-    fn initialize(&self, session_id: &str, hermes_home: &str) {
+    fn initialize(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        hermes_home: &str,
+    ) -> Result<(), String> {
         let mut config = HindsightConfig::load(hermes_home);
-        config.bank_id = resolve_bank_id_template(
+        let namespace = resolve_bank_id_template(
             &config.bank_id_template,
             &config.bank_id,
             &[
@@ -406,77 +441,79 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     "platform",
                     std::env::var("HERMES_PLATFORM").unwrap_or_default(),
                 ),
-                ("user", std::env::var("HERMES_USER_ID").unwrap_or_default()),
-                ("session", session_id.to_string()),
             ],
         );
+        config.bank_id = subject_scoped_bank_id(&namespace, filter);
+        // Do not accept a server-side queued retain as a completed write.
+        config.retain_async = false;
         tracing::info!(
-            "Hindsight initialized: mode={}, api_url={}, bank={}, budget={}, memory_mode={}",
+            "Hindsight initialized: mode={}, bank={}, budget={}, memory_mode={}",
             config.mode,
-            config.api_url,
             config.bank_id,
             config.budget,
             config.memory_mode
         );
-        *self.session_id.lock().unwrap() = session_id.to_string();
-        *self.document_id.lock().unwrap() = scoped_document_id(session_id);
-        *self.turn_counter.lock().unwrap() = 0;
-        *self.retain_batch_counter.lock().unwrap() = 0;
-        self.session_turns.lock().unwrap().clear();
-        *self.config.lock().unwrap() = Some(config);
+        *self.subject_key.lock() = Some(filter.clone());
+        *self.document_id.lock() = scoped_document_id(filter.as_str());
+        self.clear_local_residue();
+        *self.config.lock() = Some(config);
+        Ok(())
     }
 
     fn system_prompt_block(&self) -> String {
-        let config = self.config.lock().unwrap();
-        let config = match config.as_ref() {
-            Some(c) => c,
-            None => return String::new(),
+        let config = self.config.lock();
+        let Some(config) = config.as_ref() else {
+            return String::new();
         };
         match config.memory_mode.as_str() {
             "context" => format!(
                 "# Hindsight Memory\n\
-                 Active (context mode). Bank: {}, budget: {}.\n\
+                 Active (context mode). Budget: {}.\n\
                  Relevant memories are automatically injected into context.",
-                config.bank_id, config.budget
+                config.budget
             ),
             "tools" => format!(
                 "# Hindsight Memory\n\
-                 Active (tools mode). Bank: {}, budget: {}.\n\
+                 Active (tools mode). Budget: {}.\n\
                  Use hindsight_recall to search, hindsight_reflect for synthesis, \
                  hindsight_retain to store facts.",
-                config.bank_id, config.budget
+                config.budget
             ),
             _ => format!(
                 "# Hindsight Memory\n\
-                 Active. Bank: {}, budget: {}.\n\
+                 Active. Budget: {}.\n\
                  Relevant memories are automatically injected into context. \
                  Use hindsight_recall to search, hindsight_reflect for synthesis, \
                  hindsight_retain to store facts.",
-                config.bank_id, config.budget
+                config.budget
             ),
         }
     }
 
-    fn prefetch(&self, _query: &str, _session_id: &str) -> String {
-        let result = {
-            let mut lock = self.prefetch_result.lock().unwrap();
-            let r = lock.clone();
-            lock.clear();
-            r
-        };
-        if result.is_empty() {
+    fn prefetch(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _query: &str,
+    ) -> String {
+        if !self.is_bound_to(filter) {
             return String::new();
         }
-
-        let config = self.config.lock().unwrap();
-        let preamble = config
-            .as_ref()
-            .and_then(|c| {
-                if c.recall_prompt_preamble.is_empty() {
-                    None
-                } else {
-                    Some(c.recall_prompt_preamble.clone())
-                }
+        let result = self.prefetch_result.lock().take().and_then(|(key, value)| {
+            if key == *filter {
+                Some(value)
+            } else {
+                None
+            }
+        });
+        let Some(result) = result.filter(|value| !value.is_empty()) else {
+            return String::new();
+        };
+        let preamble = self
+            .config_for(filter)
+            .and_then(|config| {
+                (!config.recall_prompt_preamble.is_empty())
+                    .then_some(config.recall_prompt_preamble)
             })
             .unwrap_or_else(|| {
                 "# Hindsight Memory (persistent cross-session context)\n\
@@ -484,162 +521,167 @@ impl MemoryProviderPlugin for HindsightPlugin {
                  Do not call tools to look up information that is already present here."
                     .to_string()
             });
-
-        format!("{}\n\n{}", preamble, result)
+        format!("{preamble}\n\n{result}")
     }
 
-    fn queue_prefetch(&self, query: &str, _session_id: &str) {
-        let config = self.config.lock().unwrap();
-        let config = match config.as_ref() {
-            Some(c) => c,
-            None => return,
+    fn queue_prefetch(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        query: &str,
+    ) {
+        let Some(config) = self.config_for(filter) else {
+            return;
         };
         if config.memory_mode == "tools" || !config.auto_recall {
             return;
         }
-
-        let mut q = query.to_string();
-        if config.recall_max_input_chars > 0 && q.len() > config.recall_max_input_chars {
-            q.truncate(config.recall_max_input_chars);
+        let mut query = query.to_string();
+        if config.recall_max_input_chars > 0 && query.len() > config.recall_max_input_chars {
+            query.truncate(config.recall_max_input_chars);
         }
-
-        let cfg = config.clone();
+        let subject_key = filter.clone();
         let out = Arc::clone(&self.prefetch_result);
         std::thread::spawn(move || {
             let client = match Client::builder()
-                .timeout(Duration::from_secs(cfg.timeout_secs))
+                .timeout(Duration::from_secs(config.timeout_secs))
                 .build()
             {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::debug!("Hindsight prefetch client build failed: {}", e);
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::debug!("Hindsight prefetch client build failed: {error}");
                     return;
                 }
             };
-            let base = cfg.api_url.trim_end_matches('/').to_string();
-            let bank = urlencode_path(&cfg.bank_id);
-            let text = if cfg.prefetch_method == "reflect" {
-                match hindsight_reflect(&client, &base, &bank, &cfg.api_key, &q, &cfg.budget) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::debug!("Hindsight reflect prefetch failed: {}", e);
-                        return;
-                    }
-                }
+            let base = config.api_url.trim_end_matches('/').to_string();
+            let bank = urlencode_path(&config.bank_id);
+            let result = if config.prefetch_method == "reflect" {
+                hindsight_reflect(&client, &base, &bank, &config.api_key, &query, &config.budget)
             } else {
-                match hindsight_recall(
+                hindsight_recall(
                     &client,
                     HindsightRecallRequest {
                         base: &base,
                         bank: &bank,
-                        api_key: &cfg.api_key,
-                        query: &q,
-                        budget: &cfg.budget,
-                        max_tokens: cfg.recall_max_tokens,
-                        recall_types: &cfg.recall_types,
+                        api_key: &config.api_key,
+                        query: &query,
+                        budget: &config.budget,
+                        max_tokens: config.recall_max_tokens,
+                        recall_types: &config.recall_types,
                     },
-                ) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::debug!("Hindsight recall prefetch failed: {}", e);
-                        return;
-                    }
-                }
+                )
             };
-            if !text.is_empty() {
-                let mut lock = out.lock().unwrap();
-                *lock = text;
+            match result {
+                Ok(text) if !text.is_empty() => {
+                    *out.lock() = Some((subject_key, text));
+                }
+                Ok(_) => {}
+                Err(error) => tracing::debug!("Hindsight prefetch failed: {error}"),
             }
         });
     }
 
-    fn sync_turn(&self, user_content: &str, assistant_content: &str, session_id: &str) {
-        let config = self.config.lock().unwrap();
-        let config = match config.as_ref() {
-            Some(c) => c,
-            None => return,
+    fn sync_turn(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        user_content: &str,
+        assistant_content: &str,
+    ) {
+        let Some(config) = self.config_for(filter) else {
+            return;
         };
         if !config.auto_retain {
             return;
         }
-
         let now = chrono::Utc::now().to_rfc3339();
-        let turn = hindsight_turn_payload(user_content, assistant_content, &now);
-        self.session_turns.lock().unwrap().push(turn);
-
-        let mut counter = self.turn_counter.lock().unwrap();
+        self.session_turns
+            .lock()
+            .push(hindsight_turn_payload(user_content, assistant_content, &now));
+        let mut counter = self.turn_counter.lock();
         *counter += 1;
         if *counter % config.retain_every_n_turns != 0 {
             return;
         }
-
-        let cfg = config.clone();
-        let sid = session_id.to_string();
+        drop(counter);
         let fallback_document_id = self.next_retain_document_id();
         let turns = self.take_pending_turns();
         if turns.is_empty() {
             return;
         }
-
-        std::thread::spawn(move || {
-            retain_hindsight_turns(&cfg, &sid, &fallback_document_id, &turns, "sync_turn");
-        });
+        if let Err(error) = retain_hindsight_turns(
+            &config,
+            filter.as_str(),
+            &fallback_document_id,
+            &turns,
+            "sync_turn",
+        ) {
+            tracing::warn!("Hindsight retain failed (sync_turn): {error}");
+        }
     }
 
     fn get_tool_schemas(&self) -> Vec<Value> {
         if self.memory_mode() == "context" {
-            return Vec::new();
+            Vec::new()
+        } else {
+            vec![retain_schema(), recall_schema(), reflect_schema()]
         }
-        vec![retain_schema(), recall_schema(), reflect_schema()]
     }
 
-    fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
-        let cfg = match self.config.lock().unwrap().clone() {
-            Some(c) => c,
-            None => return json!({"error": "Hindsight not initialized"}).to_string(),
+    fn handle_tool_call(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        tool_name: &str,
+        args: &Value,
+    ) -> String {
+        let Some(config) = self.config_for(filter) else {
+            return json!({"error": "Hindsight not initialized for the authenticated subject"})
+                .to_string();
         };
-
         let client = match Client::builder()
-            .timeout(Duration::from_secs(cfg.timeout_secs))
+            .timeout(Duration::from_secs(config.timeout_secs))
             .build()
         {
-            Ok(c) => c,
-            Err(e) => return json!({"error": format!("HTTP client: {}", e)}).to_string(),
+            Ok(client) => client,
+            Err(error) => return json!({"error": format!("HTTP client: {error}")}).to_string(),
         };
-        let base = cfg.api_url.trim_end_matches('/').to_string();
-        let bank = urlencode_path(&cfg.bank_id);
-
+        let base = config.api_url.trim_end_matches('/').to_string();
+        let bank = urlencode_path(&config.bank_id);
         match tool_name {
             "hindsight_retain" => {
-                let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let content = args.get("content").and_then(Value::as_str).unwrap_or("");
                 if content.is_empty() {
                     return json!({"error": "Missing required parameter: content"}).to_string();
                 }
-                let ctx = args.get("context").and_then(|v| v.as_str());
+                let context = args.get("context").and_then(Value::as_str);
                 let call_tags = args
                     .get("tags")
                     .and_then(parse_retain_tags_value)
                     .unwrap_or_default();
-                let retain_tags = merge_retain_tags(&cfg.retain_tags, &call_tags);
+                let tags = merge_retain_tags(
+                    &merge_retain_tags(&config.retain_tags, &call_tags),
+                    &[format!("subject:{}", filter.as_str())],
+                );
                 match hindsight_retain(
                     &client,
                     HindsightRetainRequest {
                         base: &base,
                         bank: &bank,
-                        api_key: &cfg.api_key,
+                        api_key: &config.api_key,
                         content,
-                        context: ctx,
-                        async_mode: cfg.retain_async,
-                        retain_tags: &retain_tags,
-                        observation_scopes: cfg.observation_scopes.as_ref(),
+                        context,
+                        async_mode: false,
+                        retain_tags: &tags,
+                        observation_scopes: config.observation_scopes.as_ref(),
                     },
                 ) {
                     Ok(()) => json!({"result": "Memory stored successfully."}).to_string(),
-                    Err(e) => json!({"error": e}).to_string(),
+                    Err(error) => json!({"error": error}).to_string(),
                 }
             }
             "hindsight_recall" => {
-                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
@@ -648,60 +690,151 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     HindsightRecallRequest {
                         base: &base,
                         bank: &bank,
-                        api_key: &cfg.api_key,
+                        api_key: &config.api_key,
                         query,
-                        budget: &cfg.budget,
-                        max_tokens: cfg.recall_max_tokens,
-                        recall_types: &cfg.recall_types,
+                        budget: &config.budget,
+                        max_tokens: config.recall_max_tokens,
+                        recall_types: &config.recall_types,
                     },
                 ) {
                     Ok(text) if !text.is_empty() => json!({"result": text}).to_string(),
                     Ok(_) => json!({"result": "No relevant memories found."}).to_string(),
-                    Err(e) => json!({"error": e}).to_string(),
+                    Err(error) => json!({"error": error}).to_string(),
                 }
             }
             "hindsight_reflect" => {
-                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
-                match hindsight_reflect(&client, &base, &bank, &cfg.api_key, query, &cfg.budget) {
+                match hindsight_reflect(&client, &base, &bank, &config.api_key, query, &config.budget)
+                {
                     Ok(text) if !text.is_empty() => json!({"result": text}).to_string(),
                     Ok(_) => json!({"result": "No relevant memories found."}).to_string(),
-                    Err(e) => json!({"error": e}).to_string(),
+                    Err(error) => json!({"error": error}).to_string(),
                 }
             }
-            _ => json!({"error": format!("Unknown tool: {}", tool_name)}).to_string(),
+            _ => json!({"error": format!("Unknown tool: {tool_name}")}).to_string(),
         }
     }
 
-    fn on_turn_start(&self, turn_number: u32, _message: &str) {
-        *self.turn_counter.lock().unwrap() = turn_number;
-    }
-
-    fn on_session_end(&self, _messages: &[Value]) {
-        self.flush_pending_turns("session_end");
-        tracing::debug!("Hindsight session end");
-    }
-
-    fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
-        let new_session_id = new_session_id.trim();
-        if new_session_id.is_empty() {
-            return;
+    fn on_turn_start(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        turn_number: u32,
+        _message: &str,
+    ) {
+        if self.is_bound_to(filter) {
+            *self.turn_counter.lock() = turn_number;
         }
-        self.flush_pending_turns("session_switch");
-        *self.prefetch_result.lock().unwrap() = String::new();
-        *self.session_id.lock().unwrap() = new_session_id.to_string();
-        *self.document_id.lock().unwrap() = scoped_document_id(new_session_id);
-        *self.turn_counter.lock().unwrap() = 0;
-        *self.retain_batch_counter.lock().unwrap() = 0;
-        self.session_turns.lock().unwrap().clear();
-        tracing::debug!(
-            "Hindsight session switch: new_session={} parent={} reset={}",
-            new_session_id,
-            parent_session_id,
-            reset
-        );
+    }
+
+    fn on_session_end(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _messages: &[Value],
+    ) {
+        if self.is_bound_to(filter) {
+            self.flush_pending_turns("session_end");
+        }
+    }
+
+    fn on_session_switch(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        reset: bool,
+    ) {
+        if self.is_bound_to(filter) {
+            self.flush_pending_turns("session_switch");
+            if reset {
+                self.clear_local_residue();
+            }
+        }
+    }
+
+    fn export_subject(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _actor: &MemoryAuditActor,
+        _sink: &mut dyn MemoryExportSink,
+    ) -> Result<MemoryExportReceipt, MemoryProviderGovernanceError> {
+        // Hindsight's current API can report a count but cannot enumerate a
+        // stable snapshot with content-hash IDs and ordered cursors. A
+        // count-only export must never be treated as an export.
+        Err(MemoryProviderGovernanceError::unsupported(
+            self.name(),
+            MemoryGovernanceOperation::Export,
+        ))
+    }
+
+    fn forget_subject(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryForgetReceipt, MemoryProviderGovernanceError> {
+        let config = self
+            .config_for(filter)
+            .ok_or_else(|| hindsight_governance_error(MemoryGovernanceOperation::Forget))?;
+        let client = hindsight_governance_client(&config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Forget))?;
+        let deleted = hindsight_list_memory_count(&client, &config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Forget))?
+            .unwrap_or(0);
+        hindsight_delete_bank(&client, &config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Forget))?;
+        self.clear_local_residue();
+        if hindsight_bank_exists(&client, &config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Readback))?
+        {
+            return Err(hindsight_governance_error(MemoryGovernanceOperation::Forget));
+        }
+        Ok(MemoryForgetReceipt::new("hindsight", filter.clone(), deleted))
+    }
+
+    fn retention_sweep(
+        &self,
+        _subject: &MemorySubject,
+        _filter: &MemorySubjectStorageKey,
+        _policy: &MemoryRetentionPolicy,
+        _actor: &MemoryAuditActor,
+    ) -> Result<MemoryRetentionReceipt, MemoryProviderGovernanceError> {
+        // The documented API supports only whole-bank or fact-type deletion.
+        // It cannot prove a max-age/max-records sweep without over-deleting.
+        Err(MemoryProviderGovernanceError::unsupported(
+            "hindsight",
+            MemoryGovernanceOperation::RetentionSweep,
+        ))
+    }
+
+    fn verify_subject_absent(
+        &self,
+        _subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<MemoryReadbackReceipt, MemoryProviderGovernanceError> {
+        let config = self
+            .config_for(filter)
+            .ok_or_else(|| hindsight_governance_error(MemoryGovernanceOperation::Readback))?;
+        let client = hindsight_governance_client(&config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Readback))?;
+        let exists = hindsight_bank_exists(&client, &config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Readback))?;
+        if !exists {
+            return Ok(MemoryReadbackReceipt::absent("hindsight", filter.clone()));
+        }
+        let count = hindsight_list_memory_count(&client, &config)
+            .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Readback))?
+            .unwrap_or(0)
+            .max(1);
+        Ok(MemoryReadbackReceipt::residual(
+            "hindsight",
+            filter.clone(),
+            count,
+        ))
     }
 
     fn shutdown(&self) {
@@ -714,8 +847,8 @@ impl MemoryProviderPlugin for HindsightPlugin {
             {"key": "mode", "description": "Connection mode. Legacy local/local_embedded values are treated as local_external in the Rust runtime.", "default": "cloud", "choices": ["cloud", "local_external"]},
             {"key": "api_url", "description": "Hindsight API URL", "default": DEFAULT_API_URL},
             {"key": "api_key", "description": "Hindsight API key", "secret": true, "env_var": "HINDSIGHT_API_KEY", "url": "https://ui.hindsight.vectorize.io"},
-            {"key": "bank_id", "description": "Memory bank name", "default": "hermes"},
-            {"key": "bank_id_template", "description": "Optional dynamic bank template with placeholders: {profile}, {workspace}, {platform}, {user}, {session}", "default": ""},
+            {"key": "bank_id", "description": "Optional bank namespace; the runtime appends the authenticated opaque subject key", "default": "subject"},
+            {"key": "bank_id_template", "description": "Optional bank namespace template with placeholders: {profile}, {workspace}, {platform}; the authenticated subject key is always appended", "default": ""},
             {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": DEFAULT_TIMEOUT_SECS},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "recall_types", "description": "Fact types returned by recall", "default": DEFAULT_RECALL_TYPE},
@@ -789,6 +922,91 @@ fn sanitize_bank_segment(value: &str) -> String {
         }
     }
     out.trim_matches(|c| c == '-' || c == '_').to_string()
+}
+
+fn subject_scoped_bank_id(namespace: &str, filter: &MemorySubjectStorageKey) -> String {
+    let namespace = sanitize_bank_segment(namespace);
+    let namespace = if namespace.is_empty() {
+        "subject"
+    } else {
+        namespace.as_str()
+    };
+    format!("{namespace}--{}", filter.as_str())
+}
+
+fn hindsight_governance_error(operation: MemoryGovernanceOperation) -> MemoryProviderGovernanceError {
+    MemoryProviderGovernanceError::failed("hindsight", operation)
+}
+
+fn hindsight_governance_client(config: &HindsightConfig) -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(config.timeout_secs))
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+fn hindsight_bank_base(config: &HindsightConfig) -> String {
+    format!(
+        "{}/v1/default/banks/{}",
+        config.api_url.trim_end_matches('/'),
+        urlencode_path(&config.bank_id)
+    )
+}
+
+fn hindsight_list_memory_count(
+    client: &Client,
+    config: &HindsightConfig,
+) -> Result<Option<u64>, String> {
+    let url = format!("{}/memories/list", hindsight_bank_base(config));
+    let mut request = client.get(url);
+    if !config.api_key.is_empty() {
+        request = request.bearer_auth(&config.api_key);
+    }
+    let response = request.send().map_err(|error| error.to_string())?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("Hindsight list memories HTTP {}", response.status()));
+    }
+    let body = response.json::<Value>().map_err(|error| error.to_string())?;
+    let items = body
+        .as_array()
+        .or_else(|| body.get("items").and_then(Value::as_array))
+        .ok_or_else(|| "Hindsight list memories response had no item list".to_string())?;
+    Ok(Some(items.len() as u64))
+}
+
+fn hindsight_bank_exists(client: &Client, config: &HindsightConfig) -> Result<bool, String> {
+    let url = format!("{}/profile", hindsight_bank_base(config));
+    let mut request = client.get(url);
+    if !config.api_key.is_empty() {
+        request = request.bearer_auth(&config.api_key);
+    }
+    let response = request.send().map_err(|error| error.to_string())?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if response.status().is_success() {
+        Ok(true)
+    } else {
+        Err(format!("Hindsight bank profile HTTP {}", response.status()))
+    }
+}
+
+
+fn hindsight_delete_bank(client: &Client, config: &HindsightConfig) -> Result<(), String> {
+    let url = hindsight_bank_base(config);
+    let mut request = client.delete(url);
+    if !config.api_key.is_empty() {
+        request = request.bearer_auth(&config.api_key);
+    }
+    let response = request.send().map_err(|error| error.to_string())?;
+    if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND {
+        Ok(())
+    } else {
+        Err(format!("Hindsight delete bank HTTP {}", response.status()))
+    }
 }
 
 fn resolve_bank_id_template(
@@ -997,71 +1215,61 @@ fn hindsight_sync_turn_body(
 
 fn retain_hindsight_turns(
     cfg: &HindsightConfig,
-    session_id: &str,
+    subject_key: &str,
     fallback_document_id: &str,
     turns: &[String],
     reason: &str,
-) {
+) -> Result<(), String> {
     if turns.is_empty() {
-        return;
+        return Ok(());
     }
-    let client = match Client::builder()
+    let client = Client::builder()
         .timeout(Duration::from_secs(cfg.timeout_secs))
         .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::debug!("Hindsight sync client: {}", e);
-            return;
-        }
-    };
+        .map_err(|error| format!("Hindsight sync client: {error}"))?;
     let base = cfg.api_url.trim_end_matches('/').to_string();
     let bank = urlencode_path(&cfg.bank_id);
     let (document_id, update_mode) = hindsight_retain_target(
         &client,
         &base,
         &cfg.api_key,
-        session_id,
+        subject_key,
         fallback_document_id,
     );
     let content = format!("[{}]", turns.join(","));
     let url = format!("{}/v1/default/banks/{}/memories", base, bank);
-    let lineage_tags = nonempty_str(session_id)
-        .map(|session_id| vec![format!("session:{session_id}")])
+    let lineage_tags = nonempty_str(subject_key)
+        .map(|key| vec![format!("subject:{key}")])
         .unwrap_or_default();
     let retain_tags = merge_retain_tags(&cfg.retain_tags, &lineage_tags);
     let body = hindsight_sync_turn_body(
         &content,
         &cfg.retain_context,
-        cfg.retain_async,
+        false,
         nonempty_str(&document_id),
         update_mode,
         &retain_tags,
         cfg.observation_scopes.as_ref(),
     );
-    let mut req = client.post(&url).json(&body);
+    let mut request = client.post(&url).json(&body);
     if !cfg.api_key.is_empty() {
-        req = req.bearer_auth(&cfg.api_key);
+        request = request.bearer_auth(&cfg.api_key);
     }
-    match req.send() {
-        Ok(resp) if resp.status().is_success() => {
+    match request.send() {
+        Ok(response) if response.status().is_success() => {
             tracing::debug!(
-                "Hindsight retain_batch ok for session {} (reason={}, turns={}, update_mode={:?})",
-                session_id,
-                reason,
+                "Hindsight retain_batch accepted for authenticated subject (reason={reason}, turns={}, update_mode={update_mode:?})",
                 turns.len(),
-                update_mode
             );
+            Ok(())
         }
-        Ok(resp) => {
-            tracing::debug!(
-                "Hindsight retain_batch HTTP {} for session {} (reason={})",
-                resp.status(),
-                session_id,
-                reason
-            );
-        }
-        Err(e) => tracing::debug!("Hindsight retain_batch error (reason={}): {}", reason, e),
+        Ok(response) => Err(format!(
+            "Hindsight retain_batch HTTP {} (reason={reason})",
+            response.status(),
+        )),
+        Err(error) => Err(format!(
+            "Hindsight retain_batch request failed (reason={reason}): {error}",
+        )),
     }
 }
 
@@ -1069,12 +1277,12 @@ fn hindsight_retain_target(
     client: &Client,
     base: &str,
     api_key: &str,
-    session_id: &str,
+    subject_key: &str,
     fallback_document_id: &str,
 ) -> (String, Option<&'static str>) {
-    let stable_session = session_id.trim();
-    if !stable_session.is_empty() && hindsight_api_supports_append(client, base, api_key) {
-        (stable_session.to_string(), Some("append"))
+    let key = subject_key.trim();
+    if !key.is_empty() && hindsight_api_supports_append(client, base, api_key) {
+        (key.to_string(), Some("append"))
     } else {
         (fallback_document_id.to_string(), None)
     }
@@ -1086,7 +1294,7 @@ fn hindsight_api_supports_append(client: &Client, base: &str, api_key: &str) -> 
         return false;
     }
     let cache = APPEND_CAPABILITY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(cached) = cache.lock().unwrap().get(&base).copied() {
+    if let Some(cached) = cache.lock().get(&base).copied() {
         return cached;
     }
 
@@ -1109,7 +1317,7 @@ fn hindsight_api_supports_append(client: &Client, base: &str, api_key: &str) -> 
         });
     let supported =
         hindsight_version_meets_minimum(version.as_deref(), MIN_VERSION_FOR_UPDATE_MODE_APPEND);
-    cache.lock().unwrap().insert(base.clone(), supported);
+    cache.lock().insert(base.clone(), supported);
     if !supported {
         tracing::warn!(
             "Hindsight API at {} does not report {}+ append support; using unique batch document ids",

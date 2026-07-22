@@ -1,14 +1,18 @@
 {
+  "authority": {
+    "capability_promotion_authoritative": false,
+    "production_complete": false
+  },
   "delta_from_previous_entry": {
-    "coverage_manifest_entries": 51.0,
-    "covered_behavior_rows": 51.0,
-    "queue_pending": 0.0,
-    "rust_test_functions": 3624.0,
-    "sota_direct_rust_tests": 0.0,
-    "sota_fault_scenarios": 0.0,
-    "sota_protocol_cases": 0.0,
-    "sota_workflow_replay_steps": 4.0,
-    "tracked_behavior_rows": 51.0
+    "coverage_manifest_entries": 7.0,
+    "covered_behavior_rows": 7.0,
+    "fixture_reference_fault_scenarios": 6.0,
+    "fixture_reference_protocol_cases": 7.0,
+    "fixture_reference_rust_tests": 12.0,
+    "fixture_reference_workflow_replay_steps": 9.0,
+    "queue_pending": 1067.0,
+    "rust_test_functions": 158.0,
+    "tracked_behavior_rows": 7.0
   },
   "entries": [
     {
@@ -120,38 +124,73 @@
       "tracked_behavior_coverage_ratio": 1.0,
       "tracked_behavior_rows": 470,
       "upstream_head": "048270fa069ff6aa41c01b403ac1eeab34b29628"
+    },
+    {
+      "ci_gate_pass": false,
+      "coverage_manifest_entries": 467,
+      "covered_behavior_rows": 477,
+      "fixture_reference_category_coverage_ratio": 1.0,
+      "fixture_reference_critical_gaps": 0,
+      "fixture_reference_fault_scenarios": 6,
+      "fixture_reference_missing_rust_test_refs": 0,
+      "fixture_reference_protocol_cases": 7,
+      "fixture_reference_rust_tests": 12,
+      "fixture_reference_workflow_replay_steps": 9,
+      "local_head": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27+worktree",
+      "missing_rust_test_refs": 0,
+      "queue_pending": 1067,
+      "queue_total": 1067,
+      "recorded_at_utc": "2026-07-19T00:53:42.936681+00:00",
+      "release_gate_pass": false,
+      "rust_test_functions": 7412,
+      "tracked_behavior_coverage_ratio": 1.0,
+      "tracked_behavior_rows": 477,
+      "upstream_head": "0f102fa4dc04b7dfdab048169aaaa640d09d7523"
     }
   ],
-  "generated_at_utc": "2026-07-03T20:16:19.312613+00:00",
+  "generated_at_utc": "2026-07-19T00:53:42.937304+00:00",
   "latest": {
     "ci_gate_pass": false,
-    "coverage_manifest_entries": 460,
-    "covered_behavior_rows": 470,
-    "local_head": "977d4afe0031323843f69812f0ffc3b06aee2eaf+worktree",
+    "coverage_manifest_entries": 467,
+    "covered_behavior_rows": 477,
+    "fixture_reference_category_coverage_ratio": 1.0,
+    "fixture_reference_critical_gaps": 0,
+    "fixture_reference_fault_scenarios": 6,
+    "fixture_reference_missing_rust_test_refs": 0,
+    "fixture_reference_protocol_cases": 7,
+    "fixture_reference_rust_tests": 12,
+    "fixture_reference_workflow_replay_steps": 9,
+    "local_head": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27+worktree",
     "missing_rust_test_refs": 0,
-    "queue_pending": 0,
-    "queue_total": 8262,
-    "recorded_at_utc": "2026-07-03T20:16:19.311890+00:00",
-    "release_gate_pass": true,
-    "rust_test_functions": 7254,
-    "sota_critical_gaps": 0,
-    "sota_direct_rust_tests": 12,
-    "sota_domain_coverage_ratio": 1.0,
-    "sota_fault_scenarios": 6,
-    "sota_missing_rust_test_refs": 0,
-    "sota_protocol_cases": 7,
-    "sota_workflow_replay_steps": 9,
+    "queue_pending": 1067,
+    "queue_total": 1067,
+    "recorded_at_utc": "2026-07-19T00:53:42.936681+00:00",
+    "release_gate_pass": false,
+    "rust_test_functions": 7412,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 470,
-    "upstream_head": "048270fa069ff6aa41c01b403ac1eeab34b29628"
+    "tracked_behavior_rows": 477,
+    "upstream_head": "0f102fa4dc04b7dfdab048169aaaa640d09d7523"
   },
-  "purpose": "Track parity coverage and SOTA harness movement over time.",
-  "schema_version": 1,
+  "purpose": "Track parity coverage and fixture-reference harness hygiene over time.",
+  "schema_version": 2,
+  "scope": {
+    "authoritative_for": [
+      "fixture/reference regression coverage",
+      "referenced Rust test existence"
+    ],
+    "coverage_kind": "fixture_reference_regression",
+    "not_evidence_of": [
+      "implemented production capability",
+      "executable protocol behavior",
+      "executable client behavior",
+      "executable chaos behavior"
+    ]
+  },
   "source_artifacts": {
+    "fixture_reference_matrix": "docs/parity/sota-harness-matrix.json",
     "global_parity_proof": "docs/parity/global-parity-proof.json",
     "harness_budget": "docs/parity/harness-budget.json",
     "harness_trend_ledger": "docs/parity/harness-trend-ledger.json",
-    "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
     "test_coverage_audit": "docs/parity/test-coverage-audit.json",
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   }

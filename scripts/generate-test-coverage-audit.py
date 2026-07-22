@@ -36,8 +36,8 @@ HARNESS_HARDENING_MOVES = [
         ],
     },
     {
-        "title": "Cross-version harness budget",
-        "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
+        "title": "Cross-version fixture-reference hygiene budget",
+        "rationale": "Record runtime and fixture-reference hygiene budgets across releases so regression coverage growth stays deterministic, bounded, and reviewable; this does not establish capability promotion.",
         "artifacts": [
             "docs/parity/harness-budget.json",
             "docs/parity/harness-budget.md",
@@ -304,9 +304,9 @@ def render_md(payload: dict[str, Any]) -> str:
     else:
         lines.append("- none")
     lines.append("")
-    lines.append("## Completed Sigma Harness Moves")
+    lines.append("## Completed Harness Moves")
     lines.append("")
-    completed_moves = payload.get("completed_sigma_harness_moves", [])
+    completed_moves = payload.get("completed_harness_moves", [])
     if completed_moves:
         for item in completed_moves:
             artifacts = ", ".join(f"`{path}`" for path in item["artifacts"])
@@ -314,9 +314,9 @@ def render_md(payload: dict[str, Any]) -> str:
     else:
         lines.append("- none")
     lines.append("")
-    lines.append("## Next Sigma Harness Moves")
+    lines.append("## Next Harness Moves")
     lines.append("")
-    next_moves = payload["next_sigma_harness_moves"]
+    next_moves = payload["next_harness_moves"]
     if next_moves:
         for item in next_moves:
             lines.append(f"- **{item['title']}**: {item['rationale']}")
@@ -535,10 +535,10 @@ def main() -> int:
         "coverage_manifests": manifest_rows,
         "critical_gaps": critical_gaps,
         "advisory_gaps": advisory_gaps,
-        "completed_sigma_harness_moves": [
+        "completed_harness_moves": [
             row for row in hardening_moves if row["status"] == "complete"
         ],
-        "next_sigma_harness_moves": [
+        "next_harness_moves": [
             row for row in hardening_moves if row["status"] == "pending"
         ],
     }

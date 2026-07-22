@@ -1,17 +1,17 @@
 //! Skill orchestrator and slash command system.
 //!
-//! Scans `~/.hermes/skills/` for SKILL.md files, builds a `/command` → skill
-//! mapping, and provides helpers for invoking skills via slash commands and
-//! preloading skills for session-wide use.
-//!
-//! Corresponds to Python `agent/skill_commands.py`.
+//! Resolves only v2 lock-backed skill packages through the shared trust store,
+//! builds a `/command` → verified package mapping, and provides helpers for
+//! slash invocation and session-wide preloading.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use hermes_core::types::Skill;
-use hermes_skills::SkillGuard;
+use hermes_tools::skill_utils::{
+    discover_verified_skills, reload_verified_skill, render_skill_provenance_tag, SkillInfo,
+    SkillTrustIdentity, SkillTrustRuntime,
+};
 use regex::Regex;
 
 // ---------------------------------------------------------------------------
@@ -77,17 +77,16 @@ fn extract_bundle_user_instruction(message: &str) -> Option<String> {
 // Types
 // ---------------------------------------------------------------------------
 
-/// Information about a registered skill command.
+/// Information about a registered, currently verified skill command.
 #[derive(Debug, Clone)]
 pub struct SkillCommandInfo {
-    /// Original skill name from frontmatter.
+    /// Canonical package name from the verified manifest.
     pub name: String,
-    /// Short description.
+    /// Short description from verified package frontmatter.
     pub description: String,
-    /// Path to the SKILL.md file.
-    pub skill_md_path: PathBuf,
-    /// Directory containing the skill.
-    pub skill_dir: PathBuf,
+    /// Typed immutable package identity included in prompt evidence.
+    pub provenance: SkillTrustIdentity,
+    verified_skill: SkillInfo,
 }
 
 /// Parsed SKILL.md frontmatter.
@@ -165,28 +164,20 @@ fn slugify_skill_name(name: &str) -> String {
     deduped.trim_matches('-').to_string()
 }
 
-fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
-    let probe = Skill {
-        name: name.to_string(),
-        content: body.to_string(),
-        category: Some("external".to_string()),
-        description: None,
-    };
-    SkillGuard::default()
-        .scan_security_only(&probe)
-        .map_err(|e| e.to_string())
-}
 
 // ---------------------------------------------------------------------------
 // SkillOrchestrator
 // ---------------------------------------------------------------------------
 
-/// Manages skill discovery, slash command resolution, and skill invocation.
+/// Manages verified package cataloging, slash command resolution, and prompt
+/// construction. The core verifier is consulted again before every load.
 pub struct SkillOrchestrator {
-    /// Mapping from `/command-name` to skill info.
+    /// Mapping from `/command-name` to verified skill info.
     commands: HashMap<String, SkillCommandInfo>,
-    /// Base skills directory (typically `~/.hermes/skills/`).
+    /// Actual v2 skill root.
     skills_dir: PathBuf,
+    /// Core verifier context; absent context fails closed.
+    trust_runtime: Option<SkillTrustRuntime>,
     /// Explicit allow-list of skill identifiers (`name` and `/command` forms).
     enabled: HashSet<String>,
     /// Explicit deny-list of skill identifiers (`name` and `/command` forms).
@@ -238,40 +229,54 @@ fn emit_security_skip_summary(skips: &HashMap<String, Vec<String>>) {
 }
 
 impl SkillOrchestrator {
-    /// Create a new orchestrator with the given skills directory.
+    /// Create an orchestrator with a fail-closed verifier context.
     pub fn new(skills_dir: impl Into<PathBuf>) -> Self {
         Self {
             commands: HashMap::new(),
             skills_dir: skills_dir.into(),
+            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
             enabled: HashSet::new(),
             disabled: HashSet::new(),
         }
     }
 
-    /// Create an orchestrator using the default `~/.hermes/skills/` directory.
-    pub fn default_dir() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        Self::new(home.join(".hermes").join("skills"))
+    /// Inject a runtime-owned verifier context (for trusted keys, embedded
+    /// manifests, or deterministic tests) without accepting a source label as
+    /// evidence.
+    pub fn with_trust_runtime(
+        skills_dir: impl Into<PathBuf>,
+        trust_runtime: SkillTrustRuntime,
+    ) -> Self {
+        let mut orchestrator = Self::new(skills_dir);
+        orchestrator.trust_runtime = Some(trust_runtime);
+        orchestrator
     }
 
-    /// Scan the skills directory and build the command mapping.
-    ///
-    /// Returns a reference to the updated commands map.
+
+    /// Build the command mapping from fresh v2 lock admissions. Missing,
+    /// legacy, tampered, revoked, incompatible, or quarantined packages never
+    /// enter `commands`.
     pub fn scan_skill_commands(&mut self) -> &HashMap<String, SkillCommandInfo> {
         self.commands.clear();
-
-        if !self.skills_dir.exists() {
-            return &self.commands;
-        }
-
         let mut seen_names = std::collections::HashSet::new();
         let mut security_skips: HashMap<String, Vec<String>> = HashMap::new();
+        let Some(trust) = self.trust_runtime.clone() else {
+            record_security_skip(
+                &mut security_skips,
+                "<skill-store>",
+                "no core skill trust verifier is configured",
+            );
+            emit_security_skip_summary(&security_skips);
+            return &self.commands;
+        };
 
-        self.scan_directory(
-            &self.skills_dir.clone(),
-            &mut seen_names,
-            &mut security_skips,
-        );
+        let catalog = discover_verified_skills(&[self.skills_dir.clone()], &trust);
+        for rejection in catalog.blocked {
+            record_security_skip(&mut security_skips, &rejection.name, &rejection.reason);
+        }
+        for skill in catalog.available {
+            self.register_verified_skill(skill, &mut seen_names, &mut security_skips);
+        }
         emit_security_skip_summary(&security_skips);
 
         &self.commands
@@ -310,102 +315,64 @@ impl SkillOrchestrator {
         self.enabled.contains(&name_key) || self.enabled.contains(&cmd_key)
     }
 
-    /// Recursively scan a directory for SKILL.md files.
-    fn scan_directory(
+    /// Register a package that has already passed the core verifier. The
+    /// frontmatter can describe it, but cannot rename or authorize it.
+    fn register_verified_skill(
         &mut self,
-        dir: &Path,
+        skill: SkillInfo,
         seen_names: &mut std::collections::HashSet<String>,
         security_skips: &mut HashMap<String, Vec<String>>,
     ) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-
-            // Skip hidden directories
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.') {
-                    continue;
-                }
-            }
-
-            if path.is_dir() {
-                // Check for SKILL.md in this directory
-                let skill_md = path.join("SKILL.md");
-                if skill_md.exists() {
-                    self.register_skill(&skill_md, seen_names, security_skips);
-                }
-                // Also recurse into subdirectories
-                self.scan_directory(&path, seen_names, security_skips);
-            }
-        }
-    }
-
-    /// Register a single SKILL.md file.
-    fn register_skill(
-        &mut self,
-        skill_md_path: &Path,
-        seen_names: &mut std::collections::HashSet<String>,
-        security_skips: &mut HashMap<String, Vec<String>>,
-    ) {
-        let content = match std::fs::read_to_string(skill_md_path) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        let (frontmatter, body) = parse_frontmatter(&content);
-
-        let name = frontmatter.name.unwrap_or_else(|| {
-            skill_md_path
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string()
-        });
-
-        if seen_names.contains(&name) {
+        if !skill.is_verified() {
+            record_security_skip(
+                security_skips,
+                &skill.name,
+                "skill lacks a verified package locator",
+            );
             return;
         }
-        seen_names.insert(name.clone());
+        let name = skill.name.clone();
+        if !seen_names.insert(name.clone()) {
+            record_security_skip(
+                security_skips,
+                &name,
+                "duplicate canonical package name in verified catalog",
+            );
+            return;
+        }
 
-        let description = frontmatter.description.unwrap_or_else(|| {
-            // Use first non-heading, non-empty line from body
-            body.lines()
-                .map(|l| l.trim())
-                .find(|l| !l.is_empty() && !l.starts_with('#'))
-                .map(|l| l.chars().take(80).collect())
-                .unwrap_or_else(|| format!("Invoke the {} skill", name))
-        });
+        let description = skill
+            .frontmatter
+            .get("description")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                skill
+                    .body
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty() && !line.starts_with('#'))
+                    .map(|line| line.chars().take(80).collect())
+                    .unwrap_or_else(|| format!("Invoke the {} skill", name))
+            });
 
         let cmd_name = slugify_skill_name(&name);
         if cmd_name.is_empty() {
+            record_security_skip(security_skips, &name, "empty canonical command slug");
             return;
         }
         if !self.is_skill_allowed(&name, &cmd_name) {
-            tracing::debug!("Skipping skill '{}' due to enabled/disabled filters", name);
+            tracing::debug!("Skipping verified skill '{}' due to enabled/disabled filters", name);
             return;
         }
-        if let Err(err) = security_gate_skill_content(&name, body) {
-            record_security_skip(security_skips, &name, &err);
-            return;
-        }
-
-        let skill_dir = skill_md_path
-            .parent()
-            .unwrap_or(skill_md_path)
-            .to_path_buf();
 
         self.commands.insert(
             format!("/{cmd_name}"),
             SkillCommandInfo {
                 name,
                 description,
-                skill_md_path: skill_md_path.to_path_buf(),
-                skill_dir,
+                provenance: skill.provenance().clone(),
+                verified_skill: skill,
             },
         );
     }
@@ -415,15 +382,9 @@ impl SkillOrchestrator {
         &self.commands
     }
 
-    /// Return the top-level category folder for a discovered skill.
+    /// Return the verifier-derived category display metadata for a skill.
     pub fn skill_category(&self, info: &SkillCommandInfo) -> Option<String> {
-        info.skill_dir
-            .strip_prefix(&self.skills_dir)
-            .ok()
-            .and_then(|relative| relative.components().next())
-            .and_then(|component| component.as_os_str().to_str())
-            .map(str::to_string)
-            .filter(|category| !category.trim().is_empty())
+        info.verified_skill.category().map(str::to_string)
     }
 
     /// Resolve a user-typed `/command` to its canonical key.
@@ -441,35 +402,37 @@ impl SkillOrchestrator {
         }
     }
 
-    /// Build the user message content for a skill slash command invocation.
+    /// Build the user message content for a freshly reverified skill slash
+    /// invocation.
     pub fn build_skill_invocation_message(
         &self,
         cmd_key: &str,
         user_instruction: &str,
     ) -> Option<String> {
         let info = self.commands.get(cmd_key)?;
-
-        let content = match std::fs::read_to_string(&info.skill_md_path) {
-            Ok(c) => c,
-            Err(_) => return Some(format!("[Failed to load skill: {}]", info.name)),
+        let trust = self.trust_runtime.as_ref()?;
+        let loaded = match reload_verified_skill(&info.verified_skill, trust) {
+            Ok(skill) => skill,
+            Err(error) => {
+                tracing::warn!(
+                    skill = %info.name,
+                    error = %error,
+                    "blocked skill invocation after fresh trust verification"
+                );
+                return None;
+            }
         };
-
-        let (_, body) = parse_frontmatter(&content);
-        if let Err(err) = security_gate_skill_content(&info.name, body) {
-            return Some(format!(
-                "[Blocked skill '{}' by security policy: {}]",
-                info.name, err
-            ));
-        }
 
         let mut parts = vec![
             format!(
                 "[SYSTEM: The user has invoked the \"{}\" skill, indicating they want \
                  you to follow its instructions. The full skill content is loaded below.]",
-                info.name
+                loaded.name
             ),
             String::new(),
-            body.trim().to_string(),
+            render_skill_provenance_tag(loaded.provenance()),
+            String::new(),
+            loaded.body.trim().to_string(),
         ];
 
         if !user_instruction.is_empty() {
@@ -483,9 +446,11 @@ impl SkillOrchestrator {
         Some(parts.join("\n"))
     }
 
-    /// Load multiple skills for session-wide preloading.
+    /// Load multiple verified packages for session-wide preloading.
     ///
-    /// Returns (prompt_text, loaded_skill_names, missing_identifiers).
+    /// Returns (prompt_text, loaded_skill_names, missing_identifiers). Every
+    /// selected package is reverified against the current lock, revocations,
+    /// compatibility, scan, and content digest immediately before injection.
     pub fn build_preloaded_skills_prompt(
         &self,
         identifiers: &[String],
@@ -494,50 +459,53 @@ impl SkillOrchestrator {
         let mut loaded_names = Vec::new();
         let mut missing = Vec::new();
         let mut seen = std::collections::HashSet::new();
+        let Some(trust) = self.trust_runtime.as_ref() else {
+            missing.extend(
+                identifiers
+                    .iter()
+                    .map(|identifier| identifier.trim())
+                    .filter(|identifier| !identifier.is_empty())
+                    .map(str::to_string),
+            );
+            return (String::new(), loaded_names, missing);
+        };
 
         for identifier in identifiers {
             let identifier = identifier.trim();
-            if identifier.is_empty() || seen.contains(identifier) {
+            if identifier.is_empty() || !seen.insert(identifier.to_string()) {
                 continue;
             }
-            seen.insert(identifier.to_string());
 
-            // Try to resolve as a command key
             let cmd_key = self.resolve_skill_command_key(identifier);
-            let info = cmd_key.as_ref().and_then(|k| self.commands.get(k));
+            let info = cmd_key.as_ref().and_then(|key| self.commands.get(key));
 
             match info {
-                Some(info) => {
-                    let content = match std::fs::read_to_string(&info.skill_md_path) {
-                        Ok(c) => c,
-                        Err(_) => {
-                            missing.push(identifier.to_string());
-                            continue;
-                        }
-                    };
-                    let (_, body) = parse_frontmatter(&content);
-                    if let Err(err) = security_gate_skill_content(&info.name, body) {
+                Some(info) => match reload_verified_skill(&info.verified_skill, trust) {
+                    Ok(loaded) => {
+                        let activation = format!(
+                            "[SYSTEM: The user launched this CLI session with the \"{}\" skill \
+                             preloaded. Treat its instructions as active guidance for the duration \
+                             of this session unless the user overrides them.]",
+                            loaded.name
+                        );
+                        prompt_parts.push(format!(
+                            "{}\n{}\n\n{}",
+                            activation,
+                            render_skill_provenance_tag(loaded.provenance()),
+                            loaded.body.trim()
+                        ));
+                        loaded_names.push(loaded.name);
+                    }
+                    Err(error) => {
                         tracing::warn!(
-                            "Skipping preloaded skill '{}' due to security policy: {}",
-                            info.name,
-                            err
+                            skill = %info.name,
+                            error = %error,
+                            "skipping preloaded skill after fresh trust verification"
                         );
                         missing.push(identifier.to_string());
-                        continue;
                     }
-
-                    let activation = format!(
-                        "[SYSTEM: The user launched this CLI session with the \"{}\" skill \
-                         preloaded. Treat its instructions as active guidance for the duration \
-                         of this session unless the user overrides them.]",
-                        info.name
-                    );
-                    prompt_parts.push(format!("{}\n\n{}", activation, body.trim()));
-                    loaded_names.push(info.name.clone());
-                }
-                None => {
-                    missing.push(identifier.to_string());
-                }
+                },
+                None => missing.push(identifier.to_string()),
             }
         }
 
@@ -548,7 +516,108 @@ impl SkillOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use hermes_core::Skill;
+    use hermes_skills::{
+        canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
+        LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
+        SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
+        SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
+        SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
+        SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+    };
+    use std::collections::BTreeMap;
+
+    fn install_attested_local_skill(root: &std::path::Path, name: &str, body: &str, description: &str) {
+        let store = FileSkillStore::new(root.to_path_buf());
+        futures::executor::block_on(store.save(&Skill {
+            name: name.to_string(),
+            content: body.to_string(),
+            category: None,
+            description: Some(description.to_string()),
+        }))
+        .unwrap();
+        let digest = canonical_bundle_digest(&root.join(name)).unwrap();
+        store
+            .attest_local_skill(
+                name,
+                LocalOwnerAttestation::new(
+                    "test-owner",
+                    format!("test-attestation-{name}"),
+                    digest,
+                    "2026-07-20T00:00:00Z",
+                ),
+            )
+            .unwrap();
+    }
+
+    fn install_signed_remote_skill(root: &std::path::Path) -> (SkillTrustRuntime, SkillSigningKey) {
+        let name = "signed-skill";
+        let package_root = root.join(name);
+        std::fs::create_dir_all(&package_root).unwrap();
+        std::fs::write(
+            package_root.join("SKILL.md"),
+            "---\nname: signed-skill\ndescription: Signed fixture\n---\n# Signed\n\n1. Follow verified instructions",
+        )
+        .unwrap();
+        let signer = SkillSigningKey::from_seed([31; 32]);
+        let identity = SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/signed-skill",
+            "publisher.example",
+            "0123456789abcdef0123456789abcdef01234567",
+            canonical_bundle_digest(&package_root).unwrap(),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = SkillPackageManifestV2::new(
+            SkillPackageSource::Remote,
+            identity,
+            SkillPackageProof::RemoteSignature(SkillSignature::ed25519("test-key", "")),
+            full_skill_scan(&package_root),
+            SkillCompatibility::default(),
+            SkillPermissions::default(),
+            Vec::new(),
+        );
+        signer.sign_manifest(&mut manifest, "test-key").unwrap();
+        store_lock(
+            root,
+            &SkillLockV2 {
+                schema_version: SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![SkillLockEntryV2 {
+                    install_path: name.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .unwrap();
+        let verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(vec![signer.trusted_key("test-key", true)]).unwrap(),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        (SkillTrustRuntime::new(verifier), signer)
+    }
+
+    fn revoke_signed_remote_skill(root: &std::path::Path, signer: &SkillSigningKey) {
+        let mut revocations = SignedSkillRevocationList {
+            schema_version: SKILL_REVOCATION_SCHEMA_VERSION,
+            issued_at: "2026-07-20T00:00:00Z".to_string(),
+            signature: None,
+            revoked: vec![SkillRevocation {
+                name: Some("signed-skill".to_string()),
+                publisher_id: None,
+                immutable_source_revision: None,
+                content_digest: None,
+                key_id: None,
+                reason: "fixture revocation".to_string(),
+                revoked_at: "2026-07-20T00:00:00Z".to_string(),
+            }],
+        };
+        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        store_revocations(root, &revocations).unwrap();
+    }
 
     #[test]
     fn test_parse_frontmatter_with_yaml() {
@@ -577,48 +646,41 @@ mod tests {
 
     #[test]
     fn test_resolve_skill_command_key() {
-        let mut orch = SkillOrchestrator::new("/tmp/nonexistent");
-        orch.commands.insert(
-            "/my-skill".to_string(),
-            SkillCommandInfo {
-                name: "my-skill".to_string(),
-                description: "test".to_string(),
-                skill_md_path: PathBuf::from("/tmp/skill/SKILL.md"),
-                skill_dir: PathBuf::from("/tmp/skill"),
-            },
+        let tmp = tempfile::tempdir().unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "my-skill",
+            "# My skill\n\n1. Follow the skill",
+            "test",
         );
+        let mut orch = SkillOrchestrator::new(tmp.path());
+        orch.scan_skill_commands();
 
-        // Exact match
         assert_eq!(
             orch.resolve_skill_command_key("my-skill"),
             Some("/my-skill".to_string())
         );
-        // Underscore → hyphen normalization
         assert_eq!(
             orch.resolve_skill_command_key("my_skill"),
             Some("/my-skill".to_string())
         );
-        // With leading slash
         assert_eq!(
             orch.resolve_skill_command_key("/my-skill"),
             Some("/my-skill".to_string())
         );
-        // Non-existent
         assert!(orch.resolve_skill_command_key("nonexistent").is_none());
-        // Empty
         assert!(orch.resolve_skill_command_key("").is_none());
     }
 
     #[test]
     fn test_scan_skill_commands() {
         let tmp = tempfile::tempdir().unwrap();
-        let skill_dir = tmp.path().join("test-skill");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: test-skill\ndescription: A test\n---\n# Test\nDo the thing.",
-        )
-        .unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "test-skill",
+            "# Test\n\n1. Do the thing",
+            "A test",
+        );
 
         let mut orch = SkillOrchestrator::new(tmp.path());
         orch.scan_skill_commands();
@@ -627,18 +689,19 @@ mod tests {
         let info = &orch.commands["/test-skill"];
         assert_eq!(info.name, "test-skill");
         assert_eq!(info.description, "A test");
+        assert_eq!(info.provenance.source, hermes_skills::SkillPackageSource::LocalAuthored);
+        assert!(!info.provenance.effects_allowed);
     }
 
     #[test]
     fn test_build_skill_invocation_message() {
         let tmp = tempfile::tempdir().unwrap();
-        let skill_dir = tmp.path().join("greet");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: greet\ndescription: Greeting skill\n---\nSay hello to the user.",
-        )
-        .unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "greet",
+            "# Greet\n\n1. Say hello to the user.",
+            "Greeting skill",
+        );
 
         let mut orch = SkillOrchestrator::new(tmp.path());
         orch.scan_skill_commands();
@@ -649,6 +712,63 @@ mod tests {
         assert!(msg.contains("greet"));
         assert!(msg.contains("Say hello to the user."));
         assert!(msg.contains("in French"));
+        assert!(msg.contains("<skill_provenance"));
+    }
+
+    #[test]
+    fn test_tampered_skill_is_denied_after_catalog_before_invocation() {
+        let tmp = tempfile::tempdir().unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "greet",
+            "# Greet\n\n1. Say hello to the user.",
+            "Greeting skill",
+        );
+
+        let mut orch = SkillOrchestrator::new(tmp.path());
+        orch.scan_skill_commands();
+        std::fs::write(
+            tmp.path().join("greet").join("SKILL.md"),
+            "# Greet\n\n1. Inject tampered body",
+        )
+        .unwrap();
+
+        assert!(
+            orch.build_skill_invocation_message("/greet", "in French")
+                .is_none()
+        );
+        let (prompt, loaded, missing) =
+            orch.build_preloaded_skills_prompt(&["greet".to_string()]);
+        assert!(prompt.is_empty());
+        assert!(loaded.is_empty());
+        assert_eq!(missing, vec!["greet"]);
+    }
+
+    #[test]
+    fn signed_orchestrator_package_loads_then_revocation_denies_invoke_and_preload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (trust, signer) = install_signed_remote_skill(tmp.path());
+        let mut orch = SkillOrchestrator::with_trust_runtime(tmp.path(), trust);
+        orch.scan_skill_commands();
+        assert!(orch.commands.contains_key("/signed-skill"));
+        let message = orch
+            .build_skill_invocation_message("/signed-skill", "verify")
+            .expect("signed skill must load");
+        assert!(message.contains("key_id=\"test-key\""));
+        assert!(message.contains("Follow verified instructions"));
+
+        revoke_signed_remote_skill(tmp.path(), &signer);
+        assert!(
+            orch.build_skill_invocation_message("/signed-skill", "verify")
+                .is_none()
+        );
+        let (prompt, loaded, missing) =
+            orch.build_preloaded_skills_prompt(&["signed-skill".to_string()]);
+        assert!(prompt.is_empty());
+        assert!(loaded.is_empty());
+        assert_eq!(missing, vec!["signed-skill"]);
+        orch.scan_skill_commands();
+        assert!(orch.commands.is_empty());
     }
 
     #[test]
@@ -726,13 +846,12 @@ mod tests {
     #[test]
     fn test_build_preloaded_skills_prompt() {
         let tmp = tempfile::tempdir().unwrap();
-        let skill_dir = tmp.path().join("coder");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: coder\ndescription: Coding assistant\n---\nWrite clean code.",
-        )
-        .unwrap();
+        install_attested_local_skill(
+            tmp.path(),
+            "coder",
+            "# Coder\n\n1. Write clean code.",
+            "Coding assistant",
+        );
 
         let mut orch = SkillOrchestrator::new(tmp.path());
         orch.scan_skill_commands();
@@ -744,25 +863,14 @@ mod tests {
         assert_eq!(missing, vec!["nonexistent"]);
         assert!(prompt.contains("Write clean code."));
         assert!(prompt.contains("preloaded"));
+        assert!(prompt.contains("<skill_provenance"));
     }
 
     #[test]
     fn test_scan_skill_commands_respects_disabled_filters() {
         let tmp = tempfile::tempdir().unwrap();
-        let alpha_dir = tmp.path().join("alpha");
-        let beta_dir = tmp.path().join("beta");
-        fs::create_dir_all(&alpha_dir).unwrap();
-        fs::create_dir_all(&beta_dir).unwrap();
-        fs::write(
-            alpha_dir.join("SKILL.md"),
-            "---\nname: alpha\ndescription: Alpha skill\n---\nAlpha body",
-        )
-        .unwrap();
-        fs::write(
-            beta_dir.join("SKILL.md"),
-            "---\nname: beta\ndescription: Beta skill\n---\nBeta body",
-        )
-        .unwrap();
+        install_attested_local_skill(tmp.path(), "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
+        install_attested_local_skill(tmp.path(), "beta", "# Beta\n\n1. Beta", "Beta skill");
 
         let mut orch = SkillOrchestrator::new(tmp.path());
         orch.set_enabled_disabled(&[], &["alpha".to_string()]);
@@ -774,20 +882,8 @@ mod tests {
     #[test]
     fn test_scan_skill_commands_respects_enabled_filters() {
         let tmp = tempfile::tempdir().unwrap();
-        let alpha_dir = tmp.path().join("alpha");
-        let beta_dir = tmp.path().join("beta");
-        fs::create_dir_all(&alpha_dir).unwrap();
-        fs::create_dir_all(&beta_dir).unwrap();
-        fs::write(
-            alpha_dir.join("SKILL.md"),
-            "---\nname: alpha\ndescription: Alpha skill\n---\nAlpha body",
-        )
-        .unwrap();
-        fs::write(
-            beta_dir.join("SKILL.md"),
-            "---\nname: beta\ndescription: Beta skill\n---\nBeta body",
-        )
-        .unwrap();
+        install_attested_local_skill(tmp.path(), "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
+        install_attested_local_skill(tmp.path(), "beta", "# Beta\n\n1. Beta", "Beta skill");
 
         let mut orch = SkillOrchestrator::new(tmp.path());
         orch.set_enabled_disabled(&["beta".to_string()], &[]);
