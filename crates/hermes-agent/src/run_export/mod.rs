@@ -962,6 +962,39 @@ fn validate_exact_replay_proof(
             "exact replay status has an invalid closed state/reason pair".to_string(),
         ));
     }
+    let has_pending_obligation = replay_obligations
+        .iter()
+        .any(|obligation| obligation.fidelity == ReplayObligationFidelity::Pending);
+    let has_degraded_obligation = replay_obligations.iter().any(|obligation| {
+        matches!(
+            obligation.fidelity,
+            ReplayObligationFidelity::MetadataOnly | ReplayObligationFidelity::Unavailable
+        )
+    });
+    let obligations_are_exact = replay_obligations
+        .iter()
+        .all(|obligation| obligation.fidelity == ReplayObligationFidelity::ExactPrivate);
+    let obligations_prove_state = if has_degraded_obligation {
+        expected_state == ExactReplayState::UnavailableSanitized
+    } else if has_pending_obligation {
+        expected_state == ExactReplayState::Unverified
+    } else {
+        obligations_are_exact
+            && matches!(
+                expected_state,
+                ExactReplayState::Available
+                    | ExactReplayState::UnavailableMissing
+                    | ExactReplayState::UnavailableCorrupt
+                    | ExactReplayState::UnavailableKeyRevoked
+                    | ExactReplayState::Retiring
+                    | ExactReplayState::Retired
+            )
+    };
+    if !obligations_prove_state {
+        return Err(RunExportError::InvalidExport(
+            "exact replay status does not match replay obligation fidelity".to_string(),
+        ));
+    }
 
     let event_by_id = events
         .iter()
@@ -1094,18 +1127,34 @@ fn validate_exact_replay_proof(
                 ));
             }
             let same_event_typed_proof = replay_obligations.iter().any(|obligation| {
-                matches!(
-                    obligation.fidelity,
-                    ReplayObligationFidelity::MetadataOnly
-                        | ReplayObligationFidelity::Unavailable
-                ) && match obligation.phase {
-                    ReplayOperationPhase::Request => {
-                        obligation.source_event_id == latch_event.event_id
+                let fidelity_proves_state = match expected_state {
+                    ExactReplayState::Available => {
+                        obligation.fidelity == ReplayObligationFidelity::ExactPrivate
                     }
-                    ReplayOperationPhase::Result => {
-                        obligation.resolved_event_id == Some(latch_event.event_id)
+                    ExactReplayState::Unverified => {
+                        obligation.fidelity == ReplayObligationFidelity::Pending
                     }
-                }
+                    ExactReplayState::UnavailableSanitized => matches!(
+                        obligation.fidelity,
+                        ReplayObligationFidelity::MetadataOnly
+                            | ReplayObligationFidelity::Unavailable
+                    ),
+                    ExactReplayState::UnavailableMissing
+                    | ExactReplayState::UnavailableCorrupt
+                    | ExactReplayState::UnavailableKeyRevoked
+                    | ExactReplayState::Retiring
+                    | ExactReplayState::Retired => false,
+                };
+                fidelity_proves_state
+                    && match (obligation.phase, obligation.fidelity) {
+                        (ReplayOperationPhase::Request, _)
+                        | (ReplayOperationPhase::Result, ReplayObligationFidelity::Pending) => {
+                            obligation.source_event_id == latch_event.event_id
+                        }
+                        (ReplayOperationPhase::Result, _) => {
+                            obligation.resolved_event_id == Some(latch_event.event_id)
+                        }
+                    }
             });
             let latch_is_proven = match latch_event.kind {
                 SessionRunEventKind::ArtifactStateAudit => audit_by_id
@@ -1121,10 +1170,7 @@ fn validate_exact_replay_proof(
                 SessionRunEventKind::RunStart
                 | SessionRunEventKind::Append
                 | SessionRunEventKind::DeliveryResult
-                | SessionRunEventKind::RunExit => {
-                    expected_state == ExactReplayState::UnavailableSanitized
-                        && same_event_typed_proof
-                }
+                | SessionRunEventKind::RunExit => same_event_typed_proof,
             };
             if !latch_is_proven {
                 return Err(RunExportError::InvalidExport(

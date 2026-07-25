@@ -270,14 +270,6 @@ impl<'a> ExactReplayLifecycleCoordinator<'a> {
 fn ensure_readable_status(
     status: &crate::run_ledger::ArtifactReferenceStatus,
 ) -> ExactReplayLifecycleResult<()> {
-    if !status.exact_replay.exact_replay {
-        return Err(ExactReplayLifecycleError::Unavailable {
-            reason: status
-                .exact_replay
-                .reason
-                .unwrap_or(ArtifactStateReason::Sanitized),
-        });
-    }
     if matches!(
         status.reference_state,
         ArtifactReferenceState::Retiring | ArtifactReferenceState::Retired
@@ -671,7 +663,8 @@ mod tests {
                 "type": "object",
                 "properties": {
                     "api_key": {"type": "string"}
-                }
+                },
+                "required": ["api_key"]
             }
         });
         private["advertised_tools"] = json!([schema.clone()]);

@@ -108,6 +108,69 @@
         }
     }
 
+    async fn install_attested_prepared_prompt_skill(root: &std::path::Path) {
+        use hermes_core::Skill;
+        use hermes_skills::{
+            store_local_owner_keyring_file, FileSkillStore, LocalOwnerKeyring,
+            LocalOwnerSigningKey, SkillStore,
+        };
+
+        std::fs::create_dir_all(root).expect("create skill root");
+        let home = root.parent().expect("skills root has a home");
+        let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(home)
+            .expect("derive skill trust authority layout");
+        assert_eq!(layout.skills_root(), root);
+        std::fs::create_dir_all(layout.authority_root()).expect("create skill authority root");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                layout.authority_root(),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("restrict skill authority root");
+        }
+
+        let signer = LocalOwnerSigningKey::from_seed([41; 32]);
+        let local_owner_keys = vec![signer.trusted_key(
+            "prepared-prompt-owner",
+            "prepared-prompt-key",
+            true,
+        )];
+        let keyring =
+            LocalOwnerKeyring::new(local_owner_keys.clone()).expect("create local owner keyring");
+        store_local_owner_keyring_file(root, layout.local_owner_keyring_file(), &keyring)
+            .expect("store local owner keyring");
+
+        let store =
+            FileSkillStore::new(root.to_path_buf()).with_trusted_local_owner_keys(local_owner_keys);
+        store
+            .save(&Skill {
+                name: "demo-skill".to_string(),
+                content: "Body".to_string(),
+                category: Some("testing".to_string()),
+                description: Some("Prepared provenance fixture".to_string()),
+            })
+            .await
+            .expect("stage local skill");
+        let mut manifest = store
+            .pending_local_manifest("demo-skill")
+            .expect("load staged local skill")
+            .expect("staged local skill manifest");
+        let attestation = signer
+            .sign_local_manifest(
+                &mut manifest,
+                "prepared-prompt-owner",
+                "prepared-prompt-key",
+                "prepared-prompt-attestation",
+                "2026-07-20T00:00:00Z",
+            )
+            .expect("sign local skill attestation");
+        store
+            .attest_local_skill("demo-skill", attestation)
+            .expect("attest local skill");
+    }
+
     #[tokio::test]
     async fn prepared_input_applies_shared_sanitization_and_context_expansion() {
         let config = AgentConfig {
@@ -179,13 +242,8 @@
     #[tokio::test]
     async fn stored_prompt_skips_fresh_skill_scan_while_fresh_prompt_retains_exact_block() {
         let home = tempfile::tempdir().expect("skills home");
-        let skill_dir = home.path().join("skills").join("testing").join("demo-skill");
-        std::fs::create_dir_all(&skill_dir).expect("create skill fixture");
-        std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: demo-skill\ndescription: Prepared provenance fixture\n---\nBody",
-        )
-        .expect("write skill fixture");
+        let skills_root = home.path().join("skills");
+        install_attested_prepared_prompt_skill(&skills_root).await;
         let tools = vec![ToolSchema::new(
             "skills_list",
             "List skills",

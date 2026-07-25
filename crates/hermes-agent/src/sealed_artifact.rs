@@ -159,7 +159,7 @@ impl ArtifactRedactor for LedgerEvidenceRedactor {
             return Err(invalid_artifact("unsupported replay fidelity"));
         }
         let evidence_id = required_bounded_string(identity_object, "evidence_id")?;
-        let evidence_subject = required_safe_bounded_string(identity_object, "evidence_subject")?;
+        let evidence_subject = required_bounded_string(identity_object, "evidence_subject")?;
         let outcome = required_bounded_string(identity_object, "outcome")?;
         if (artifact_kind == "request" && outcome != "not_applicable")
             || (artifact_kind == "result"
@@ -444,7 +444,7 @@ fn validate_runtime_evidence_subject(
                     | "delegation"
                     | "agent-output"
                     | "oauth-refresh"
-            ) || evidence_subject.starts_with(DELIVERY_EVIDENCE_SUBJECT_PREFIX)
+            ) || is_closed_delivery_evidence_subject(evidence_subject)
         }
         _ => false,
     };
@@ -453,6 +453,19 @@ fn validate_runtime_evidence_subject(
     } else {
         Err(invalid_artifact("unsupported runtime evidence subject"))
     }
+}
+
+/// Delivery subjects carry a SHA-256 idempotency key that can resemble a
+/// secret to the generic text redactor. Admit that shape only when every
+/// segment is a closed, derived outbox identity; no generic exception applies.
+fn is_closed_delivery_evidence_subject(value: &str) -> bool {
+    let Some(value) = value.strip_prefix(DELIVERY_EVIDENCE_SUBJECT_PREFIX) else {
+        return false;
+    };
+    let Some((destination, idempotency_key)) = value.split_once('/') else {
+        return false;
+    };
+    destination == "alpha_runtime_v1" && is_lowercase_sha256_hex(idempotency_key)
 }
 
 /// Evidence IDs normally pass the generic text redactor. Runtime-generated
@@ -488,7 +501,7 @@ fn validate_runtime_evidence_id(
             return Ok(());
         }
         subject
-            if subject.starts_with(DELIVERY_EVIDENCE_SUBJECT_PREFIX)
+            if is_closed_delivery_evidence_subject(subject)
                 && is_canonical_lowercase_uuid(evidence_id) =>
         {
             return Ok(());
@@ -550,7 +563,7 @@ fn closed_runtime_replay_payload(
             }
             closed_alpha_task_payload(private)
         }
-        ("result", subject) if subject.starts_with(DELIVERY_EVIDENCE_SUBJECT_PREFIX) => {
+        ("result", subject) if is_closed_delivery_evidence_subject(subject) => {
             closed_delivery_result_payload(private)
         }
         ("result", "agent-output") => {
@@ -576,11 +589,10 @@ fn closed_runtime_replay_payload(
     }
 }
 
-/// Validate the only private RunStart schema allowed to claim exact replay.
-/// It is deliberately narrower than `AgentConfig` and is accepted only if
-/// recursive credential redaction is a no-op, so an authorized unseal can
-/// return the exact prepared runtime bytes rather than a silently altered
-/// approximation.
+/// It is deliberately narrower than `AgentConfig` and is accepted only after
+/// field-aware credential validation. Tool-schema property names remain exact
+/// metadata, while every string value and all non-schema fields must be
+/// credential-free so an authorized unseal returns the prepared runtime bytes.
 /// Validate the immutable private RunStart payload without constructing or
 /// sealing an artifact. Deterministic replay uses this as a pure boundary
 /// check after authorized unsealing.
@@ -948,7 +960,7 @@ fn exact_runtime_binding_from_identity<'a>(
     }
     let artifact_kind = required_bounded_string(identity, "artifact_kind")?;
     let evidence_id = required_bounded_string(identity, "evidence_id")?;
-    let evidence_subject = required_safe_bounded_string(identity, "evidence_subject")?;
+    let evidence_subject = required_bounded_string(identity, "evidence_subject")?;
     let outcome = ExactRuntimeEvidenceOutcome::parse(required_bounded_string(identity, "outcome")?)?;
     validate_runtime_evidence_subject(artifact_kind, evidence_subject)?;
     validate_runtime_evidence_id(evidence_subject, evidence_id)?;
@@ -1021,7 +1033,7 @@ fn exact_runtime_binding_from_identity<'a>(
             "result",
             subject,
             ExactRuntimeEvidenceOutcome::Returned | ExactRuntimeEvidenceOutcome::HandlerError,
-        ) if subject.starts_with(DELIVERY_EVIDENCE_SUBJECT_PREFIX) => (
+        ) if is_closed_delivery_evidence_subject(subject) => (
             ExactRuntimeEvidenceSchema::DeliveryResultV1,
             ExactRuntimeEvidencePhase::Result,
         ),
@@ -1062,7 +1074,7 @@ fn validate_exact_runtime_private_binding<'a>(
         "exact runtime private evidence",
     )?;
     if required_bounded_string(private, "evidence_id")? != binding.evidence_id
-        || required_safe_bounded_string(private, "evidence_subject")? != binding.evidence_subject
+        || required_bounded_string(private, "evidence_subject")? != binding.evidence_subject
         || required_bounded_string(private, "phase")? != binding.phase.as_str()
         || required_bounded_string(private, "phase")? != artifact_kind
         || required_bounded_string(private, "schema")? != outer_schema
@@ -1447,7 +1459,6 @@ fn validate_exact_delivery_result_private(
         .get("payload")
         .ok_or_else(|| invalid_artifact("exact delivery result payload is missing"))?;
     closed_delivery_result_payload(payload)?;
-    validate_exact_runtime_value(payload, 0)?;
     let payload = payload
         .as_object()
         .ok_or_else(|| invalid_artifact("exact delivery result payload must be an object"))?;
@@ -1744,10 +1755,60 @@ fn validate_tool_schema_value(value: &Value, depth: usize) -> Result<(), SealedA
         Value::Array(values) => values
             .iter()
             .try_for_each(|value| validate_tool_schema_value(value, depth + 1)),
-        Value::Object(values) => values
-            .values()
-            .try_for_each(|value| validate_tool_schema_value(value, depth + 1)),
+        Value::Object(values) => {
+            for (key, value) in values {
+                match key.as_str() {
+                    "properties" | "$defs" => {
+                        validate_tool_schema_named_schema_map(value, depth + 1)?
+                    }
+                    "required" => validate_tool_schema_property_names(value)?,
+                    _ => validate_tool_schema_value(value, depth + 1)?,
+                }
+            }
+            Ok(())
+        }
     }
+}
+
+fn validate_tool_schema_named_schema_map(
+    value: &Value,
+    depth: usize,
+) -> Result<(), SealedArtifactError> {
+    let schemas = value
+        .as_object()
+        .ok_or_else(|| invalid_artifact("tool schema named schema map must be an object"))?;
+    for (name, schema) in schemas {
+        validate_tool_schema_metadata_name(name)?;
+        validate_tool_schema_value(schema, depth + 1)?;
+    }
+    Ok(())
+}
+
+fn validate_tool_schema_property_names(value: &Value) -> Result<(), SealedArtifactError> {
+    let names = value
+        .as_array()
+        .ok_or_else(|| invalid_artifact("tool schema required names must be an array"))?;
+    for name in names {
+        let name = name
+            .as_str()
+            .ok_or_else(|| invalid_artifact("tool schema required name must be a string"))?;
+        validate_tool_schema_metadata_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_tool_schema_metadata_name(name: &str) -> Result<(), SealedArtifactError> {
+    if name.is_empty()
+        || name.len() > MAX_ARTIFACT_IDENTIFIER_BYTES
+        || name.contains('\0')
+        || contains_unredacted_credential_token(name)
+        || (!is_sensitive_field_name(name) && redact_sensitive_text(name) != name)
+    {
+        return Err(invalid_artifact(
+            "tool schema metadata name contains a credential or is invalid",
+        ));
+    }
+    Ok(())
 }
 
 fn closed_runtime_summary(shape: &str) -> Value {
@@ -2187,7 +2248,13 @@ fn validate_delivery_result_private_shape(
         }
     }
     for field in ["event_id", "outbox_id", "run_id"] {
-        required_safe_bounded_string(private, field)?;
+        let value = required_bounded_string(private, field)?;
+        if !is_canonical_lowercase_uuid(value) {
+            ensure_credential_free_identity(
+                private.get(field).expect("required identifier"),
+                field,
+            )?;
+        }
     }
     required_sha256_digest(private, "idempotency_key")?;
     let reference = exact_artifact_object(
@@ -2534,14 +2601,20 @@ fn prepare_exact_artifact_bound_for(
 ) -> Result<PreparedArtifact, SealedArtifactError> {
     validate_identifier("redactor version", redactor.version())?;
     closed_exact_runtime_payload(schema, safe_raw, private_evidence)?;
-    let mut recursively_redacted = credential_free_replay_payload(private_evidence);
-    let private_identity = ensure_canonical_bytes_match(
-        private_evidence,
-        &recursively_redacted,
-        "exact private evidence requires a redaction identity transform",
-    );
-    zeroize_json_value(&mut recursively_redacted);
-    private_identity?;
+    // RunStart validates each closed field separately because JSON-schema
+    // property names are metadata, not runtime credential fields. Every other
+    // exact schema has no such key namespace and remains subject to recursive
+    // identity redaction.
+    if schema != ExactRuntimeEvidenceSchema::RunStart {
+        let mut recursively_redacted = credential_free_replay_payload(private_evidence);
+        let private_identity = ensure_canonical_bytes_match(
+            private_evidence,
+            &recursively_redacted,
+            "exact private evidence requires a redaction identity transform",
+        );
+        zeroize_json_value(&mut recursively_redacted);
+        private_identity?;
+    }
     let expected_identity = safe_raw
         .get("identity")
         .ok_or_else(|| invalid_artifact("exact runtime identity is missing"))?;

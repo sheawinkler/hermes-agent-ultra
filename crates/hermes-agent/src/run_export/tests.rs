@@ -9,14 +9,15 @@ use tempfile::TempDir;
 
 use crate::run_ledger::{
     ActionId, AppendIdentity, AppendKey, AppendLease, AppendReceipt, AppendRequest,
-    AppendReservation, BranchId, CanonicalJson, CertifiedOutboxDestinationHandler, ClaimNext,
-    DeliveryCompletion, DeliveryEvidence, DeliveryFailureReason, Destination, DigestAbsence,
-    DurableDeliveryReceipt, DurableOutboxDestinationHandler, EffectIntent, LedgerClock,
-    LedgerConnectionFactory, LedgerError, LedgerIdentityKeyId, ModelId, ObjectiveId, OutboxLease,
-    OutboxRouteRegistry, PrivateFingerprint, ProvenanceDigest, ProviderId, ReplayAppendContract,
-    ReplayArtifactFidelity, ReplayOperationKind, ReplayOperationPhase, RunExit, RunId, RunLedger,
-    RunLedgerConfig, RunOwnerId, RunOwnerLease, RunProvenance, RunStart, SealedArtifactRef,
-    SessionId, Sha256Digest, TaskId, TenantId, TerminalReason,
+    AppendReservation, ArtifactDegradationReason, BranchId, CanonicalJson,
+    CertifiedOutboxDestinationHandler, ClaimNext, DeliveryCompletion, DeliveryEvidence,
+    DeliveryFailureReason, Destination, DigestAbsence, DurableDeliveryReceipt,
+    DurableOutboxDestinationHandler, EffectIntent, LedgerClock, LedgerConnectionFactory,
+    LedgerError, LedgerIdentityKeyId, ModelId, ObjectiveId, OutboxLease, OutboxRouteRegistry,
+    PrivateFingerprint, ProvenanceDigest, ProviderId, ReplayAppendContract, ReplayArtifactFidelity,
+    ReplayOperationKind, ReplayOperationPhase, RunExit, RunId, RunLedger, RunLedgerConfig,
+    RunOwnerId, RunOwnerLease, RunProvenance, RunStart, SealedArtifactRef, SessionId, Sha256Digest,
+    TaskId, TenantId, TerminalReason,
 };
 use crate::run_runtime::CertifiedEffectIntent;
 use crate::sealed_artifact;
@@ -449,6 +450,68 @@ fn v3_export_binds_exact_replay_status_and_keeps_v2_v1_readable() {
         verify_run_export_replay_plan_bytes(&canonical_document(&v1)),
         Err(RunExportError::IncompleteReplayEvidence(_))
     ));
+}
+
+#[test]
+fn v3_export_rejects_exact_status_elevation_over_degraded_obligation() {
+    let (directory, ledger) = fixture();
+    let (run_id, owner_lease) = create_exact_start_run(&ledger);
+    let lease = reserve(
+        &ledger,
+        &owner_lease,
+        append_request(run_id, "degraded-replay-proof", EffectIntent::None, 7)
+            .with_replay_contract(
+                ReplayAppendContract::own_event(
+                    ReplayOperationKind::Model,
+                    ReplayOperationPhase::Request,
+                ),
+                ReplayArtifactFidelity::ExactPrivate,
+            ),
+    );
+    ledger
+        .degrade_reserved_append(
+            mode(),
+            &owner_lease,
+            &lease,
+            ArtifactDegradationReason::ArtifactStoreUnavailable,
+        )
+        .expect("degrade replay-critical reservation");
+    ledger
+        .finalize_run_exit(
+            mode(),
+            &owner_lease,
+            RunExit::new(
+                TerminalReason::ExecutionFailure,
+                object(json!({"exit":"degraded"})),
+            ),
+        )
+        .expect("finalize degraded replay fixture");
+    let receipt = export_run(
+        &ledger,
+        directory.path().join("degraded-replay-export"),
+        run_id,
+    )
+    .expect("export degraded replay fixture");
+    let bytes = std::fs::read(receipt.path).expect("read degraded replay export");
+    let mut document = parsed_export(&bytes);
+    assert_eq!(
+        document["status"]["exact_replay"]["state"],
+        "unavailable_sanitized"
+    );
+
+    document["status"]["exact_replay"]["state"] = Value::String("available".to_string());
+    document["status"]["exact_replay"]["reason"] = Value::Null;
+    document["status"]["exact_replay"]["exact_replay"] = Value::Bool(true);
+    document["status"]["exact_replay"]["latched_at_ms"] =
+        document["events"][0]["created_at_ms"].clone();
+    document["status"]["exact_replay"]["latched_by_event_id"] =
+        document["events"][0]["event_id"].clone();
+    recanonicalize_with_digest(&mut document);
+
+    assert!(
+        verify_run_export_bytes(&canonical_document(&document)).is_err(),
+        "an exact RunStart obligation cannot conceal a later degraded obligation"
+    );
 }
 
 #[test]

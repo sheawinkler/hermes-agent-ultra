@@ -1328,8 +1328,10 @@ fn delivery_redactor_accepts_schema_typed_digests_and_rejects_nested_secrets() {
     let mut evidence = serde_json::json!({
         "identity": {
             "artifact_kind": "result",
-            "evidence_id": "delivery-result-1",
-            "evidence_subject": "hermes.session-run.outbox/alpha-runtime-v1",
+            "evidence_id": "11111111-1111-1111-1111-111111111111",
+            "evidence_subject": format!(
+                "hermes.session-run.outbox/alpha_runtime_v1/{digest}"
+            ),
             "outcome": "returned",
             "replay_fidelity": "credential_redacted",
             "schema": "hermes.runtime-evidence/v1",
@@ -1338,7 +1340,7 @@ fn delivery_redactor_accepts_schema_typed_digests_and_rejects_nested_secrets() {
             "attempt_count": 1,
             "completion": "acknowledged",
             "delivery_failure": null,
-            "delivery_receipt": null,
+            "delivery_receipt": format!("alpha-runtime-v1:{digest}"),
             "event_id": "event-1",
             "idempotency_key": digest,
             "outbox_id": "outbox-1",
@@ -1364,6 +1366,63 @@ fn delivery_redactor_accepts_schema_typed_digests_and_rejects_nested_secrets() {
             "shape": "delivery-result",
         })
     );
+    let numeric_uuid = "12345678-1234-1234-1234-123456789012";
+    assert_ne!(
+        redact_sensitive_text(numeric_uuid),
+        numeric_uuid,
+        "fixture must exercise the generic phone-number false positive"
+    );
+    evidence["identity"]["evidence_id"] = Value::String(numeric_uuid.to_string());
+    for field in ["event_id", "outbox_id", "run_id"] {
+        evidence["private"][field] = Value::String(numeric_uuid.to_string());
+    }
+    assert_eq!(
+        LedgerEvidenceRedactor
+            .redact(&evidence)
+            .expect("schema-typed UUIDs bypass generic PII heuristics")
+            .credential_free_private,
+        serde_json::json!({
+            "completion": "acknowledged",
+            "schema": CLOSED_RUNTIME_REPLAY_SCHEMA,
+            "shape": "delivery-result",
+        })
+    );
+    let exact_payload = evidence["private"].clone();
+    let exact_subject = evidence["identity"]["evidence_subject"].clone();
+    let mut exact_evidence = evidence.clone();
+    exact_evidence["identity"]["replay_fidelity"] = Value::String("exact_private".to_string());
+    exact_evidence["private"] = serde_json::json!({
+        "evidence_id": numeric_uuid,
+        "evidence_subject": exact_subject,
+        "payload": exact_payload,
+        "phase": "result",
+        "schema": EXACT_RUNTIME_EVIDENCE_SCHEMA,
+    });
+    assert_eq!(
+        LedgerEvidenceRedactor
+            .redact(&exact_evidence)
+            .expect("exact schema-typed UUIDs bypass generic PII heuristics")
+            .credential_free_private,
+        Value::Null
+    );
+    evidence["private"]["delivery_receipt"] = Value::Null;
+    assert!(matches!(
+        LedgerEvidenceRedactor.redact(&evidence),
+        Err(SealedArtifactError::Redaction(_))
+    ));
+    evidence["private"]["delivery_receipt"] = Value::String(format!("alpha-runtime-v1:{digest}"));
+
+    evidence["identity"]["evidence_subject"] = Value::String(format!(
+        "hermes.session-run.outbox/alpha_runtime_v1/{}",
+        synthetic_openai_key()
+    ));
+    assert!(matches!(
+        LedgerEvidenceRedactor.redact(&evidence),
+        Err(SealedArtifactError::Redaction(_))
+    ));
+    evidence["identity"]["evidence_subject"] = Value::String(format!(
+        "hermes.session-run.outbox/alpha_runtime_v1/{digest}"
+    ));
 
     evidence["private"]["source_sealed_artifact_ref"]["key_id"] =
         Value::String(synthetic_openai_key());

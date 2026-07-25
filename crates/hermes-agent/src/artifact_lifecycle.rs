@@ -124,8 +124,8 @@ impl<'a> ArtifactAppendCoordinator<'a> {
     }
 
     /// Construct the production coordinator with real filesystem capacity
-    /// admission. The guard runs before reservation, sealing, publication, or
-    /// ledger commit.
+    /// admission. Successful writes reserve capacity before reservation or
+    /// sealing; a manual bound I/O outage reserves only to record degradation.
     pub fn new_with_filesystem_admission(
         ledger: &'a RunLedger,
         keys: &'a OsArtifactKeyManager,
@@ -194,10 +194,10 @@ impl<'a> ArtifactAppendCoordinator<'a> {
         allow_manual_degradation: bool,
         replay: Option<ReplayCriticalArtifactAppend>,
     ) -> ArtifactLifecycleResult<ArtifactAppendOutcome> {
-        // A brand-new append is denied before its reservation exists. Prepare
-        // first because admission is sized from the actual private JCS payload.
-        // If a concurrent writer wins while capacity is queried, reread once so
-        // an idempotent committed/in-flight retry is not rejected as new work.
+        // A brand-new successful append is admitted before its reservation
+        // exists because capacity is sized from the actual private JCS payload.
+        // A manual bound I/O outage is the narrow exception: it reserves only
+        // to record a typed terminal degradation, never to attempt a write.
         let mut existing_identity = self.ledger.append_identity_for_key(&request.append_key)?;
         let fingerprint_key = match existing_identity.as_ref() {
             Some(identity) => self.keys.resolve_fingerprint_key(
@@ -277,27 +277,41 @@ impl<'a> ArtifactAppendCoordinator<'a> {
             ),
         };
         let mut capacity_reservation = None;
+        // A manual bound append may use a failed capacity probe only to create
+        // its durable degradation audit. It must never continue to a write.
+        let mut pre_reservation_degradation = None;
         if existing_identity.is_none() {
             if let Some(free_space_guard) = self.free_space_guard.as_ref() {
                 match free_space_guard.reserve_for_prepared(&prepared) {
                     Ok(reservation) => capacity_reservation = Some(reservation),
                     Err(error) => {
-                        let Some(concurrent_identity) =
+                        if let Some(concurrent_identity) =
                             self.ledger.append_identity_for_key(&request.append_key)?
-                        else {
+                        {
+                            let historical_fingerprint_key = self
+                                .keys
+                                .resolve_fingerprint_key(
+                                    concurrent_identity.private_fingerprint.key_id().as_str(),
+                                    concurrent_identity.private_fingerprint.key_version(),
+                                )
+                                .map_err(ArtifactLifecycleError::ArtifactAfterReservation)?;
+                            prepared
+                                .rebind_fingerprint(&historical_fingerprint_key)
+                                .map_err(ArtifactLifecycleError::ArtifactAfterReservation)?;
+                            existing_identity = Some(concurrent_identity);
+                        } else if let Some(reason) = degradation_reason(&error) {
+                            if allow_manual_degradation
+                                && request.mode.mode == ExecutionMode::Manual
+                            {
+                                pre_reservation_degradation = Some(reason);
+                            } else {
+                                return Err(ArtifactLifecycleError::ArtifactBeforeReservation(
+                                    error,
+                                ));
+                            }
+                        } else {
                             return Err(ArtifactLifecycleError::ArtifactBeforeReservation(error));
-                        };
-                        let historical_fingerprint_key = self
-                            .keys
-                            .resolve_fingerprint_key(
-                                concurrent_identity.private_fingerprint.key_id().as_str(),
-                                concurrent_identity.private_fingerprint.key_version(),
-                            )
-                            .map_err(ArtifactLifecycleError::ArtifactAfterReservation)?;
-                        prepared
-                            .rebind_fingerprint(&historical_fingerprint_key)
-                            .map_err(ArtifactLifecycleError::ArtifactAfterReservation)?;
-                        existing_identity = Some(concurrent_identity);
+                        }
                     }
                 }
             }
@@ -336,6 +350,15 @@ impl<'a> ArtifactAppendCoordinator<'a> {
                 published_sealed_artifact_ref,
             }),
             AppendReservation::Reserved(lease) => {
+                if let Some(reason) = pre_reservation_degradation {
+                    let receipt = self.ledger.degrade_reserved_append(
+                        request.mode,
+                        request.owner_lease,
+                        &lease,
+                        reason,
+                    )?;
+                    return outcome_from_receipt(receipt);
+                }
                 let sealer = ArtifactSealer::new(self.keys, self.store);
                 if let Some(published) = lease.published_sealed_artifact_ref.as_ref() {
                     let artifact_reference = SealedArtifactRef::try_from(published)
@@ -666,6 +689,17 @@ mod tests {
         fn available_bytes(&self, _root: &Path) -> Result<u64, SealedArtifactError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.available_bytes)
+        }
+    }
+
+    struct UnavailableFreeSpace;
+
+    impl ArtifactFreeSpaceProvider for UnavailableFreeSpace {
+        fn available_bytes(&self, _root: &Path) -> Result<u64, SealedArtifactError> {
+            Err(SealedArtifactError::Io(io::Error::new(
+                io::ErrorKind::NotFound,
+                "artifact root unavailable",
+            )))
         }
     }
 
@@ -1008,6 +1042,97 @@ mod tests {
             .outbox_for_run(fixture.owner_lease.run_id)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn manual_bound_pre_reservation_store_outage_is_audited_without_write() {
+        let fixture = fixture(ExecutionMode::Manual);
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let keys = key_manager(credentials, "seal-v1", "fingerprint-v1", 1);
+        keys.provision_active_keys().unwrap();
+        let store = CountingStore::default();
+        let unavailable = UnavailableFreeSpace;
+        let guard = ArtifactFreeSpaceGuard::with_provider(fixture._directory.path(), &unavailable);
+        let coordinator = ArtifactAppendCoordinator::new_with_free_space_guard(
+            &fixture.ledger,
+            &keys,
+            &store,
+            guard,
+        );
+        let append_key = AppendKey::new("manual-pre-reservation-store-outage").unwrap();
+        let raw = raw_artifact();
+        let redactor = TestRedactor;
+        let request = ArtifactAppendRequest {
+            mode: fixture.mode,
+            owner_lease: &fixture.owner_lease,
+            append_key,
+            effect_intent: EffectIntent::None,
+            public_payload: canonical(json!({"request": "manual-store-outage"})),
+            raw_artifact: &raw,
+            redactor: &redactor,
+        };
+
+        let receipt = degraded(coordinator.append_bound(&request, &raw).unwrap());
+        assert_eq!(
+            receipt.artifact_degradation_reason,
+            Some(ArtifactDegradationReason::ArtifactStoreUnavailable)
+        );
+        assert_eq!(store.publish_count(), 0);
+        assert_eq!(
+            fixture
+                .ledger
+                .events_for_run(fixture.owner_lease.run_id)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn nonmanual_bound_pre_reservation_store_outage_fails_without_audit() {
+        let fixture = fixture(ExecutionMode::Manual);
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let keys = key_manager(credentials, "seal-v1", "fingerprint-v1", 1);
+        keys.provision_active_keys().unwrap();
+        let store = CountingStore::default();
+        let unavailable = UnavailableFreeSpace;
+        let guard = ArtifactFreeSpaceGuard::with_provider(fixture._directory.path(), &unavailable);
+        let coordinator = ArtifactAppendCoordinator::new_with_free_space_guard(
+            &fixture.ledger,
+            &keys,
+            &store,
+            guard,
+        );
+        let raw = raw_artifact();
+        let redactor = TestRedactor;
+        let request = ArtifactAppendRequest {
+            mode: ResolvedExecutionMode {
+                mode: ExecutionMode::Reviewed,
+                source: ExecutionModeSource::Cli,
+            },
+            owner_lease: &fixture.owner_lease,
+            append_key: AppendKey::new("reviewed-pre-reservation-store-outage").unwrap(),
+            effect_intent: EffectIntent::None,
+            public_payload: canonical(json!({"request": "must-fail-closed"})),
+            raw_artifact: &raw,
+            redactor: &redactor,
+        };
+
+        assert!(matches!(
+            coordinator.append_bound(&request, &raw),
+            Err(ArtifactLifecycleError::ArtifactBeforeReservation(
+                SealedArtifactError::Io(_)
+            ))
+        ));
+        assert_eq!(store.publish_count(), 0);
+        assert_eq!(
+            fixture
+                .ledger
+                .events_for_run(fixture.owner_lease.run_id)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

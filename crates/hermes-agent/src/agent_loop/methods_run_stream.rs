@@ -33,11 +33,17 @@ impl AgentLoop {
                         prepared,
                         on_chunk,
                         Some(active_run.clone()),
-                    )).catch_unwind() => match result {
-                        Ok(result) => result,
-                        Err(_) => Err(AgentError::ToolExecution(
-                            "streaming agent run panicked".to_string(),
-                        )),
+                    )).catch_unwind() => {
+                        if let Some(error) = self.interrupt.take_fatal_error() {
+                            Err(error)
+                        } else {
+                            match result {
+                                Ok(result) => result,
+                                Err(_) => Err(AgentError::ToolExecution(
+                                    "streaming agent run panicked".to_string(),
+                                )),
+                            }
+                        }
                     },
                 }
             }
