@@ -471,6 +471,7 @@ def test_intentional_divergence_rejects_unapproved_changed_path(tmp_path: Path) 
 
     assert result.returncode == 1
     assert queue["commits"][0]["disposition"] == "pending"
+    assert queue["commits"][0]["files"] == ["delta.txt"]
     assert "override_divergence_path_unapproved" in _error_codes(queue)
     assert ledger["source_valid"] is False
 

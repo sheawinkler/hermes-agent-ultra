@@ -1789,6 +1789,7 @@ def classify_blocks(
             "target_ticket": classify_ticket(files),
             "target_ticket_name": TICKET_NAME.get(classify_ticket(files), "unknown"),
             "files_touched": len(files),
+            "files": files,
             "files_sample": files[:20],
             "disposition": disposition,
             "owner": owner,
