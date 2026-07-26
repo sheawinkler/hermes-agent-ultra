@@ -1448,6 +1448,11 @@ impl AgentLoop {
                     Ok(chunk) => chunk,
                     Err(err) => {
                         let error_text = err.to_string();
+                        let partial_tool_in_flight = tool_calls.iter().any(|tool_call| {
+                            !tool_call.id.is_empty()
+                                || !tool_call.function.name.is_empty()
+                                || !tool_call.function.arguments.trim().is_empty()
+                        });
                         let digest = hex::encode(raw_stream_digest.clone().finalize());
                         if active_run.is_some()
                             && (raw_chunk_count > 0 || Self::llm_error_is_uncertain(&err))
@@ -1472,19 +1477,49 @@ impl AgentLoop {
                             raw_chunk_count,
                         )
                         .await?;
-                        let should_retry_before_visible_output = !deltas_were_sent
-                            && !tool_call_delta_was_emitted
-                            && is_transient_stream_error(&err)
+                        let retryable = is_transient_stream_error(&err)
                             && stream_attempt < max_stream_retries;
+                        let should_retry_for_partial_tool =
+                            partial_tool_in_flight && tool_call_delta_was_emitted && retryable;
+                        let should_retry_before_visible_output =
+                            !deltas_were_sent && !tool_call_delta_was_emitted && retryable;
 
-                        if should_retry_before_visible_output {
+                        if should_retry_for_partial_tool || should_retry_before_visible_output {
+                            let next_attempt = stream_attempt + 2;
                             let total_attempts = max_stream_retries + 1;
-                            tracing::warn!(
-                                "Streaming attempt {}/{} failed before externally visible stream output; retrying: {}",
-                                stream_attempt + 1,
-                                total_attempts,
-                                err
-                            );
+                            if should_retry_for_partial_tool {
+                                let notice =
+                                    "\n\n[connection dropped mid tool-call; reconnecting...]\n\n";
+                                self.callbacks.emit_stream_delta(notice);
+                                on_chunk(StreamChunk {
+                                    delta: Some(hermes_core::StreamDelta {
+                                        content: Some(notice.to_string()),
+                                        tool_calls: None,
+                                        extra: None,
+                                    }),
+                                    finish_reason: None,
+                                    usage: None,
+                                });
+                                self.emit_status(
+                                    "lifecycle",
+                                    &format!(
+                                        "Connection dropped mid tool-call; reconnecting (attempt {next_attempt}/{total_attempts})"
+                                    ),
+                                );
+                                tracing::warn!(
+                                    "Streaming attempt {}/{} failed after partial tool-call data; retrying: {}",
+                                    stream_attempt + 1,
+                                    total_attempts,
+                                    err
+                                );
+                            } else {
+                                tracing::warn!(
+                                    "Streaming attempt {}/{} failed before externally visible stream output; retrying: {}",
+                                    stream_attempt + 1,
+                                    total_attempts,
+                                    err
+                                );
+                            }
                             continue 'stream_attempt;
                         }
                         return Err(err);

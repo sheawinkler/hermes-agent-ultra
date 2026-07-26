@@ -905,10 +905,23 @@
                 StreamRetryScenario::PartialTextEof => {
                     vec![Ok(stream_chunk_content("Partial text"))]
                 }
-                StreamRetryScenario::PartialToolArgsEof => vec![
-                    Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
-                    Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
-                ],
+                StreamRetryScenario::PartialToolArgsEof => {
+                    if attempt == 1 {
+                        vec![
+                            Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
+                            Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
+                        ]
+                    } else {
+                        vec![
+                            Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
+                            Ok(stream_chunk_tool_args(
+                                0,
+                                "{\"path\":\"/tmp/y\",\"content\":\"recovered\"}",
+                            )),
+                            Ok(stream_chunk_finish("tool_calls")),
+                        ]
+                    }
+                }
                 StreamRetryScenario::TerminalFrame => vec![
                     Ok(stream_chunk_content("complete")),
                     Ok(stream_chunk_finish("stop")),
@@ -1101,20 +1114,20 @@
     }
 
     #[tokio::test]
-    async fn stream_partial_tool_args_eof_is_typed_and_does_not_retry() {
+    async fn stream_partial_tool_args_eof_retries_and_recovers() {
         let provider = Arc::new(StreamRetryProvider::new(
             StreamRetryScenario::PartialToolArgsEof,
         ));
         let cfg = AgentConfig {
-            stream_read_max_retries: 2,
+            stream_read_max_retries: 1,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
         let ctx = stream_test_context();
-        let tool_call_chunks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let tool_call_chunks_ref = tool_call_chunks.clone();
+        let emitted_content = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let emitted_content_ref = emitted_content.clone();
 
-        let err = match agent
+        let out = agent
             .collect_stream_llm_response(
                 &ctx,
                 &[],
@@ -1123,27 +1136,40 @@
                 None,
                 None,
                 &move |chunk| {
-                    let emits_tool_call = chunk
-                        .delta
-                        .as_ref()
-                        .and_then(|delta| delta.tool_calls.as_ref())
-                        .is_some_and(|calls| !calls.is_empty());
-                    if emits_tool_call {
-                        tool_call_chunks_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if let Some(content) = chunk.delta.and_then(|delta| delta.content) {
+                        emitted_content_ref
+                            .lock()
+                            .expect("emitted content lock")
+                            .push(content);
                     }
                 },
             )
             .await
-        {
-            Err(err) => err,
-            Ok(_) => panic!("partial tool args EOF must not synthesize a tool call"),
-        };
+            .expect("partial tool-call stream should recover");
 
-        assert_premature_stream_close(err, 2);
-        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
-        assert_eq!(
-            tool_call_chunks.load(std::sync::atomic::Ordering::SeqCst),
-            2
+        let StreamCollectOutcome::Complete(response) = out else {
+            panic!("expected complete response");
+        };
+        let tool_call = response
+            .message
+            .tool_calls
+            .as_ref()
+            .and_then(|calls| calls.first())
+            .expect("recovered tool call");
+        let arguments: Value =
+            serde_json::from_str(&tool_call.function.arguments).expect("valid tool arguments");
+        assert_eq!(tool_call.id, "call_2");
+        assert_eq!(tool_call.function.name, "write_file");
+        assert_eq!(arguments["path"], "/tmp/y");
+        assert_eq!(arguments["content"], "recovered");
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
+        assert!(
+            emitted_content
+                .lock()
+                .expect("emitted content lock")
+                .join("")
+                .contains("[connection dropped mid tool-call; reconnecting...]"),
+            "retry notice was not emitted"
         );
     }
 
