@@ -126,6 +126,21 @@ fn configured_agent_max_tokens(provider_config: Option<&LlmProviderConfig>) -> O
     }
     provider_config.and_then(|cfg| cfg.max_tokens.filter(|value| *value > 0))
 }
+fn runtime_surface_platform() -> &'static str {
+    let enabled = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+    };
+
+    if enabled("HERMES_DESKTOP") && !enabled("HERMES_DESKTOP_TERMINAL") {
+        "desktop"
+    } else {
+        "cli"
+    }
+}
+
 
 pub fn build_agent_config(
     config: &GatewayConfig,
@@ -209,7 +224,7 @@ pub fn build_agent_config(
         skip_memory,
         skip_context_files,
         coding_context: config.agent.coding_context.clone(),
-        platform: Some("cli".to_string()),
+        platform: Some(runtime_surface_platform().to_string()),
         execution_mode,
         enabled_skills: config.skills.enabled.clone(),
         disabled_skills: config.skills.disabled.clone(),

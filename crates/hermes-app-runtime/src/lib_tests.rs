@@ -83,6 +83,38 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_uses_desktop_surface_only_for_desktop_chat() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_DESKTOP", "HERMES_DESKTOP_TERMINAL"]);
+        std::env::remove_var("HERMES_DESKTOP");
+        std::env::remove_var("HERMES_DESKTOP_TERMINAL");
+
+        let config = GatewayConfig::default();
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("cli")
+        );
+
+        std::env::set_var("HERMES_DESKTOP", "yes");
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("desktop")
+        );
+
+        std::env::set_var("HERMES_DESKTOP_TERMINAL", "1");
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("cli")
+        );
+    }
+
+    #[test]
     fn test_build_agent_config_loads_prefill_messages_from_config() {
         let _lock = env_test_lock();
         let _env = EnvSnapshot::capture(&["HERMES_PREFILL_MESSAGES_FILE"]);

@@ -371,6 +371,10 @@ impl AgentLoop {
             .unwrap_or_default();
         match platform_key.as_str() {
             "cli" => Some("You are a CLI AI Agent. Prefer concise plain text output suitable for terminals."),
+            "desktop" => Some(
+                "You are interacting through a graphical Hermes desktop client, not a terminal. \
+                 Use clear Markdown when helpful, and do not assume terminal-only interaction controls.",
+            ),
             "telegram" | "discord" | "slack" => {
                 Some("You are responding on a chat platform. Keep responses concise and avoid heavy formatting.")
             }

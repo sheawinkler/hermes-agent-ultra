@@ -1302,7 +1302,15 @@ fn coding_context_prompt_respects_platform_and_off_mode() {
             skip_context_files: true,
             ..AgentConfig::default()
         },
+        AgentConfig {
+            platform: Some("desktop".to_string()),
+            coding_context: "off".to_string(),
+            skip_memory: true,
+            skip_context_files: true,
+            ..AgentConfig::default()
+        },
     ] {
+        let desktop = config.platform.as_deref() == Some("desktop");
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -1310,6 +1318,11 @@ fn coding_context_prompt_respects_platform_and_off_mode() {
         );
         let prompt = agent.build_system_prompt("", &tools, "openai/gpt-5.4");
         assert!(!prompt.contains("You are a coding agent pairing"));
+        if desktop {
+            assert!(prompt.contains("graphical Hermes desktop client"));
+            assert!(prompt.contains("not a terminal"));
+            assert!(!prompt.contains("CLI AI Agent"));
+        }
     }
 }
 
