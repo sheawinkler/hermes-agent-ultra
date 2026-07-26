@@ -116,11 +116,11 @@
         },
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+          "name": "stream_retry_before_visible_output_recovers"
         },
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_text_only_drop_does_not_retry"
+          "name": "stream_partial_tool_args_eof_retries_and_recovers"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",

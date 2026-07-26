@@ -1921,11 +1921,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -2317,7 +2317,7 @@
         },
         {
           "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_stream_chunk_has_progress_for_extra_only_events"
+          "name": "test_stream_ui_lifecycle_event_updates_activity"
         }
       ]
     },
@@ -2373,11 +2373,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -2434,11 +2434,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ],
       "classification_path": "ui-tui/src"
@@ -2725,11 +2725,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3107,11 +3107,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3194,11 +3194,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3254,11 +3254,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3314,11 +3314,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3374,11 +3374,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3435,11 +3435,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3495,11 +3495,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3543,7 +3543,7 @@
         },
         {
           "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_stream_chunk_has_progress_for_extra_only_events"
+          "name": "test_stream_ui_lifecycle_event_updates_activity"
         }
       ]
     },
@@ -3599,11 +3599,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3719,11 +3719,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -3839,11 +3839,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -4032,11 +4032,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -4212,11 +4212,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -4488,11 +4488,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -4548,11 +4548,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ]
     },
@@ -5046,11 +5046,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ],
       "classification_path": "ui-tui/src"
@@ -5264,11 +5264,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ],
       "classification_path": "ui-tui/src"
@@ -5797,7 +5797,7 @@
         },
         {
           "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_stream_chunk_has_progress_for_extra_only_events"
+          "name": "test_stream_ui_lifecycle_event_updates_activity"
         }
       ]
     },
@@ -5906,11 +5906,11 @@
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
+          "name": "test_new_session_persists_startup_stub_snapshot"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+          "name": "app_tracks_actual_usage_from_agent_results_and_resets"
         }
       ],
       "classification_path": "ui-tui/src"

@@ -349,28 +349,6 @@ pub async fn handle_cli_skills(
     action: Option<String>,
     name: Option<String>,
     extra: Option<String>,
-    remove: bool,
-    yes: bool,
-    sync_now: bool,
-) -> Result<(), hermes_core::AgentError> {
-    handle_cli_skills_with_trust_args(
-        action,
-        name,
-        extra,
-        None,
-        None,
-        None,
-        remove,
-        yes,
-        sync_now,
-    )
-    .await
-}
-
-pub async fn handle_cli_skills_with_trust_args(
-    action: Option<String>,
-    name: Option<String>,
-    extra: Option<String>,
     authority_dir: Option<PathBuf>,
     trust_file: Option<PathBuf>,
     expected_sha256: Option<String>,
@@ -892,4 +870,29 @@ pub async fn handle_cli_skills_with_trust_args(
         }
     }
     Ok(())
+}
+
+pub async fn handle_cli_skills_with_trust_args(
+    action: Option<String>,
+    name: Option<String>,
+    extra: Option<String>,
+    authority_dir: Option<PathBuf>,
+    trust_file: Option<PathBuf>,
+    expected_sha256: Option<String>,
+    remove: bool,
+    yes: bool,
+    sync_now: bool,
+) -> Result<(), hermes_core::AgentError> {
+    handle_cli_skills(
+        action,
+        name,
+        extra,
+        authority_dir,
+        trust_file,
+        expected_sha256,
+        remove,
+        yes,
+        sync_now,
+    )
+    .await
 }

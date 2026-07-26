@@ -63,7 +63,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -107,7 +107,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -213,7 +213,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -256,7 +256,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         }
       ],
       "status": "covered_by_rust_contracts"
@@ -296,7 +296,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -340,7 +340,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-cli/src/cli.rs",
@@ -384,7 +384,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -428,7 +428,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -982,7 +982,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -2362,7 +2362,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         }
       ],
       "status": "covered_by_rust_contracts"
@@ -2401,7 +2401,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         }
       ],
       "status": "covered_by_rust_contracts"
@@ -2441,7 +2441,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -2804,7 +2804,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-cli/src/cli.rs",
@@ -2882,7 +2882,7 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         }
       ],
       "status": "covered_by_rust_contracts"

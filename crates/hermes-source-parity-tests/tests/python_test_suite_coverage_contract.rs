@@ -210,7 +210,7 @@ fn python_suite_mcp_environment_and_stress_contracts_are_rust_owned() {
     assert!(terminal_requirements.contains("ssh_requires_host_and_user"));
 
     let docker = read_text("crates/hermes-environments/src/docker.rs");
-    assert!(docker.contains("build_run_args_include_terminal_config_env_and_resource_flags"));
+    assert!(docker.contains("build_run_args_use_least_privilege_defaults"));
     assert!(docker.contains("docker_forward_env"));
     assert!(docker.contains("docker_volumes"));
 
