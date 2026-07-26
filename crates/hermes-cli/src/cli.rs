@@ -769,6 +769,9 @@ pub enum CliCommand {
         /// Restrict prune to sessions with this source marker.
         #[arg(long)]
         source: Option<String>,
+        /// Restrict `sessions list` to a recorded workspace path or basename.
+        #[arg(long)]
+        workspace: Option<String>,
         /// Prune sessions older than N days.
         #[arg(long = "older-than")]
         older_than: Option<u64>,
@@ -944,6 +947,9 @@ pub struct Cli {
     /// Override the provider for this invocation (e.g. "nous", "anthropic").
     #[arg(long, global = true)]
     pub provider: Option<String>,
+    /// Keep the current directory when resuming a saved session.
+    #[arg(long, global = true)]
+    pub no_restore_cwd: bool,
 
     /// Override the startup execution posture for this invocation.
     ///

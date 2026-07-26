@@ -731,11 +731,26 @@ mod tests {
             personality: Some("helpful".to_string()),
             message_count: 5,
             created_at: "2025-01-01T00:00:00Z".to_string(),
+            cwd: Some("/workspace/hermes-agent".to_string()),
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.session_id, "test-123");
         assert_eq!(back.model, "dynamic");
+        assert_eq!(back.cwd.as_deref(), Some("/workspace/hermes-agent"));
+    }
+
+    #[test]
+    fn legacy_session_info_without_cwd_remains_readable() {
+        let legacy: SessionInfo = serde_json::from_value(serde_json::json!({
+            "session_id": "legacy",
+            "model": "dynamic",
+            "personality": null,
+            "message_count": 1,
+            "created_at": "2026-07-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(legacy.cwd, None);
     }
 
     #[test]

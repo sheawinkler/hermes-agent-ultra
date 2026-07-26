@@ -27,6 +27,12 @@ fn test_persist_session_snapshot_writes_default_session_file() {
             .and_then(|v| v.as_str()),
         Some("resume-test")
     );
+    assert!(
+        value
+            .pointer("/session_info/cwd")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    );
     assert_eq!(
         value
             .get("messages")
@@ -361,6 +367,7 @@ fn test_apply_cli_runtime_overrides_applies_provider_to_prefixed_model() {
         config_dir: None,
         model: None,
         provider: Some("nous".to_string()),
+        no_restore_cwd: false,
         oneshot: None,
         execution_mode: None,
         allow_tools: false,
@@ -383,6 +390,7 @@ fn test_apply_cli_runtime_overrides_applies_provider_to_bare_model() {
         config_dir: None,
         model: None,
         provider: Some("anthropic".to_string()),
+        no_restore_cwd: false,
         oneshot: None,
         execution_mode: None,
         allow_tools: false,

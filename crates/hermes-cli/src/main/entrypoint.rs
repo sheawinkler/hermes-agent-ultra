@@ -412,6 +412,7 @@ async fn main() {
             redact,
             yes,
             source,
+            workspace,
             older_than,
             limit,
         } => {
@@ -428,6 +429,7 @@ async fn main() {
                 yes,
                 source,
                 older_than,
+                workspace,
                 limit,
             })
             .await

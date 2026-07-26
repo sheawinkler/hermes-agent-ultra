@@ -414,6 +414,8 @@ pub struct SessionInfo {
     pub personality: Option<String>,
     pub message_count: usize,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 /// A TUI-local transcript message anchored to a conversation position.

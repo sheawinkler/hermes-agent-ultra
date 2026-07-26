@@ -525,6 +525,19 @@ fn cli_parse_resume_specific_session() {
 }
 
 #[test]
+fn cli_parse_resume_can_keep_current_directory() {
+    let cli =
+        Cli::try_parse_from(vec!["hermes", "--no-restore-cwd", "resume", "abc123"]).unwrap();
+    assert!(cli.no_restore_cwd);
+    match cli.command {
+        Some(CliCommand::Resume { session_id }) => {
+            assert_eq!(session_id.as_deref(), Some("abc123"));
+        }
+        _ => panic!("Expected Resume command"),
+    }
+}
+
+#[test]
 fn cli_parse_elite_check() {
     let cli = Cli::try_parse_from(vec!["hermes", "elite-check", "--json", "--strict"]).unwrap();
     match cli.command {
@@ -833,6 +846,19 @@ fn cli_parse_sessions_limit_default_is_twenty() {
     match cli.command {
         Some(CliCommand::Sessions { limit, .. }) => {
             assert_eq!(limit, 20);
+        }
+        _ => panic!("Expected Sessions command"),
+    }
+}
+
+#[test]
+fn cli_parse_sessions_workspace_flag() {
+    let cli =
+        Cli::try_parse_from(vec!["hermes", "sessions", "list", "--workspace", "hermes-agent"])
+            .unwrap();
+    match cli.command {
+        Some(CliCommand::Sessions { workspace, .. }) => {
+            assert_eq!(workspace.as_deref(), Some("hermes-agent"));
         }
         _ => panic!("Expected Sessions command"),
     }

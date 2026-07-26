@@ -1318,6 +1318,7 @@ async fn cli_sessions_export_command_writes_html_file_with_session_id_alias() {
         yes: false,
         source: None,
         older_than: None,
+        workspace: None,
         limit: 20,
     })
     .await
@@ -1351,6 +1352,7 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
             false,
             true,
             1usize,
+            None,
         ),
         (
             "canonical-b".to_string(),
@@ -1359,6 +1361,7 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
             true,
             true,
             2usize,
+            None,
         ),
         (
             "canonical-a".to_string(),
@@ -1367,6 +1370,7 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
             true,
             true,
             5usize,
+            None,
         ),
         (
             "artifact-new".to_string(),
@@ -1375,6 +1379,7 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
             false,
             true,
             9usize,
+            None,
         ),
         (
             "invalid-x".to_string(),
@@ -1383,6 +1388,7 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
             false,
             false,
             0usize,
+            None,
         ),
     ];
 
@@ -1413,4 +1419,44 @@ fn sessions_list_limit_truncates_after_sort_with_omission_count() {
     assert_eq!(total, 5);
     assert_eq!(canonical_count, 2);
     assert_eq!(artifact_count, 3);
+}
+
+#[test]
+fn sessions_workspace_filter_matches_paths_and_windows_basenames() {
+    assert!(session_workspace_matches(
+        Some("/Users/agent/src/hermes-agent"),
+        "src/hermes"
+    ));
+    assert!(session_workspace_matches(
+        Some(r"C:\Users\agent\src\hermes-agent"),
+        "hermes-agent"
+    ));
+    assert!(!session_workspace_matches(
+        Some("/Users/agent/src/hermes-agent"),
+        "other-project"
+    ));
+    assert_eq!(
+        session_workspace_label(Some(r"C:\Users\agent\src\hermes-agent\")),
+        "hermes-agent"
+    );
+    assert_eq!(session_workspace_label(None), "—");
+}
+
+#[test]
+fn session_workspace_key_reads_snapshot_metadata() {
+    let tmp = tempdir().expect("tempdir");
+    let path = tmp.path().join("session.json");
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "session_info": {"cwd": "/workspace/hermes-agent"},
+            "messages": []
+        })
+        .to_string(),
+    )
+    .expect("write snapshot");
+    assert_eq!(
+        read_session_snapshot_workspace_key(&path).as_deref(),
+        Some("/workspace/hermes-agent")
+    );
 }

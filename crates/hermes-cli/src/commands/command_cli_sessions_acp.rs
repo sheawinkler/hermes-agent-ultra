@@ -63,6 +63,7 @@ pub struct CliSessionsOptions {
     pub redact: bool,
     pub yes: bool,
     pub source: Option<String>,
+    pub workspace: Option<String>,
     pub older_than: Option<u64>,
     /// Maximum rows shown by `sessions list` after sort/classification.
     pub limit: usize,
@@ -99,6 +100,55 @@ fn read_session_snapshot_source(path: &Path) -> Option<String> {
         .map(str::trim)
         .filter(|source| !source.is_empty())
         .map(ToString::to_string)
+}
+
+fn read_session_snapshot_workspace_key(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value
+        .pointer("/session_info/cwd")
+        .or_else(|| value.pointer("/cwd"))
+        .or_else(|| value.pointer("/metadata/cwd"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .map(ToString::to_string)
+}
+
+fn session_workspace_matches(workspace: Option<&str>, needle: &str) -> bool {
+    let needle = needle.trim().to_ascii_lowercase();
+    let Some(workspace) = workspace
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+    else {
+        return false;
+    };
+    if needle.is_empty() {
+        return true;
+    }
+    let workspace = workspace.to_ascii_lowercase();
+    let basename = workspace
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(workspace.as_str());
+    workspace.contains(&needle) || basename == needle
+}
+
+fn session_workspace_label(workspace: Option<&str>) -> String {
+    let Some(workspace) = workspace
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+    else {
+        return "—".to_string();
+    };
+    workspace
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(workspace)
+        .to_string()
 }
 
 fn list_session_snapshot_entries(
@@ -941,7 +991,7 @@ fn sessions_list_row_limit(limit: usize) -> usize {
 
 /// Sort key for `sessions list`: canonical first, then message count, mtime, id.
 fn sort_sessions_list_entries(
-    entries: &mut [(String, u64, std::time::SystemTime, bool, bool, usize)],
+    entries: &mut [(String, u64, std::time::SystemTime, bool, bool, usize, Option<String>)],
 ) {
     entries.sort_by(|a, b| {
         b.3.cmp(&a.3)
@@ -975,10 +1025,16 @@ pub async fn handle_cli_sessions(
         yes,
         source,
         older_than,
+        workspace,
         limit,
     } = options;
     // Bound is applied only after classification/sort below.
     let list_limit = sessions_list_row_limit(limit);
+    let workspace_filter = workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+        .map(ToOwned::to_owned);
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -986,8 +1042,15 @@ pub async fn handle_cli_sessions(
                 println!("No sessions directory found.");
                 return Ok(());
             }
-            let mut entries: Vec<(String, u64, std::time::SystemTime, bool, bool, usize)> =
-                Vec::new();
+            let mut entries: Vec<(
+                String,
+                u64,
+                std::time::SystemTime,
+                bool,
+                bool,
+                usize,
+                Option<String>,
+            )> = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
                 for entry in rd.filter_map(|e| e.ok()) {
                     let path = entry.path();
@@ -1004,6 +1067,12 @@ pub async fn handle_cli_sessions(
                             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                         let integrity = inspect_snapshot_integrity(&path);
                         let canonical = is_canonical_snapshot_name(&stem, &integrity);
+                        let workspace = read_session_snapshot_workspace_key(&path);
+                        if let Some(needle) = workspace_filter.as_deref() {
+                            if !session_workspace_matches(workspace.as_deref(), needle) {
+                                continue;
+                            }
+                        }
                         entries.push((
                             stem,
                             size,
@@ -1011,6 +1080,7 @@ pub async fn handle_cli_sessions(
                             canonical,
                             integrity.valid,
                             integrity.message_count,
+                            workspace,
                         ));
                     }
                 }
@@ -1027,7 +1097,10 @@ pub async fn handle_cli_sessions(
                     total, canonical_count, artifact_count
                 );
                 let (shown, omitted) = sessions_list_visible_range(total, list_limit);
-                for (name, size, _, canonical, valid, messages) in entries.iter().take(shown) {
+                let has_workspace =
+                    workspace_filter.is_some() || entries.iter().any(|entry| entry.6.is_some());
+                for (name, size, _, canonical, valid, messages, workspace) in entries.iter().take(shown)
+                {
                     let kind = if *canonical {
                         "session"
                     } else if *valid {
@@ -1035,7 +1108,18 @@ pub async fn handle_cli_sessions(
                     } else {
                         "invalid"
                     };
-                    println!("  • {} ({} bytes, {} msgs, {})", name, size, messages, kind);
+                    if has_workspace {
+                        println!(
+                            "  • {} (Workspace: {}, {} bytes, {} msgs, {})",
+                            name,
+                            session_workspace_label(workspace.as_deref()),
+                            size,
+                            messages,
+                            kind
+                        );
+                    } else {
+                        println!("  • {} ({} bytes, {} msgs, {})", name, size, messages, kind);
+                    }
                 }
                 if omitted > 0 {
                     println!(

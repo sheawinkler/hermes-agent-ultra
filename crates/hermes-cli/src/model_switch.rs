@@ -148,6 +148,7 @@ pub fn provider_picker_description(provider: &str) -> &'static str {
             "nous" => {
                 "Nous Portal (Everything your agent needs, 300+ models with bundled tool use)"
             }
+            "fireworks" => "Fireworks AI (OpenAI-compatible direct model API)",
             "openrouter" => "OpenRouter (Pay-per-use API aggregator)",
             "moa" => "Mixture of Agents (virtual provider backed by Rust quorum fan-out)",
             "novita" => "NovitaAI (Cloud: Model API, Agent Sandbox, GPU Cloud)",
@@ -813,12 +814,22 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_curated_models_include_gpt55_variants() {
-        let models = provider_curated_models("openrouter");
-        assert!(models.contains(&"openai/gpt-5.5"));
-        assert!(models.contains(&"openai/gpt-5.5-pro"));
-        assert!(models.contains(&"tencent/hy3-preview:free"));
-        assert!(models.contains(&"tencent/hy3-preview"));
+    fn curated_models_track_current_agentic_catalogs() {
+        let openrouter = provider_curated_models("openrouter");
+        assert!(openrouter.contains(&"openai/gpt-5.6-terra"));
+        assert!(openrouter.contains(&"anthropic/claude-sonnet-5"));
+        assert!(openrouter.contains(&"x-ai/grok-4.5"));
+        assert!(!openrouter.contains(&"moonshotai/kimi-k2.6"));
+
+        let nous = provider_curated_models("nous");
+        assert!(nous.contains(&"openai/gpt-5.6-terra-pro"));
+        assert!(nous.contains(&"moonshotai/kimi-k3"));
+        assert!(!nous.contains(&"moonshotai/kimi-k2.6"));
+
+        assert!(provider_curated_models("kimi-coding").contains(&"kimi-k3"));
+        assert!(provider_curated_models("kimi-coding-cn").contains(&"kimi-k2.7-code-highspeed"));
+        assert!(provider_curated_models("alibaba-coding-plan").contains(&"qwen3.7-plus"));
+        assert_eq!(curated_provider_slugs()[1], "fireworks");
     }
 
     #[test]
@@ -869,6 +880,7 @@ mod tests {
         assert!(provider_picker_description("nous").contains("300+ models"));
         assert!(provider_picker_description("nous-api").contains("direct API key"));
         assert!(provider_picker_description("openrouter").contains("Pay-per-use API aggregator"));
+        assert!(provider_picker_description("fireworks").contains("Fireworks AI"));
         assert!(provider_picker_description("google-gemini-cli").contains("Code Assist OAuth flow"));
         assert!(provider_picker_description("xai").contains("Grok"));
         assert!(provider_picker_description("qwen-oauth").contains("Reuses local Qwen CLI login"));
