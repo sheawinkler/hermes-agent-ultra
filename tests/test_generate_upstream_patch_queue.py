@@ -412,15 +412,28 @@ def test_queue_authority_fails_for_staged_unstaged_and_untracked_local_source(
         assert ledger["local_source"]["tree_state_digest"] != clean["tree_state_digest"]
 
 
-def test_generated_workstream_artifact_is_excluded_from_local_source_dirtiness(
+def test_canonical_generated_artifacts_are_excluded_from_local_source_dirtiness(
     tmp_path: Path,
 ) -> None:
     local, _, _, _ = _common_history(tmp_path)
-    artifact = local / "docs/parity/upstream-workstreams.json"
-    artifact.parent.mkdir(parents=True, exist_ok=True)
-    artifact.write_text('{"old": true}\n', encoding="utf-8")
-    _commit(local, "track generated workstream artifact")
-    artifact.write_text('{"new": true}\n', encoding="utf-8")
+    generated_paths = (
+        "docs/parity/adapter-feature-matrix.md",
+        "docs/parity/behavioral-similarity-diff.md",
+        "docs/parity/deep-problem-solving-diff.md",
+        "docs/parity/parity-matrix.md",
+        "docs/parity/shared-diff-backlog.md",
+        "docs/parity/test-coverage-audit.md",
+        "docs/parity/test-intent-mapping.md",
+        "docs/parity/upstream-workstreams.json",
+        "docs/parity/workstream-status.md",
+    )
+    for relative in generated_paths:
+        artifact = local / relative
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("old\n", encoding="utf-8")
+    _commit(local, "track generated parity artifacts")
+    for relative in generated_paths:
+        (local / relative).write_text("new\n", encoding="utf-8")
 
     source = _local_source(local)
 
