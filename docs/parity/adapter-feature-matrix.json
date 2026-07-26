@@ -1,6 +1,12 @@
 {
-  "generated_at_utc": "2026-07-08T09:23:41.672641+00:00",
+  "generated_at_utc": "2026-07-26T11:07:14.712361+00:00",
   "items": [
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "builtin",
+      "status": "rust-native"
+    },
     {
       "category": "memory_plugin",
       "feature": "always",
@@ -183,7 +189,7 @@
     }
   ],
   "summary": {
-    "memory_plugins": 9,
+    "memory_plugins": 10,
     "non_rust_native": 0,
     "placeholder_status_entries": 0,
     "platform_adapters": 21

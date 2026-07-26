@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-08T09:23:41.104345+00:00",
+  "generated_at_utc": "2026-07-26T11:07:14.607413+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
@@ -75,7 +75,7 @@
       ]
     },
     {
-      "evidence_count": 178,
+      "evidence_count": 181,
       "evidence_sample": [
         "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-app-runtime/src/lib_tests.rs",
@@ -111,7 +111,7 @@
       ]
     },
     {
-      "evidence_count": 106,
+      "evidence_count": 136,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/agent_loop/agent_struct.rs",
@@ -128,16 +128,16 @@
         "crates/hermes-agent/src/agent_loop/methods_hooks_memory_context.rs",
         "crates/hermes-agent/src/agent_loop/methods_prompt_llm.rs",
         "crates/hermes-agent/src/agent_loop/methods_run.rs",
+        "crates/hermes-agent/src/agent_loop/methods_run_record.rs",
         "crates/hermes-agent/src/agent_loop/methods_run_stream.rs",
         "crates/hermes-agent/src/agent_loop/methods_runtime_provider.rs",
         "crates/hermes-agent/src/agent_loop/methods_session.rs",
         "crates/hermes-agent/src/agent_loop/methods_tools_background.rs",
+        "crates/hermes-agent/src/agent_loop/prepared_run_input.rs",
         "crates/hermes-agent/src/agent_loop/runtime_state.rs",
         "crates/hermes-agent/src/agent_loop/tests/coding_route_learning.rs",
         "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
-        "crates/hermes-agent/src/agent_loop/tests/llm_retry_stream.rs",
-        "crates/hermes-agent/src/agent_loop/tests/runtime_provider_resolution.rs",
-        "crates/hermes-agent/src/agent_loop/tests/runtime_smart_routing.rs"
+        "crates/hermes-agent/src/agent_loop/tests/llm_retry_stream.rs"
       ],
       "id": "agent-loop-and-runtime",
       "mapped": true,
@@ -178,7 +178,7 @@
       ]
     },
     {
-      "evidence_count": 69,
+      "evidence_count": 72,
       "evidence_sample": [
         "crates/hermes-cli/src/commands/command_agentic_workflows.rs",
         "crates/hermes-cli/src/commands/command_agentic_workflows/quorum_claims.rs",
@@ -203,8 +203,8 @@
         "crates/hermes-cli/src/commands/command_cli_chat_skills/quality.rs",
         "crates/hermes-cli/src/commands/command_cli_chat_skills/snapshot.rs",
         "crates/hermes-cli/src/commands/command_cli_chat_skills/tap.rs",
-        "crates/hermes-cli/src/commands/command_cli_chat_skills/update.rs",
-        "crates/hermes-cli/src/commands/command_cli_plugins_memory_mcp.rs"
+        "crates/hermes-cli/src/commands/command_cli_chat_skills/trust.rs",
+        "crates/hermes-cli/src/commands/command_cli_chat_skills/update.rs"
       ],
       "id": "skills-management-contract",
       "mapped": true,
@@ -215,7 +215,7 @@
       ]
     },
     {
-      "evidence_count": 71,
+      "evidence_count": 73,
       "evidence_sample": [
         "crates/hermes-cli/src/commands/command_agentic_workflows.rs",
         "crates/hermes-cli/src/commands/command_agentic_workflows/quorum_claims.rs",
@@ -240,8 +240,8 @@
         "crates/hermes-cli/src/commands/command_cli_chat_skills/quality.rs",
         "crates/hermes-cli/src/commands/command_cli_chat_skills/snapshot.rs",
         "crates/hermes-cli/src/commands/command_cli_chat_skills/tap.rs",
-        "crates/hermes-cli/src/commands/command_cli_chat_skills/update.rs",
-        "crates/hermes-cli/src/commands/command_cli_plugins_memory_mcp.rs"
+        "crates/hermes-cli/src/commands/command_cli_chat_skills/trust.rs",
+        "crates/hermes-cli/src/commands/command_cli_chat_skills/update.rs"
       ],
       "id": "cron-and-scheduler-runtime",
       "mapped": true,
@@ -250,8 +250,9 @@
       ]
     },
     {
-      "evidence_count": 12,
+      "evidence_count": 13,
       "evidence_sample": [
+        "crates/hermes-agent/src/memory_plugins/builtin.rs",
         "crates/hermes-agent/src/memory_plugins/byterover.rs",
         "crates/hermes-agent/src/memory_plugins/config_io.rs",
         "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
@@ -273,8 +274,9 @@
       ]
     },
     {
-      "evidence_count": 14,
+      "evidence_count": 15,
       "evidence_sample": [
+        "crates/hermes-environments/src/containment.rs",
         "crates/hermes-environments/src/daytona.rs",
         "crates/hermes-environments/src/docker.rs",
         "crates/hermes-environments/src/file_sync.rs",

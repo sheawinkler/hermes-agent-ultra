@@ -3,25 +3,25 @@
     {
       "kind": "upstream_queue_pending",
       "message": "upstream missing queue has pending rows; queue closure is enforced by global parity thresholds",
-      "pending": 1343
+      "pending": 2501
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 1.0
+      "value": 17982.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 1.0
+      "value": 16531.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 3439.0
+      "value": 4764.0
     }
   ],
   "audit_gate": {
@@ -95,7 +95,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-07-26T04:45:26.869759+00:00",
+  "generated_at_utc": "2026-07-26T11:08:36.943260+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -226,7 +226,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 53,
+      "direct_test_evidence_count": 54,
       "direct_test_evidence_sample": [
         "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-app-runtime/src/lib_tests.rs",
@@ -291,7 +291,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 90,
+      "direct_test_evidence_count": 91,
       "direct_test_evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/agent_loop/config.rs",
@@ -319,7 +319,7 @@
         "crates/hermes-agent/src/compression.rs",
         "crates/hermes-agent/src/compression/tests.rs"
       ],
-      "evidence_count": 135,
+      "evidence_count": 136,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/agent_loop/agent_struct.rs",
@@ -649,10 +649,10 @@
     "divergence_review_overdue": 0,
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
-    "queue_pending": 1343,
-    "queue_total": 1839,
-    "rust_test_files": 467,
-    "rust_test_functions": 8912,
+    "queue_pending": 2501,
+    "queue_total": 3113,
+    "rust_test_files": 470,
+    "rust_test_functions": 8996,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
