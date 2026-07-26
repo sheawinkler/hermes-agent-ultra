@@ -7,7 +7,14 @@ FORMULA_DIR="Formula"
 FORMULA_FILE="${FORMULA_DIR}/hermes-agent-ultra.rb"
 
 sha256_file() {
-  sha256sum "$1" | awk '{print $1}'
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    echo "Missing required command: shasum or sha256sum" >&2
+    exit 1
+  fi
 }
 
 MACOS_AARCH64_SHA="$(sha256_file dist/hermes-macos-aarch64.tar.gz)"

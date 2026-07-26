@@ -266,3 +266,74 @@ fn default_install_preserves_existing_upstream_hermes_command() {
         "#!/usr/bin/env sh\necho upstream hermes\n"
     );
 }
+
+#[test]
+fn windows_release_installer_is_portable_and_published() {
+    let installer_path = repo_root().join("scripts/install.ps1");
+    let installer = fs::read(&installer_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", installer_path.display()));
+    assert!(
+        installer.is_ascii(),
+        "Windows PowerShell 5.1 must be able to parse the BOM-less release installer"
+    );
+    let installer = String::from_utf8(installer).expect("ASCII installer is UTF-8");
+    for required in [
+        "function Get-TargetAsset",
+        "function Get-ReleaseUrl",
+        "function Install-HermesRelease",
+        "hermes-windows-x86_64.zip",
+        "Expand-Archive",
+        "Legacy hermes alias not installed by default; existing upstream hermes commands are left untouched.",
+        "New-Object System.Text.UTF8Encoding($false)",
+    ] {
+        assert!(
+            installer.contains(required),
+            "Windows release installer is missing required contract: {required}"
+        );
+    }
+
+    let ci_path = repo_root().join(".github/workflows/ci.yml");
+    let ci = fs::read_to_string(&ci_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", ci_path.display()));
+    for required in [
+        "windows-installer-contract:",
+        "Parser]::ParseFile(",
+        "scripts/install.ps1 must remain ASCII",
+    ] {
+        assert!(
+            ci.contains(required),
+            "CI must retain the Windows installer contract gate: {required}"
+        );
+    }
+
+    let release_path = repo_root().join(".github/workflows/release.yml");
+    let release = fs::read_to_string(&release_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", release_path.display()));
+    assert!(
+        release.contains("scripts/install.ps1"),
+        "tagged releases must publish the Windows installer"
+    );
+    assert!(
+        release.contains("windows-release-smoke:"),
+        "tagged releases must exercise the published Windows installer"
+    );
+    assert!(
+        release.contains("targets: aarch64-apple-darwin,x86_64-apple-darwin"),
+        "tagged releases must install both macOS target toolchains"
+    );
+}
+
+#[test]
+fn homebrew_formula_generator_has_portable_checksum_support() {
+    let generator_path = repo_root().join("scripts/generate-homebrew-formula.sh");
+    let generator = fs::read_to_string(&generator_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", generator_path.display()));
+    assert!(
+        generator.contains("command -v shasum") && generator.contains("shasum -a 256"),
+        "macOS must be able to generate release checksums with its bundled shasum"
+    );
+    assert!(
+        generator.contains("elif command -v sha256sum"),
+        "Linux checksum support must remain available"
+    );
+}
