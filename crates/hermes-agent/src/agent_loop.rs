@@ -75,7 +75,6 @@ use crate::smart_model_routing::{
 };
 pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
 use crate::steer::{is_formatted_steer_marker, STEER_CHANNEL_NOTE};
-use crate::tool_call_args::{repair_tool_call_arguments, ToolArgumentRepair};
 
 /// Bound consecutive provider responses that claim a tool call but carry none.
 ///

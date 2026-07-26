@@ -433,9 +433,6 @@ pub struct AgentConfig {
     #[serde(default = "default_invalid_tool_call_max_retries")]
     pub invalid_tool_call_max_retries: u32,
 
-    /// Max retries when tool call arguments are invalid JSON.
-    #[serde(default = "default_invalid_tool_json_max_retries")]
-    pub invalid_tool_json_max_retries: u32,
 
     /// Max retries when streaming assembles truncated tool arguments (`finish_reason=length` parity).
     #[serde(default = "default_truncated_tool_call_max_retries")]
@@ -590,9 +587,6 @@ fn default_invalid_tool_call_max_retries() -> u32 {
     3
 }
 
-fn default_invalid_tool_json_max_retries() -> u32 {
-    3
-}
 
 fn default_truncated_tool_call_max_retries() -> u32 {
     3
@@ -682,7 +676,6 @@ impl Default for AgentConfig {
             preflight_context_compress: default_preflight_context_compress(),
             persist_user_message: None,
             invalid_tool_call_max_retries: default_invalid_tool_call_max_retries(),
-            invalid_tool_json_max_retries: default_invalid_tool_json_max_retries(),
             truncated_tool_call_max_retries: default_truncated_tool_call_max_retries(),
             code_index_enabled: default_code_index_enabled(),
             code_index_max_files: default_code_index_max_files(),

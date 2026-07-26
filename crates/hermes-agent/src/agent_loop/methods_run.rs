@@ -163,7 +163,6 @@ impl AgentLoop {
         let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
         let mut invalid_tool_retries: u32 = 0;
-        let mut invalid_json_retries: u32 = 0;
         let mut last_content_with_tools: Option<String> = None;
         let mut dropped_tool_call_retries: u32 = 0;
         let mut context_pressure_warned_at: f64 = 0.0;
@@ -903,54 +902,25 @@ impl AgentLoop {
             }
             invalid_tool_retries = 0;
 
-            let mut invalid_json_args: Vec<(String, String)> = Vec::new();
-            for tc in &mut tool_calls {
-                if let Err(e) = Self::normalize_tool_call_arguments(tc) {
-                    invalid_json_args.push((tc.function.name.clone(), e));
-                }
-            }
+            let (valid_tool_calls, invalid_json_args) =
+                Self::partition_valid_tool_call_arguments(tool_calls);
+            tool_calls = valid_tool_calls;
             if !invalid_json_args.is_empty() {
-                invalid_json_retries = invalid_json_retries.saturating_add(1);
-                if invalid_json_retries < self.config.invalid_tool_json_max_retries {
-                    self.emit_status(
-                        "lifecycle",
-                        &format!(
-                            "Invalid tool JSON arguments — retrying ({}/{})",
-                            invalid_json_retries, self.config.invalid_tool_json_max_retries
-                        ),
-                    );
-                    let _ = ctx.get_messages_mut().pop();
-                    continue;
-                }
                 self.emit_status(
                     "lifecycle",
-                    &format!(
-                        "Max invalid JSON retries reached ({}); returning tool errors",
-                        self.config.invalid_tool_json_max_retries
-                    ),
+                    "Rejected malformed tool arguments without dispatching those calls",
                 );
-                invalid_json_retries = 0;
-                for tc in &tool_calls {
-                    let content = if let Some((_, err)) = invalid_json_args
-                        .iter()
-                        .find(|(name, _)| name == &tc.function.name)
-                    {
-                        format!(
-                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
-                                err
-                            )
-                    } else {
-                        "Skipped: other tool call in this response had invalid JSON.".to_string()
-                    };
+                for (tc, error) in invalid_json_args {
                     ctx.add_message(Self::named_tool_result_message(
-                        tc.id.clone(),
-                        tc.function.name.clone(),
-                        content,
+                        tc.id,
+                        tc.function.name,
+                        format!("Error: Invalid tool arguments. {error}"),
                     ));
                 }
+            }
+            if tool_calls.is_empty() {
                 continue;
             }
-            invalid_json_retries = 0;
             self.apply_tool_request_middleware_to_calls(&mut tool_calls, total_turns);
 
             for tc in &tool_calls {

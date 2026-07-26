@@ -477,19 +477,31 @@ impl AgentLoop {
     }
 
     fn normalize_tool_call_arguments(tc: &mut ToolCall) -> Result<(), String> {
-        let (normalized, repair) = repair_tool_call_arguments(&tc.function.arguments);
-        if repair != ToolArgumentRepair::Unchanged {
-            tracing::warn!(
-                "repaired tool-call arguments for tool={} repair={:?}",
-                tc.function.name,
-                repair
+        let parsed: Value = serde_json::from_str(&tc.function.arguments).map_err(|err| {
+            format!(
+                "tool arguments must be a valid JSON object; tool was not executed: {err}"
+            )
+        })?;
+        if !parsed.is_object() {
+            return Err(
+                "tool arguments must be a valid JSON object; tool was not executed".to_string(),
             );
         }
-        serde_json::from_str::<Value>(&normalized)
-            .map(|_| {
-                tc.function.arguments = normalized;
-            })
-            .map_err(|e| e.to_string())
+        Ok(())
+    }
+
+    fn partition_valid_tool_call_arguments(
+        tool_calls: Vec<ToolCall>,
+    ) -> (Vec<ToolCall>, Vec<(ToolCall, String)>) {
+        let mut valid = Vec::with_capacity(tool_calls.len());
+        let mut invalid = Vec::new();
+        for mut tool_call in tool_calls {
+            match Self::normalize_tool_call_arguments(&mut tool_call) {
+                Ok(()) => valid.push(tool_call),
+                Err(error) => invalid.push((tool_call, error)),
+            }
+        }
+        (valid, invalid)
     }
 
     fn extra_body_for_api_mode(&self, api_mode: &ApiMode) -> Option<Value> {
@@ -1740,10 +1752,8 @@ impl AgentLoop {
                 });
             }
 
-            for tc in &mut tool_calls {
-                let (normalized, _) = repair_tool_call_arguments(&tc.function.arguments);
-                tc.function.arguments = normalized;
-            }
+            // Keep model-emitted arguments intact. Invalid arguments are rejected at
+            // the dispatch boundary rather than being repaired into executable input.
 
             let has_truncated_tool_args = tool_calls.iter().any(|tc| {
                 let trimmed = tc.function.arguments.trim();

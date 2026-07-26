@@ -971,54 +971,45 @@
     }
 
     #[test]
-    fn normalize_tool_call_arguments_repairs_malformed_json_without_retry_error() {
-        let mut tc = ToolCall {
-            id: "call_1".to_string(),
+    fn malformed_tool_call_arguments_are_rejected_without_repair() {
+        let malformed = ToolCall {
+            id: "call_bad".to_string(),
             function: hermes_core::FunctionCall {
                 name: "terminal".to_string(),
                 arguments: "{\"command\":\"ls -la\",\"timeout\":30".to_string(),
             },
             extra_content: None,
         };
-
-        AgentLoop::normalize_tool_call_arguments(&mut tc).expect("repairable arguments");
-        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
-        assert_eq!(parsed["command"], "ls -la");
-        assert_eq!(parsed["timeout"], 30);
-    }
-
-    #[tokio::test]
-    async fn stream_tool_call_arguments_are_repaired_before_truncation_retry_gate() {
-        let provider = Arc::new(StreamRetryProvider::new(
-            StreamRetryScenario::MalformedToolArgs,
-        ));
-        let cfg = AgentConfig {
-            stream_read_max_retries: 0,
-            ..AgentConfig::default()
+        let scalar = ToolCall {
+            id: "call_scalar".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: "\"not-an-object\"".to_string(),
+            },
+            extra_content: None,
         };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider);
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-
-        let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
-            .await
-            .expect("stream should collect");
-
-        let StreamCollectOutcome::Complete(resp) = out else {
-            panic!("expected complete response");
+        let valid = ToolCall {
+            id: "call_good".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: "{\"command\":\"pwd\"}".to_string(),
+            },
+            extra_content: None,
         };
-        assert_eq!(resp.finish_reason.as_deref(), Some("tool_calls"));
-        let tc = resp
-            .message
-            .tool_calls
-            .as_ref()
-            .and_then(|calls| calls.first())
-            .expect("tool call");
-        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
-        assert_eq!(parsed["command"], "ls -la");
-        assert_eq!(parsed["timeout"], 30);
+
+        let (valid_calls, invalid_calls) =
+            AgentLoop::partition_valid_tool_call_arguments(vec![malformed, scalar, valid]);
+
+        assert_eq!(valid_calls.len(), 1);
+        assert_eq!(valid_calls[0].id, "call_good");
+        assert_eq!(valid_calls[0].function.arguments, "{\"command\":\"pwd\"}");
+        assert_eq!(invalid_calls.len(), 2);
+        assert_eq!(invalid_calls[0].0.id, "call_bad");
+        assert_eq!(invalid_calls[1].0.id, "call_scalar");
+        for (_, error) in invalid_calls {
+            assert!(error.contains("valid JSON object"));
+            assert!(error.contains("not executed"));
+        }
     }
 
     #[tokio::test]
