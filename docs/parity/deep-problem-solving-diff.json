@@ -9,15 +9,15 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_build_inference_messages_injects_runtime_reformulation"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_runtime_reformulation_caps_long_prompt_preview_without_losing_user_message"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_build_inference_messages_respects_reformulation_toggle_off"
         }
       ],
@@ -39,15 +39,15 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_looks_like_status_only_output_detects_defer_only_language"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_should_force_objective_continuation_for_mission_status_only_turn"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_set_session_objective_injects_replaces_and_clears_system_message"
         }
       ],
@@ -70,18 +70,18 @@
       "rust_tests": [
         {
           "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
-          "name": "test_build_search_payload_includes_project_and_topic"
+          "name": "search_payloads_and_routes_are_partitioned_per_subject"
         },
         {
           "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
-          "name": "test_apply_pressure_tuning_forces_fast_mode_and_sources"
+          "name": "pressure_tuning_preserves_subject_scoped_payload"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_objective_context_autopin_sets_topic_for_default_path"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_objective_context_autopin_respects_custom_topic_pin"
         }
       ],
@@ -104,19 +104,19 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_repo_review_tool_profile_keeps_todo_filters_messaging"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_repo_review_discovery_policy_trims_repeated_loops"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_repo_review_intent_includes_path_scoped_read_only_research"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_repo_research_plan_finalizer_requires_workstream_evidence"
         },
         {
@@ -147,15 +147,15 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_web_research_finalizer_requires_web_tool_and_urls"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_web_research_finalizer_requires_source_quality_counts"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_web_research_system_hint_reports_tool_availability"
         },
         {
@@ -163,7 +163,7 @@
           "name": "test_resolve_web_toolset"
         },
         {
-          "file": "crates/hermes-acp/src/tools.rs",
+          "file": "crates/hermes-acp/src/tools/tests.rs",
           "name": "format_tool_result_renders_web_search_results"
         }
       ],
@@ -187,23 +187,23 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests.rs",
           "name": "test_collect_quorum_models_dedup_and_limit"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_compose_quorum_messages_coalesces_systems_before_user_messages"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests.rs",
           "name": "test_required_quorum_success_majority"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_quorum_output_is_degraded_non_answer"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests.rs",
           "name": "test_quorum_mode_armed_once_triggers_without_system_hint"
         }
       ],
@@ -225,24 +225,24 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_is_provider_tool_payload_error_detects_schema_rejections"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_tool_loop_guard_trips_on_consecutive_full_failure_turns"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_tool_loop_guard_ignores_partial_success_turns"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+          "file": "crates/hermes-agent/src/agent_loop/tests/llm_retry_stream.rs",
+          "name": "stream_retry_before_visible_output_recovers"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_text_only_drop_does_not_retry"
+          "file": "crates/hermes-agent/src/agent_loop/tests/llm_retry_stream.rs",
+          "name": "stream_partial_text_eof_is_typed_premature_close"
         }
       ],
       "score": 1.0,
@@ -264,27 +264,27 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/coding_route_learning.rs",
           "name": "test_smart_model_routing_cheap_route_for_simple_turn"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests_runtime.rs",
           "name": "test_smart_model_routing_skips_complex_turn"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "test_route_learning_persists_across_agent_restarts"
+          "file": "crates/hermes-agent/src/agent_loop/tests/coding_route_learning.rs",
+          "name": "governed_runs_keep_route_statistics_in_memory_without_side_files"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests_runtime.rs",
           "name": "test_route_learning_decay_and_ttl"
         },
         {
-          "file": "crates/hermes-app-runtime/src/lib.rs",
+          "file": "crates/hermes-app-runtime/src/lib_tests.rs",
           "name": "test_build_agent_config_maps_failover_chain_from_env"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_is_transient_retryable_error_detects_timeout_and_rate_limit"
         }
       ],
@@ -308,31 +308,31 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_claim_retry_for_research_without_explicit_evidence"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_claim_retry_for_missing_evidence_path"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_output_quality_retry_detects_placeholders"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_output_quality_retry_detects_fake_attachments"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_output_quality_retry_detects_duplicate_lines"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_action_execution_retry_detects_intent_narration"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/governor_finalizer.rs",
           "name": "test_finalizer_action_execution_retry_skips_when_evidence_present"
         }
       ],
@@ -354,11 +354,11 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-agent/src/context.rs",
+          "file": "crates/hermes-agent/src/context/tests.rs",
           "name": "test_truncate_preserves_system_messages"
         },
         {
-          "file": "crates/hermes-agent/src/context.rs",
+          "file": "crates/hermes-agent/src/context/tests.rs",
           "name": "test_context_manager_compress_over_threshold"
         },
         {
@@ -370,47 +370,47 @@
           "name": "test_load_workspace_context"
         },
         {
-          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "file": "crates/hermes-agent/src/agent_loop/tests/llm_retry_stream.rs",
           "name": "stream_memory_context_blocks_are_scrubbed_from_callbacks_and_final_message"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "context_firewall_blocks_secret_and_untrusted_instruction_lanes"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "context_firewall_marks_stale_memory_as_unproven"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "evidence_compiler_marks_supported_stale_and_unproven_claims"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "problem_solving_kernel_builds_nondeferrable_loop"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "adaptive_tool_planner_ranks_parallel_safe_high_value_tools"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "contextlattice_memory_cycle_escalates_zero_hit_retrieval"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "behavioral_eval_arena_scores_missing_expected_behaviors"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "self_audit_finalizer_blocks_unverified_claims_and_memory_leaks"
         },
         {
-          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "file": "crates/hermes-intelligence/src/future_kernel/tests.rs",
           "name": "future_grade_guidance_mentions_all_runtime_components"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-cli/src/app/tests/session_runtime.rs",
           "name": "test_build_inference_messages_injects_runtime_reformulation"
         }
       ],
@@ -440,7 +440,7 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-24T00:21:25.371391+00:00",
+  "generated_at_utc": "2026-07-26T03:00:34.148812+00:00",
   "manifest": "docs/parity/deep-problem-solving-cases.json",
   "schema_version": 1,
   "summary": {
