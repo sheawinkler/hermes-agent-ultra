@@ -115,6 +115,7 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
 #[cfg(any(
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
+    feature = "gateway-slack",
     feature = "gateway-weixin"
 ))]
 async fn run_gateway_incoming_loop(
@@ -412,7 +413,18 @@ async fn register_gateway_adapters(
                     proxy: Default::default(),
                 };
                 match SlackAdapter::new(slack_cfg) {
-                    Ok(adapter) => gateway.register_adapter("slack", Arc::new(adapter)).await,
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        if adapter.config().socket_mode {
+                            let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                            adapter.set_inbound_sender(tx).await;
+                            let gw_clone = gateway.clone();
+                            sidecar_tasks.push(tokio::spawn(async move {
+                                run_gateway_incoming_loop(gw_clone, rx, "slack").await;
+                            }));
+                        }
+                        gateway.register_adapter("slack", adapter).await;
+                    }
                     Err(e) => println!("Slack enabled but failed to initialize: {}", e),
                 }
             } else {

@@ -22,6 +22,7 @@ impl PlatformAdapter for SlackAdapter {
         {
             debug!(error = %err, "Slack auth scope check skipped");
         }
+        self.start_socket_mode_runtime().await?;
         self.base.mark_running();
         Ok(())
     }
@@ -29,7 +30,7 @@ impl PlatformAdapter for SlackAdapter {
     async fn stop(&self) -> Result<(), GatewayError> {
         info!("Slack adapter stopping");
         self.base.mark_stopped();
-        self.stop_signal.notify_one();
+        self.stop_socket_mode_runtime().await;
         Ok(())
     }
 

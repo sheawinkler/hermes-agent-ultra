@@ -81,6 +81,7 @@ use hermes_gateway::gateway::{
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
     feature = "gateway-telegram",
+    feature = "gateway-slack",
     feature = "gateway-webhook",
     feature = "gateway-wecom-callback",
     feature = "gateway-weixin"
@@ -157,6 +158,7 @@ use tokio::sync::broadcast;
     feature = "gateway-api-server",
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
+    feature = "gateway-slack",
     feature = "gateway-webhook",
     feature = "gateway-wecom-callback",
     feature = "gateway-weixin"
