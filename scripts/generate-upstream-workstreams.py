@@ -185,7 +185,7 @@ WORKSTREAMS: tuple[dict[str, Any], ...] = (
             "gateway-platforms",
             "sessions-checkpoints-worktrees",
         ],
-        "prefixes": ("apps/desktop/", "apps/bootstrap-installer/"),
+        "prefixes": ("apps/desktop/", "apps/bootstrap-installer/", "apps/shared/"),
         "terms": ("desktop", "electron", "ipc"),
     },
     {
@@ -206,6 +206,7 @@ WORKSTREAMS: tuple[dict[str, Any], ...] = (
         "description": "Release automation, packaging, installers, CI, and dependency metadata.",
         "dependencies": [],
         "prefixes": (
+            ".gitignore",
             ".github/",
             "scripts/",
             "contributors/",

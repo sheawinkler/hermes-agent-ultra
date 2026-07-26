@@ -80,6 +80,21 @@ def test_routes_cron_paths_to_scheduler_before_cli_or_plugins() -> None:
     )
 
 
+def test_routes_shared_app_and_repository_metadata() -> None:
+    assert (
+        module.classify_workstream(
+            _commit("6", "fix(shared): add script alias", ["apps/shared/package.json"])
+        )
+        == "desktop-app"
+    )
+    assert (
+        module.classify_workstream(
+            _commit("7", "chore: ignore node modules", [".gitignore"])
+        )
+        == "release-packaging-build"
+    )
+
+
 def test_code_path_wins_over_companion_test_path() -> None:
     commit = _commit(
         "d",
