@@ -583,9 +583,8 @@ impl AgentLoop {
         if self.config.skip_context_files {
             return None;
         }
-        let cwd = std::env::var("TERMINAL_CWD")
-            .ok()
-            .map(std::path::PathBuf::from)
+        let cwd = crate::runtime_cwd::workspace_cwd()
+            .or_else(|| std::env::var("TERMINAL_CWD").ok().map(std::path::PathBuf::from))
             .unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });

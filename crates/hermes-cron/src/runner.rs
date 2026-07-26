@@ -8,7 +8,6 @@
 //! runs the agent with a restricted tool set that excludes the cronjob tool.
 
 use std::collections::HashSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -16,7 +15,9 @@ use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
 
 use hermes_agent::agent_loop::ToolRegistry;
-use hermes_agent::{AgentConfig, AgentLoop, RunInvocationContext, RunRuntime};
+use hermes_agent::{
+    with_workspace_cwd, AgentConfig, AgentLoop, RunInvocationContext, RunRuntime,
+};
 use hermes_environments::ExecutionContainmentContext;
 use hermes_config::{load_prefill_messages, GatewayConfig};
 use hermes_core::{
@@ -81,27 +82,6 @@ struct ScriptRun {
     code: String,
 }
 
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvVarGuard {
-    fn set(key: &'static str, value: &Path) -> Self {
-        let previous = std::env::var_os(key);
-        std::env::set_var(key, value);
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(previous) => std::env::set_var(self.key, previous),
-            None => std::env::remove_var(self.key),
-        }
-    }
-}
 
 fn trim_script_output(text: &str) -> String {
     let trimmed = text.trim();
@@ -538,9 +518,6 @@ impl CronRunner {
             runnable_job.script = None;
         }
 
-        let _terminal_cwd = workdir
-            .as_deref()
-            .map(|workdir| EnvVarGuard::set("TERMINAL_CWD", workdir));
 
         // Build agent config from job settings. The process resolves execution
         // mode exactly once; jobs must not silently re-read a different mode.
@@ -580,8 +557,7 @@ impl CronRunner {
         let messages = self.build_messages(&runnable_job)?;
 
         // Run the agent loop
-        let result = agent_loop
-            .run(messages, Some(tools))
+        let result = with_workspace_cwd(workdir, agent_loop.run(messages, Some(tools)))
             .await
             .map_err(CronError::Agent)?;
 
@@ -916,6 +892,7 @@ fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use crate::job::CronJob;
     use hermes_core::{Skill, ToolError};
 

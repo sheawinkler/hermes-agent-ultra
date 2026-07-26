@@ -117,9 +117,10 @@ impl AgentLoop {
         {
             builder = builder.with_block(CONTEXTLATTICE_OPERATIONAL_GUIDANCE);
         }
+        let workspace_cwd = crate::runtime_cwd::workspace_cwd();
         let runtime_mode = resolve_runtime_mode(
             self.config.platform.as_deref(),
-            None,
+            workspace_cwd.as_deref(),
             Some(&self.config.coding_context),
             Some(model_for_prompt),
         );

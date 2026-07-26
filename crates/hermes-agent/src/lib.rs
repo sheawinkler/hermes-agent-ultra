@@ -41,6 +41,7 @@ pub mod reasoning;
 pub mod run_export;
 pub mod run_ledger;
 pub mod run_runtime;
+mod runtime_cwd;
 mod run_proof;
 pub mod sealed_artifact;
 pub mod session_persistence;
@@ -145,6 +146,9 @@ pub use run_proof::{
     RunProofTrustDecision, RunProofTrustPolicy, TrustPolicyVerifiedRunProof, RUN_PROOF_SCHEMA,
     RUN_PROOF_SCHEMA_VERSION, RUN_PROOF_SIGNATURE_ALGORITHM,
 };
+
+// Re-export invocation-local workspace scoping for scheduled runners.
+pub use runtime_cwd::with_workspace_cwd;
 
 // Re-export context files
 pub use code_index::{CodeIndex, CodeIndexConfig, IndexStats, ReferenceHit, SymbolInfo};

@@ -52,6 +52,24 @@ pub const SUB_AGENT_MIN_TURNS: u32 = 2;
 /// Ceiling on child max_turns to keep sub-tasks bounded.
 pub const SUB_AGENT_MAX_TURNS_CAP: u32 = 12;
 
+/// Tools that a delegated child must never advertise. `execute_code` is
+/// intentionally absent: child agents may use it to batch mechanical work.
+const CHILD_BLOCKED_TOOL_NAMES: &[&str] = &[
+    "delegate_task",
+    "clarify",
+    "memory",
+    "send_message",
+    "cronjob",
+];
+
+fn filter_child_tool_schemas(tool_schemas: Vec<ToolSchema>) -> Vec<ToolSchema> {
+    tool_schemas
+        .into_iter()
+        .filter(|schema| !CHILD_BLOCKED_TOOL_NAMES.contains(&schema.name.as_str()))
+        .collect()
+}
+
+
 #[derive(Debug)]
 enum CancelAndJoinError {
     Join(tokio::task::JoinError),
@@ -414,10 +432,12 @@ impl SubAgentOrchestrator {
         // `None` means no child override: preserve the parent's exact advertised
         // set, including an intentionally empty set. Passing `None` to
         // `AgentLoop::run` would instead re-advertise the whole child registry.
+        // Apply the child capability boundary after the parent has selected its
+        // schemas so a mixed parent bundle cannot re-expose sensitive tools.
         let inherited_tools = req
             .toolset
             .is_none()
-            .then(|| req.inherited_tool_schemas.clone());
+            .then(|| filter_child_tool_schemas(req.inherited_tool_schemas.clone()));
         let initial = initial_messages(&req.task, req.context.as_deref());
 
         let child_interrupt = InterruptController::new();
@@ -875,6 +895,66 @@ mod tests {
         assert_eq!(parsed["status"], "completed");
         let seen = seen_tools.lock().expect("seen tools lock");
         assert_eq!(seen.as_slice(), &[vec!["terminal".to_string()]]);
+    }
+
+    #[tokio::test]
+    async fn omitted_toolset_blocks_child_only_tools_but_keeps_execute_code() {
+        let schemas = [
+            "terminal",
+            "execute_code",
+            "delegate_task",
+            "clarify",
+            "memory",
+            "send_message",
+            "cronjob",
+        ]
+        .into_iter()
+        .map(|name| ToolSchema::new(name, format!("{name} tool"), JsonSchema::new("object")))
+        .collect::<Vec<_>>();
+        let mut registry = ToolRegistry::new();
+        for schema in &schemas {
+            registry.register_test_observation(
+                &schema.name,
+                schema.clone(),
+                Arc::new(|_| Ok("unused".to_string())),
+            );
+        }
+        let seen_tools = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = Arc::new(test_orchestrator(SubAgentOrchestratorConfig {
+            parent_config: AgentConfig {
+                max_turns: 2,
+                ..AgentConfig::default()
+            },
+            tool_registry: Arc::new(registry),
+            llm_provider: Arc::new(RecordingProvider {
+                seen_tools: seen_tools.clone(),
+            }),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("parent".into()),
+            timeout: Duration::from_secs(2),
+        }));
+
+        let out = orch
+            .execute(SubAgentRequest {
+                task: "child task".into(),
+                child_depth: 1,
+                max_depth: 4,
+                parent_run_id: Some(orch.parent_run_id),
+                inherited_tool_schemas: schemas,
+                ..Default::default()
+            })
+            .await;
+
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["status"], "completed");
+        let seen = seen_tools.lock().expect("seen tools lock");
+        assert_eq!(
+            seen.as_slice(),
+            &[vec!["terminal".to_string(), "execute_code".to_string()]]
+        );
     }
 
     #[tokio::test]

@@ -849,6 +849,9 @@ impl AgentLoop {
             let invocation_key = format!("turn-{turn}:slot-{tool_slot}");
             let tool_name = tc.function.name.clone();
             let raw_args = tc.function.arguments.clone();
+            // `JoinSet::spawn` does not inherit Tokio task-local values. Carry the
+            // invocation's workspace explicitly so terminal calls remain scoped.
+            let runtime_workspace_cwd = crate::runtime_cwd::workspace_cwd();
             let registry = self.tool_registry.clone();
             let plugin_manager = self.plugin_manager.clone();
             let max_delegate_depth = max_delegate_depth;
@@ -858,7 +861,7 @@ impl AgentLoop {
             let invocation_key = invocation_key.clone();
 
             join_set.spawn(async move {
-                let params: Value = match serde_json::from_str(&raw_args) {
+                let mut params: Value = match serde_json::from_str(&raw_args) {
                     Ok(v) => v,
                     Err(e) => {
                         let error_msg = format!(
@@ -869,6 +872,15 @@ impl AgentLoop {
                         return Ok(ToolResult::err(&tool_call_id, error_msg));
                     }
                 };
+                if tool_name == "terminal" {
+                    if let (Some(workdir), Some(params)) =
+                        (runtime_workspace_cwd.as_ref(), params.as_object_mut())
+                    {
+                        params.entry("workdir".to_string()).or_insert_with(|| {
+                            Value::String(workdir.to_string_lossy().into_owned())
+                        });
+                    }
+                }
                 let middleware_ctx = ToolExecutionMiddlewareContext {
                     tool_name: tool_name.clone(),
                     tool_call_id: tool_call_id.clone(),
