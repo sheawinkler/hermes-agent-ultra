@@ -436,6 +436,45 @@ def test_prefix_sha_override_is_rejected_instead_of_prefix_matched(tmp_path: Pat
     assert "malformed_override_sha" in _error_codes(queue)
 
 
+
+def test_intentional_divergence_rejects_unapproved_changed_path(tmp_path: Path) -> None:
+    local, upstream_work, fork, upstream = _common_history(tmp_path)
+    (upstream_work / "delta.txt").write_text("upstream\n", encoding="utf-8")
+    upstream_sha = _commit(upstream_work, "upstream delta")
+    _git(upstream_work, "push", "-q", "origin", "main")
+    fork_sha = _git(local, "rev-parse", "HEAD").stdout.strip()
+    (local / "overrides.json").write_text(
+        json.dumps(
+            {
+                "sha": {
+                    upstream_sha: {
+                        "disposition": "superseded",
+                        "owner": "test",
+                        "notes": "unapproved path must remain pending",
+                        "provenance": {
+                            "upstream_sha": upstream_sha,
+                            "fork_sha": fork_sha,
+                            "evidence": "fixture provenance",
+                        },
+                        "semantic_equivalence": {
+                            "method": "intentional_divergence",
+                            "evidence": "fixture divergence claim",
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result, queue, ledger = _run_queue(local, fork, upstream)
+
+    assert result.returncode == 1
+    assert queue["commits"][0]["disposition"] == "pending"
+    assert "override_divergence_path_unapproved" in _error_codes(queue)
+    assert ledger["source_valid"] is False
+
+
 def test_prior_ported_disposition_is_not_reused(tmp_path: Path) -> None:
     local, upstream_work, fork, upstream = _common_history(tmp_path)
     (upstream_work / "delta.txt").write_text("upstream\n", encoding="utf-8")

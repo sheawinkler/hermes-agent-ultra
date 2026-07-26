@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
-GENERATOR_VERSION = "3.4.0"
+GENERATOR_VERSION = "3.5.0"
 CANONICAL_UPSTREAM_URL = "https://github.com/NousResearch/hermes-agent.git"
 CANONICAL_FORK_URL = "https://github.com/sheawinkler/hermes-agent-ultra.git"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1564,11 +1564,72 @@ def load_overrides(path: Path, errors: ErrorCollector) -> dict[str, dict[str, An
     return overrides
 
 
+def load_approved_divergence_prefixes(
+    path: Path, errors: ErrorCollector
+) -> tuple[str, ...]:
+    """Load exact-file and directory-prefix approvals from the divergence registry."""
+
+    if not path.exists():
+        return ()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.add(
+            "intentional_divergence_registry_invalid",
+            f"cannot load intentional divergence registry: {exc}",
+        )
+        return ()
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        errors.add(
+            "intentional_divergence_registry_invalid",
+            "intentional divergence registry must contain an items array",
+        )
+        return ()
+    prefixes: set[str] = set()
+    for item in payload["items"]:
+        if not isinstance(item, dict) or item.get("status") != "approved":
+            continue
+        raw_prefixes = item.get("path_prefixes", [])
+        if not isinstance(raw_prefixes, list):
+            errors.add(
+                "intentional_divergence_registry_invalid",
+                "approved divergence path_prefixes must be an array",
+            )
+            continue
+        for raw_prefix in raw_prefixes:
+            prefix = str(raw_prefix).strip().replace("\\", "/")
+            pure = PurePosixPath(prefix)
+            if (
+                not prefix
+                or prefix.startswith("/")
+                or ".." in pure.parts
+                or "." in pure.parts
+            ):
+                errors.add(
+                    "intentional_divergence_registry_invalid",
+                    f"unsafe approved divergence prefix: {prefix!r}",
+                )
+                continue
+            prefixes.add(prefix)
+    return tuple(sorted(prefixes))
+
+
+def path_has_approved_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+    normalized = path.replace("\\", "/").lstrip("./")
+    return any(
+        normalized == prefix.rstrip("/")
+        or normalized.startswith(prefix.rstrip("/") + "/")
+        for prefix in prefixes
+    )
+
+
 def validate_override(
     repo_root: Path,
     override: dict[str, Any],
     upstream_sha: str,
     upstream_tree_sha: str,
+    upstream_files: list[str],
+    approved_divergence_prefixes: tuple[str, ...],
     fork_ref: str,
     local_patch_candidates: dict[str, set[str]],
     upstream_patch_id: str | None,
@@ -1594,6 +1655,20 @@ def validate_override(
                 sha=upstream_sha,
             )
             return False, ""
+        if method == "intentional_divergence":
+            unapproved_paths = [
+                path
+                for path in upstream_files
+                if not path_has_approved_prefix(path, approved_divergence_prefixes)
+            ]
+            if unapproved_paths:
+                errors.add(
+                    "override_divergence_path_unapproved",
+                    "intentional_divergence override changes paths outside approved "
+                    f"registry prefixes: {', '.join(unapproved_paths[:5])}",
+                    sha=upstream_sha,
+                )
+                return False, ""
         return True, "explicit_supersede_override"
     if method == "exact_sha" and fork_sha == upstream_sha:
         return True, "explicit_exact_sha_override"
@@ -1624,6 +1699,7 @@ def classify_blocks(
     local_patch_map: dict[str, set[str]],
     upstream_patch_map: dict[str, set[str]],
     overrides: dict[str, dict[str, Any]],
+    approved_divergence_prefixes: tuple[str, ...],
     errors: ErrorCollector,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -1650,6 +1726,8 @@ def classify_blocks(
                 override,
                 sha,
                 tree_sha,
+                files,
+                approved_divergence_prefixes,
                 fork_ref,
                 local_patch_map,
                 patch_id,
@@ -1886,6 +1964,12 @@ def main() -> int:
         type=Path,
         help="Durable reviewed upstream anchor used to bound disconnected histories",
     )
+    parser.add_argument(
+        "--intentional-divergence",
+        default="docs/parity/intentional-divergence.json",
+        type=Path,
+        help="Approved path prefixes for intentional divergence overrides",
+    )
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
@@ -2035,6 +2119,12 @@ def main() -> int:
 
     overrides_path = output_path(repo_root, args.overrides).resolve()
     overrides = load_overrides(overrides_path, errors)
+    divergence_registry_path = output_path(
+        repo_root, args.intentional_divergence
+    ).resolve()
+    approved_divergence_prefixes = load_approved_divergence_prefixes(
+        divergence_registry_path, errors
+    )
     local_commits: set[str] = set()
     local_tree_map: dict[str, set[str]] = {}
     local_patch_map: dict[str, set[str]] = {}
@@ -2061,6 +2151,7 @@ def main() -> int:
         local_patch_map,
         upstream_patch_map,
         overrides,
+        approved_divergence_prefixes,
         errors,
     )
     unowned_rows = [row for row in rows if row["disposition"] == "pending"]
