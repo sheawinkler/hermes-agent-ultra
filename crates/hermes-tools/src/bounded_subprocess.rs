@@ -100,70 +100,53 @@ unsafe extern "system" {
 
 #[cfg(windows)]
 struct OwnedJobObject {
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
 impl OwnedJobObject {
     fn assign(child: &Child) -> std::io::Result<Self> {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Foundation::CloseHandle;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         };
 
-        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if handle.is_null() {
+        let raw_handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if raw_handle.is_null() {
             return Err(std::io::Error::last_os_error());
         }
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw_handle) };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let configured = unsafe {
             SetInformationJobObject(
-                handle,
+                handle.as_raw_handle(),
                 JobObjectExtendedLimitInformation,
                 (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             )
         };
         if configured == 0 {
-            let error = std::io::Error::last_os_error();
-            unsafe {
-                CloseHandle(handle);
-            }
-            return Err(error);
+            return Err(std::io::Error::last_os_error());
         }
-        if unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0 {
-            let error = std::io::Error::last_os_error();
-            unsafe {
-                CloseHandle(handle);
-            }
-            return Err(error);
+        if unsafe { AssignProcessToJobObject(handle.as_raw_handle(), child.as_raw_handle()) } == 0 {
+            return Err(std::io::Error::last_os_error());
         }
         Ok(Self { handle })
     }
 
     fn terminate(&self) {
+        use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
 
         unsafe {
-            TerminateJobObject(self.handle, 1);
+            TerminateJobObject(self.handle.as_raw_handle(), 1);
         }
     }
 }
 
-#[cfg(windows)]
-impl Drop for OwnedJobObject {
-    fn drop(&mut self) {
-        use windows_sys::Win32::Foundation::CloseHandle;
-
-        unsafe {
-            CloseHandle(self.handle);
-        }
-    }
-}
 
 #[cfg(windows)]
 fn configure_windows_suspended_tree(command: &mut StdCommand) {

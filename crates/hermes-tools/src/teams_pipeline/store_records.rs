@@ -453,7 +453,7 @@ fn try_lock_teams_store_file(file: &std::fs::File) -> std::io::Result<bool> {
     let mut overlapped = OVERLAPPED::default();
     let locked = unsafe {
         LockFileEx(
-            file.as_raw_handle() as isize,
+            file.as_raw_handle(),
             LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
             0,
             1,
@@ -479,7 +479,7 @@ fn unlock_teams_store_file(file: &std::fs::File) -> std::io::Result<()> {
     use windows_sys::Win32::System::IO::OVERLAPPED;
 
     let mut overlapped = OVERLAPPED::default();
-    if unsafe { UnlockFileEx(file.as_raw_handle() as isize, 0, 1, 0, &mut overlapped) } != 0 {
+    if unsafe { UnlockFileEx(file.as_raw_handle(), 0, 1, 0, &mut overlapped) } != 0 {
         Ok(())
     } else {
         Err(std::io::Error::last_os_error())
