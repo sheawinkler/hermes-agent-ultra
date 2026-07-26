@@ -1841,6 +1841,7 @@ dependencies = [
  "aes-gcm",
  "base64",
  "chrono",
+ "fs2",
  "futures",
  "hermes-core",
  "rand 0.10.1",

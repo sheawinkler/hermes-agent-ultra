@@ -5,9 +5,10 @@ use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 
 use aes_gcm::aead::{Aead, KeyInit};
+use fs2::FileExt;
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
@@ -25,6 +26,32 @@ const TOKEN_STORE_NONCE_BYTES: usize = 12;
 const TOKEN_STORE_KEY_ENV: &str = "HERMES_TOKEN_STORE_KEY_B64";
 
 type TokenCache = HashMap<String, OAuthCredential>;
+
+type StoreRefreshGateKey = (PathBuf, String);
+
+/// Refreshes are keyed by the credential-store path and provider, rather than
+/// a process-global provider name. Independent profiles may refresh the same
+/// provider concurrently, while managers sharing one store serialize token
+/// rotation and re-read the winner's credential.
+static STORE_REFRESH_GATES: LazyLock<Mutex<HashMap<StoreRefreshGateKey, Weak<AsyncMutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn refresh_gate_for_store(path: &Path, provider: &str) -> Arc<AsyncMutex<()>> {
+    let key = (
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        provider.to_string(),
+    );
+    let mut gates = STORE_REFRESH_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(AsyncMutex::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
+}
 
 /// A provider credential. Its `Debug` implementation intentionally never emits
 /// either token value.
@@ -361,20 +388,18 @@ impl FileTokenStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.writable_key()?;
-        let provider = credential.provider.clone();
-        let mut cache = self
+        let _file_lock = acquire_store_file_lock(&self.path)?;
+
+        // Re-read while holding the path-scoped lock so another auth profile
+        // cannot erase an unrelated provider written by a different store
+        // instance between our open and this update.
+        let mut cache = self.read_persisted_cache()?;
+        cache.insert(credential.provider.clone(), credential);
+        self.persist_cache(&cache)?;
+        *self
             .cache
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let previous = cache.insert(provider.clone(), credential);
-        if let Err(error) = self.persist_cache(&cache) {
-            if let Some(previous) = previous {
-                cache.insert(provider, previous);
-            } else {
-                cache.remove(&provider);
-            }
-            return Err(error);
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
         Ok(())
     }
 
@@ -384,17 +409,15 @@ impl FileTokenStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.writable_key()?;
-        let mut cache = self
+        let _file_lock = acquire_store_file_lock(&self.path)?;
+
+        let mut cache = self.read_persisted_cache()?;
+        cache.remove(provider);
+        self.persist_cache(&cache)?;
+        *self
             .cache
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let removed = cache.remove(provider);
-        if let Err(error) = self.persist_cache(&cache) {
-            if let Some(removed) = removed {
-                cache.insert(provider.to_string(), removed);
-            }
-            return Err(error);
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
         Ok(())
     }
 
@@ -410,11 +433,26 @@ impl FileTokenStore {
         providers
     }
 
+    fn reload_from_disk(&self) -> Result<(), CredentialStoreError> {
+        let cache = self.read_persisted_cache()?;
+        *self
+            .cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
+        Ok(())
+    }
+
     fn flush(&self) -> Result<(), CredentialStoreError> {
+        let _write = self
+            .write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file_lock = acquire_store_file_lock(&self.path)?;
         let cache = self
             .cache
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         self.persist_cache(&cache)
     }
 
@@ -431,6 +469,34 @@ impl FileTokenStore {
         let content =
             serde_json::to_vec_pretty(&envelope).map_err(|_| CredentialStoreError::Serialization)?;
         write_file_private(&self.path, &content)
+    }
+
+    fn read_persisted_cache(&self) -> Result<TokenCache, CredentialStoreError> {
+        let key = self.key.as_deref().ok_or(CredentialStoreError::KeyUnavailable)?;
+        let raw = match fs::read(&self.path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(HashMap::new())
+            }
+            Err(_) => {
+                return Err(CredentialStoreError::Io {
+                    operation: "reading an encrypted credential file",
+                })
+            }
+        };
+        let value = serde_json::from_slice::<serde_json::Value>(&raw)
+            .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        let object = value
+            .as_object()
+            .ok_or(CredentialStoreError::EncryptedStoreMalformed)?;
+        if object.values().all(serde_json::Value::is_object) {
+            return Err(CredentialStoreError::LegacyMigrationRequired);
+        }
+        let envelope = serde_json::from_value::<TokenStoreEnvelope>(value)
+            .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        let cache = decrypt_token_cache(key, &envelope)?;
+        validate_token_cache(&cache).map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        Ok(cache)
     }
 }
 
@@ -571,6 +637,37 @@ fn write_file_private(path: &Path, content: &[u8]) -> Result<(), CredentialStore
     result
 }
 
+/// Acquire an exclusive, process-visible lock for one credential-store path.
+///
+/// Holding this lock across the read-modify-write transaction prevents two
+/// independently opened stores from losing each other's provider entries.
+fn acquire_store_file_lock(path: &Path) -> Result<fs::File, CredentialStoreError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| CredentialStoreError::Io {
+            operation: "creating the credential directory",
+        })?;
+    }
+    let lock_path = path.with_extension("lock");
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&lock_path)
+        .map_err(|_| CredentialStoreError::Io {
+            operation: "opening the credential-store lock",
+        })?;
+    set_private_permissions(&lock_path)?;
+    file.lock_exclusive()
+        .map_err(|_| CredentialStoreError::Io {
+            operation: "locking the credential store",
+        })?;
+    Ok(file)
+}
+
 fn private_create_new_options() -> fs::OpenOptions {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -620,7 +717,6 @@ pub enum RefreshResolution {
 pub struct AuthManager {
     store: FileTokenStore,
     refresh_handlers: Arc<RwLock<HashMap<String, RefreshHandler>>>,
-    refresh_gates: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
 }
 
 impl AuthManager {
@@ -628,7 +724,6 @@ impl AuthManager {
         Self {
             store,
             refresh_handlers: Arc::new(RwLock::new(HashMap::new())),
-            refresh_gates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -687,17 +782,9 @@ impl AuthManager {
         &self,
         provider: &str,
     ) -> Result<RefreshResolution, AgentError> {
-        let gate = {
-            let mut gates = self
-                .refresh_gates
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            gates
-                .entry(provider.to_string())
-                .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-                .clone()
-        };
+        let gate = refresh_gate_for_store(&self.store.path, provider);
         let _guard = gate.lock().await;
+        self.store.reload_from_disk().map_err(AgentError::from)?;
 
         let Some(current) = self.store.get(provider).await else {
             return Ok(RefreshResolution::NotConfigured);
@@ -1428,6 +1515,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refreshes_are_serialized_by_store_path_and_provider() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let seed = FileTokenStore::new(&path).await.unwrap();
+        seed.upsert(OAuthCredential {
+            provider: "openai".to_string(),
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("rotating-refresh-token".to_string()),
+            token_type: "Bearer".to_string(),
+            scope: None,
+            expires_at: Some(Utc::now() - Duration::minutes(1)),
+        })
+        .await
+        .unwrap();
+
+        let first = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let second = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler: RefreshHandler = {
+            let calls = calls.clone();
+            Arc::new(move |provider, _refresh_token| {
+                let calls = calls.clone();
+                Box::pin(async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    Ok(OAuthCredential {
+                        provider,
+                        access_token: "rotated-access-token".to_string(),
+                        refresh_token: Some("next-refresh-token".to_string()),
+                        token_type: "Bearer".to_string(),
+                        scope: None,
+                        expires_at: Some(Utc::now() + Duration::minutes(5)),
+                    })
+                })
+            })
+        };
+        first
+            .register_refresh_handler("openai", handler.clone())
+            .await;
+        second.register_refresh_handler("openai", handler).await;
+
+        let (first_result, second_result) = tokio::join!(
+            first.refresh_expired_credential("openai"),
+            second.refresh_expired_credential("openai")
+        );
+        assert!(matches!(
+            first_result.unwrap(),
+            RefreshResolution::Refreshed { .. } | RefreshResolution::Current
+        ));
+        assert!(matches!(
+            second_result.unwrap(),
+            RefreshResolution::Refreshed { .. } | RefreshResolution::Current
+        ));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a shared store/provider may make only one refresh request"
+        );
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert_eq!(
+            reopened.get("openai").await.unwrap().access_token,
+            "rotated-access-token"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_reloads_a_store_opened_before_another_manager_saved_credentials() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let stale_manager = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let writer = FileTokenStore::new(&path).await.unwrap();
+        writer
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "current-access-token".to_string(),
+                refresh_token: None,
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(Utc::now() + Duration::minutes(5)),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            stale_manager
+                .refresh_expired_credential("openai")
+                .await
+                .unwrap(),
+            RefreshResolution::Current
+        ));
+    }
+
+    #[tokio::test]
     async fn refresh_timeout_is_typed_and_redacted() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1495,5 +1678,52 @@ mod tests {
 
         let providers = store.list_providers().await;
         assert_eq!(providers, vec!["anthropic", "nous", "openai"]);
+    }
+
+    #[tokio::test]
+    async fn independently_opened_token_stores_merge_provider_updates_by_store_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let first = FileTokenStore::new(&path).await.unwrap();
+        let second = FileTokenStore::new(&path).await.unwrap();
+
+        first
+            .upsert(sample_credential("openai", "openai-token"))
+            .await
+            .unwrap();
+        second
+            .upsert(sample_credential("nous", "nous-token"))
+            .await
+            .unwrap();
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert_eq!(
+            reopened.list_providers().await,
+            vec!["nous".to_string(), "openai".to_string()]
+        );
+        assert_eq!(reopened.get("openai").await.unwrap().access_token, "openai-token");
+        assert_eq!(reopened.get("nous").await.unwrap().access_token, "nous-token");
+    }
+
+    #[tokio::test]
+    async fn independently_opened_token_store_removal_preserves_newer_other_provider() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let writer = FileTokenStore::new(&path).await.unwrap();
+        writer
+            .upsert(sample_credential("openai", "openai-token"))
+            .await
+            .unwrap();
+        let stale_remover = FileTokenStore::new(&path).await.unwrap();
+
+        writer
+            .upsert(sample_credential("nous", "nous-token"))
+            .await
+            .unwrap();
+        stale_remover.remove("openai").await.unwrap();
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert!(reopened.get("openai").await.is_none());
+        assert_eq!(reopened.get("nous").await.unwrap().access_token, "nous-token");
     }
 }

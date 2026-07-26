@@ -375,6 +375,69 @@ llm_providers:
 }
 
 #[test]
+fn load_from_yaml_expands_cursor_style_env_secret_refs() {
+    use tempfile::tempdir;
+
+    let _guard = ENV_LOCK.lock();
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    std::fs::write(
+        &path,
+        r#"
+llm_providers:
+  openai:
+    api_key: ${env:TEST_CURSOR_STYLE_OPENAI_KEY}
+    base_url: https://${env:TEST_CURSOR_STYLE_OPENAI_HOST}/v1
+"#,
+    )
+    .unwrap();
+
+    // SAFETY: test process serializes env mutation via ENV_LOCK.
+    unsafe {
+        std::env::set_var("TEST_CURSOR_STYLE_OPENAI_KEY", "sk-cursor-style");
+        std::env::set_var("TEST_CURSOR_STYLE_OPENAI_HOST", "api.cursor-style.test");
+    }
+
+    let runtime = load_from_yaml(&path).unwrap();
+    let openai = runtime.llm_providers.get("openai").unwrap();
+    assert_eq!(openai.api_key.as_deref(), Some("sk-cursor-style"));
+    assert_eq!(
+        openai.base_url.as_deref(),
+        Some("https://api.cursor-style.test/v1")
+    );
+
+    // SAFETY: test process serializes env mutation via ENV_LOCK.
+    unsafe {
+        std::env::remove_var("TEST_CURSOR_STYLE_OPENAI_KEY");
+        std::env::remove_var("TEST_CURSOR_STYLE_OPENAI_HOST");
+    }
+}
+
+#[test]
+fn cursor_style_env_refs_trim_names_and_preserve_other_secret_sources() {
+    let _guard = ENV_LOCK.lock();
+    // SAFETY: test process serializes env mutation via ENV_LOCK.
+    unsafe { std::env::set_var("TEST_CURSOR_STYLE_TRIMMED", "trimmed-value") };
+
+    assert_eq!(
+        expand_env_refs_in_str("${env: TEST_CURSOR_STYLE_TRIMMED }"),
+        "trimmed-value"
+    );
+    assert_eq!(
+        expand_env_refs_in_str("${bitwarden:TEST_CURSOR_STYLE_TRIMMED}"),
+        "${bitwarden:TEST_CURSOR_STYLE_TRIMMED}"
+    );
+    assert_eq!(
+        expand_env_refs_in_str("${MY:WEIRD}"),
+        "${MY:WEIRD}",
+        "only lowercase source prefixes are secret-source references"
+    );
+
+    // SAFETY: test process serializes env mutation via ENV_LOCK.
+    unsafe { std::env::remove_var("TEST_CURSOR_STYLE_TRIMMED") };
+}
+
+#[test]
 fn load_from_yaml_keeps_unresolved_env_refs_verbatim() {
     use tempfile::tempdir;
 
@@ -1023,4 +1086,84 @@ fn load_config_rejects_lower_invalid_file_even_with_valid_higher_environment() {
         rendered.contains(path.to_string_lossy().as_ref()),
         "expected lower-layer source path, got {error}"
     );
+}
+
+#[test]
+fn load_config_retains_only_a_previously_valid_user_config_after_transient_rejection() {
+    let _global_guard = crate::managed_gateway::test_lock::lock();
+    let _env_guard = ENV_LOCK.lock();
+    clear_managed_scope_test_env();
+
+    let home = tempfile::tempdir().expect("create config home");
+    let path = home.path().join("config.yaml");
+    std::fs::write(
+        &path,
+        "max_turns: 17\napproval:\n  enabled: true\n  require_approval: true\n",
+    )
+    .expect("write valid config");
+
+    let initial = load_config(Some(home.path().to_string_lossy().as_ref()))
+        .expect("initial valid configuration loads");
+    assert_eq!(initial.max_turns, 17);
+    assert!(initial.approval.require_approval);
+
+    std::fs::write(&path, "max_turns: [\n").expect("write malformed replacement");
+    let retained = load_config(Some(home.path().to_string_lossy().as_ref()))
+        .expect("previously validated config must survive a transient malformed replacement");
+    assert_eq!(retained.max_turns, 17);
+    assert!(retained.approval.require_approval);
+
+    std::fs::write(&path, "max_turns: 23\n").expect("repair config");
+    let repaired = load_config(Some(home.path().to_string_lossy().as_ref()))
+        .expect("repaired config loads and replaces the cached snapshot");
+    assert_eq!(repaired.max_turns, 23);
+
+    let fresh_home = tempfile::tempdir().expect("create fresh config home");
+    std::fs::write(fresh_home.path().join("config.yaml"), "max_turns: [\n")
+        .expect("write first-load malformed config");
+    assert!(
+        load_config(Some(fresh_home.path().to_string_lossy().as_ref())).is_err(),
+        "a malformed first load must remain fail-closed"
+    );
+
+    clear_managed_scope_test_env();
+}
+
+#[test]
+fn raw_effective_config_retains_only_a_previously_valid_mapping_after_transient_rejection() {
+    let _global_guard = crate::managed_gateway::test_lock::lock();
+    let _env_guard = ENV_LOCK.lock();
+    clear_managed_scope_test_env();
+
+    let home = tempfile::tempdir().expect("create config home");
+    let path = home.path().join("config.yaml");
+    std::fs::write(&path, "upstream_opaque:\n  nested: retained\n")
+        .expect("write valid opaque config");
+
+    let initial = load_effective_config_yaml_value(&path).expect("read valid raw config");
+    assert_eq!(
+        initial.pointer("/upstream_opaque/nested").and_then(serde_json::Value::as_str),
+        Some("retained")
+    );
+
+    std::fs::write(&path, "upstream_opaque: [\n").expect("write malformed raw replacement");
+    let retained = load_effective_config_yaml_value(&path)
+        .expect("previously valid raw config must survive a transient malformed replacement");
+    assert_eq!(
+        retained
+            .pointer("/upstream_opaque/nested")
+            .and_then(serde_json::Value::as_str),
+        Some("retained")
+    );
+
+    let fresh_home = tempfile::tempdir().expect("create fresh config home");
+    let fresh_path = fresh_home.path().join("config.yaml");
+    std::fs::write(&fresh_path, "upstream_opaque: [\n")
+        .expect("write first-load malformed raw config");
+    assert!(
+        load_effective_config_yaml_value(&fresh_path).is_none(),
+        "a malformed first raw load must remain fail-closed"
+    );
+
+    clear_managed_scope_test_env();
 }

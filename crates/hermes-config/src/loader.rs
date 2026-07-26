@@ -1,8 +1,10 @@
 //! Configuration loading from YAML, JSON, and environment variables.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 // Re-export ConfigError for convenience
 pub use hermes_core::ConfigError;
@@ -22,6 +24,59 @@ const MANAGED_SCOPE_ENV: &str = "HERMES_MANAGED_DIR";
 pub const EXECUTION_MODE_ENV_KEY: &str = "HERMES_EXECUTION_MODE";
 #[cfg(not(test))]
 const DEFAULT_MANAGED_SCOPE_DIR: &str = "/etc/hermes";
+
+/// Process-local last known good snapshots for a user-owned `config.yaml`.
+///
+/// A syntax or validation error in an already-loaded file may be transient
+/// (for example, an editor writes the file in multiple passes). Retaining a
+/// previously validated snapshot keeps a running process safe and usable,
+/// while a first-load failure and all I/O failures remain fail-closed.
+static LAST_KNOWN_GOOD_TYPED_CONFIGS: LazyLock<Mutex<HashMap<PathBuf, GatewayConfig>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static LAST_KNOWN_GOOD_RAW_CONFIGS: LazyLock<Mutex<HashMap<PathBuf, serde_json::Value>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn config_cache_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn cache_last_known_good_typed_config(path: &Path, config: &GatewayConfig) {
+    let cache = &*LAST_KNOWN_GOOD_TYPED_CONFIGS;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(config_cache_key(path), config.clone());
+    }
+}
+
+fn last_known_good_typed_config(path: &Path) -> Option<GatewayConfig> {
+    let cache = &*LAST_KNOWN_GOOD_TYPED_CONFIGS;
+    cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&config_cache_key(path)).cloned())
+}
+
+fn cache_last_known_good_raw_config(path: &Path, config: &serde_json::Value) {
+    let cache = &*LAST_KNOWN_GOOD_RAW_CONFIGS;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(config_cache_key(path), config.clone());
+    }
+}
+
+fn last_known_good_raw_config(path: &Path) -> Option<serde_json::Value> {
+    let cache = &*LAST_KNOWN_GOOD_RAW_CONFIGS;
+    cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&config_cache_key(path)).cloned())
+}
+
+fn retains_last_known_good_config(error: &ConfigError) -> bool {
+    match error {
+        ConfigError::ValidationError(_) => true,
+        ConfigError::ParseError(message) => !message.starts_with("failed to read config file "),
+        ConfigError::NotFound(_) | ConfigError::MergeConflict(_) => false,
+    }
+}
 
 /// Controls whether a user-owned configuration document may retain legacy
 /// unknown keys. Managed overlays are always strict and never use this option.
@@ -1058,24 +1113,30 @@ fn load_managed_config_overlay_json() -> Result<Option<ManagedConfigOverlay>, Co
     Ok(Some(ManagedConfigOverlay { value, path }))
 }
 
-fn read_config_yaml_as_json(path: &Path) -> Option<serde_json::Value> {
+fn read_config_yaml_as_json(path: &Path) -> Result<Option<serde_json::Value>, ConfigError> {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
-        Err(_) => return None,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ConfigError::ParseError(format!(
+                "failed to read config file {}: {err}",
+                path.display()
+            )))
+        }
     };
     if contents.trim().is_empty() {
-        return Some(serde_json::json!({}));
+        return Ok(Some(serde_json::json!({})));
     }
-    match serde_yaml::from_str::<serde_json::Value>(&contents) {
-        Ok(value) if value.is_object() => Some(value),
-        Ok(_) => {
-            tracing::warn!("Ignoring non-mapping config at {}", path.display());
-            None
-        }
-        Err(err) => {
-            tracing::warn!("Failed to parse {}: {err}", path.display());
-            None
-        }
+    let value = serde_yaml::from_str::<serde_json::Value>(&contents).map_err(|err| {
+        ConfigError::ParseError(format!("failed to parse config file {}: {err}", path.display()))
+    })?;
+    if value.is_object() {
+        Ok(Some(value))
+    } else {
+        Err(ConfigError::ValidationError(format!(
+            "config file {} must be a mapping",
+            path.display()
+        )))
     }
 }
 
@@ -1087,11 +1148,28 @@ fn read_config_yaml_as_json(path: &Path) -> Option<serde_json::Value> {
 pub fn load_effective_config_yaml_value(path: &Path) -> Option<serde_json::Value> {
     let ignore_user_config = env_truthy("HERMES_IGNORE_USER_CONFIG");
     let mut base = if ignore_user_config {
-        None
+        serde_json::json!({})
     } else {
-        read_config_yaml_as_json(path)
-    }
-    .unwrap_or_else(|| serde_json::json!({}));
+        match read_config_yaml_as_json(path) {
+            Ok(Some(value)) => {
+                cache_last_known_good_raw_config(path, &value);
+                value
+            }
+            Ok(None) => serde_json::json!({}),
+            Err(error) if retains_last_known_good_config(&error) => {
+                let cached = last_known_good_raw_config(path)?;
+                tracing::error!(
+                    "config file {} was rejected; retaining the last successfully validated raw configuration: {error}",
+                    path.display()
+                );
+                cached
+            }
+            Err(error) => {
+                tracing::error!("config file {} was rejected: {error}", path.display());
+                return None;
+            }
+        }
+    };
     let had_user = base.as_object().is_some_and(|obj| !obj.is_empty());
 
     let managed = match load_managed_config_overlay_json() {
@@ -1146,9 +1224,27 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
         config = load_from_json(&gateway_json_path)?;
     }
 
-    // Layer 2: config.yaml (higher priority file source).
+    // Layer 2: config.yaml (higher priority file source). A malformed or
+    // invalid replacement only retains a snapshot that this process already
+    // parsed and validated; an initial load still fails closed.
     if !ignore_user_config && config_yaml_path.exists() {
-        let yaml_cfg = load_from_yaml(&config_yaml_path)?;
+        let yaml_cfg = match load_from_yaml(&config_yaml_path) {
+            Ok(config) => {
+                cache_last_known_good_typed_config(&config_yaml_path, &config);
+                config
+            }
+            Err(error) if retains_last_known_good_config(&error) => {
+                let Some(cached) = last_known_good_typed_config(&config_yaml_path) else {
+                    return Err(error);
+                };
+                tracing::error!(
+                    "config file {} was rejected; retaining the last successfully validated configuration: {error}",
+                    config_yaml_path.display()
+                );
+                cached
+            }
+            Err(error) => return Err(error),
+        };
         config = merge_configs(&yaml_cfg, &config);
     }
 
@@ -1883,7 +1979,12 @@ fn expand_env_refs_in_str(input: &str) -> String {
             output.push_str(&rest[start..]);
             return output;
         };
-        let name = &after_open[..end];
+        let raw_reference = &after_open[..end];
+        let reference = raw_reference.trim();
+        let name = reference
+            .strip_prefix("env:")
+            .map(str::trim)
+            .unwrap_or(reference);
         if !name.is_empty()
             && name
                 .bytes()
@@ -1893,19 +1994,38 @@ fn expand_env_refs_in_str(input: &str) -> String {
                 Ok(value) => output.push_str(&value),
                 Err(_) => {
                     output.push_str("${");
-                    output.push_str(name);
+                    output.push_str(raw_reference);
                     output.push('}');
                 }
             }
         } else {
+            if is_non_env_secret_reference(reference) {
+                tracing::warn!(
+                    "config reference '${{{reference}}}' is not an environment reference; configure it in the secrets block instead"
+                );
+            }
             output.push_str("${");
-            output.push_str(name);
+            output.push_str(raw_reference);
             output.push('}');
         }
         rest = &after_open[end + 1..];
     }
     output.push_str(rest);
     output
+}
+
+fn is_non_env_secret_reference(reference: &str) -> bool {
+    let Some((source, _)) = reference.split_once(':') else {
+        return false;
+    };
+    !reference.starts_with("env:")
+        && source
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| match index {
+                0 => byte.is_ascii_lowercase(),
+                _ => byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-',
+            })
 }
 
 fn mark_platform_enabled_explicit(root: &mut serde_yaml::Value, platform: &str) {

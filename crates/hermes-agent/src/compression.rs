@@ -48,9 +48,14 @@ pub const PRUNED_TOOL_PLACEHOLDER: &str = "[Old tool output cleared to save cont
 
 const MIN_SUMMARY_TOKENS: u64 = 2_000;
 const SUMMARY_RATIO: f64 = 0.20;
-const SUMMARY_TOKENS_CEILING: u64 = 12_000;
+const SUMMARY_TOKENS_CEILING: u64 = 10_000;
 const CHARS_PER_TOKEN: usize = 4;
 const SUMMARY_FAILURE_COOLDOWN: Duration = Duration::from_secs(600);
+
+/// Models below this context window need enough post-compaction headroom to
+/// avoid immediately re-summarising their protected prompt and tail.
+const SMALL_CONTEXT_WINDOW_LIMIT: u64 = 512_000;
+const SMALL_CONTEXT_THRESHOLD_PERCENT: f64 = 0.75;
 
 // Truncation limits for the summariser input (per Python class constants).
 const CONTENT_MAX: usize = 6_000;
@@ -67,6 +72,20 @@ static SUMMARY_SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----")
             .unwrap(),
     ]
+});
+
+/// Inline reasoning is transient scratch work, not durable conversation
+/// history. Native `reasoning_content` is never serialised; these patterns
+/// close the provider-specific inline-tag path.
+static SUMMARY_REASONING_BLOCKS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?is)<(?:think|thinking|reasoning|redacted_thinking)\b[^>]*>.*?</(?:think|thinking|reasoning|redacted_thinking)\s*>",
+    )
+    .expect("valid inline reasoning block regex")
+});
+static SUMMARY_UNTERMINATED_REASONING_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<(?:think|thinking|reasoning|redacted_thinking)\b[^>]*>.*$")
+        .expect("valid unterminated inline reasoning regex")
 });
 
 // ---------------------------------------------------------------------------
@@ -110,16 +129,17 @@ pub async fn summarize_messages_with_llm(
     prompt_messages.push(Message::user(
         "Return only the summary text. Keep it under 3000 characters.",
     ));
-    prompt_messages.extend_from_slice(messages);
+    prompt_messages.extend(messages.iter().cloned().map(summary_safe_message));
 
     let resp = provider
         .chat_completion(&prompt_messages, &[], Some(700), Some(0.1), model, None)
         .await?;
 
-    Ok(resp
+    let content = resp
         .message
         .content
-        .unwrap_or_else(|| "[summary unavailable]".to_string()))
+        .unwrap_or_else(|| "[summary unavailable]".to_string());
+    Ok(visible_summary_or_fallback(&content).trim().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +216,9 @@ impl ContextCompressor {
     /// Token budgets are derived eagerly so they don't change as the
     /// compressor is used. To re-target a different model, build a new
     /// instance.
-    pub fn new(config: CompressorConfig, auxiliary: Arc<AuxiliaryClient>) -> Self {
+    pub fn new(mut config: CompressorConfig, auxiliary: Arc<AuxiliaryClient>) -> Self {
+        config.threshold_percent =
+            effective_threshold_percent(config.context_length, config.threshold_percent);
         let summary_ratio = config.summary_target_ratio.clamp(0.10, 0.80);
         let threshold_tokens = (config.context_length as f64 * config.threshold_percent) as u64;
         let target_tokens = (threshold_tokens as f64 * summary_ratio) as u64;
@@ -364,9 +386,13 @@ impl ContextCompressor {
         let mut parts = Vec::with_capacity(turns.len());
         for msg in turns {
             let role = msg.role;
-            let raw_content =
-                redact_sensitive_summary_text(&msg.content.clone().unwrap_or_default());
-
+            let raw_content = match role {
+                MessageRole::Assistant => {
+                    strip_inline_reasoning_blocks(msg.content.as_deref().unwrap_or_default())
+                }
+                _ => msg.content.clone().unwrap_or_default(),
+            };
+            let raw_content = redact_sensitive_summary_text(&raw_content);
             let content = truncate_middle(&raw_content, CONTENT_MAX, CONTENT_HEAD, CONTENT_TAIL);
             match role {
                 MessageRole::Tool => {
@@ -409,7 +435,7 @@ impl ContextCompressor {
 
     fn build_summary_prompt(&self, content_block: &str, summary_budget: u64) -> String {
         if let Some(prev) = self.previous_summary.as_ref() {
-            let prev = redact_sensitive_summary_text(prev);
+            let prev = redact_sensitive_summary_text(&strip_inline_reasoning_blocks(prev));
             format!(
                 "You are updating a context compaction summary. A previous compaction produced the summary below. \
 New conversation turns have occurred since then and need to be incorporated.\n\n\
@@ -457,11 +483,8 @@ Write only the summary body. Do not include any preamble or prefix."
         let mut retry_on_main_pending =
             self.config.summary_model_override.is_some() && !self.summary_model_fallen_back;
         loop {
-            let mut request = AuxiliaryRequest::new(
-                AuxiliaryTask::Compression,
-                vec![Message::user(prompt.clone())],
-            )
-            .with_max_tokens((budget * 2) as u32);
+            let mut request =
+                AuxiliaryRequest::new(AuxiliaryTask::Compression, vec![Message::user(prompt.clone())]);
             if let Some(model) = self.config.summary_model_override.as_ref() {
                 request = request.with_model(model.clone());
             }
@@ -470,7 +493,8 @@ Write only the summary body. Do not include any preamble or prefix."
                 Ok(resp) => {
                     let body = resp
                         .text()
-                        .map(|s| s.trim().to_string())
+                        .map(|content| redact_sensitive_summary_text(&visible_summary_or_fallback(&content)))
+                        .map(|summary| summary.trim().to_string())
                         .unwrap_or_default();
                     if body.is_empty() {
                         self.last_summary_error = Some("empty summary response".to_string());
@@ -905,10 +929,53 @@ const COMPACTION_TEMPLATE: &str = "## Goal\n[What the user is trying to accompli
 ## Critical Context\n[Any specific values, error messages, configuration details, or data that would be lost without explicit preservation]\n\n\
 ## Tools & Patterns\n[Which tools were used, how they were used effectively, and any tool-specific discoveries]";
 
+fn effective_threshold_percent(context_length: u64, configured_percent: f64) -> f64 {
+    if context_length > 0 && context_length < SMALL_CONTEXT_WINDOW_LIMIT {
+        configured_percent.max(SMALL_CONTEXT_THRESHOLD_PERCENT)
+    } else {
+        configured_percent
+    }
+}
+
+fn strip_inline_reasoning_blocks(content: &str) -> String {
+    let without_closed = SUMMARY_REASONING_BLOCKS.replace_all(content, "");
+    SUMMARY_UNTERMINATED_REASONING_BLOCK
+        .replace_all(&without_closed, "")
+        .into_owned()
+}
+
+/// A thinking-only result is not a usable summary, but it is not a transport
+/// failure either. Keep a fixed visible sentinel so the caller can progress
+/// without retaining the provider's private reasoning or arming cooldown.
+const REASONING_ONLY_SUMMARY_FALLBACK: &str =
+    "[Summary unavailable: provider returned reasoning only.]";
+
+fn visible_summary_or_fallback(content: &str) -> String {
+    let stripped = strip_inline_reasoning_blocks(content);
+    if !content.trim().is_empty() && stripped.trim().is_empty() {
+        REASONING_ONLY_SUMMARY_FALLBACK.to_string()
+    } else {
+        stripped
+    }
+}
+
+fn summary_safe_message(mut message: Message) -> Message {
+    // Native reasoning is deliberately excluded from every summary prompt.
+    message.reasoning_content = None;
+    if message.role == MessageRole::Assistant {
+        message.content = message
+            .content
+            .as_deref()
+            .map(strip_inline_reasoning_blocks);
+    }
+    message
+}
+
 /// Normalise summary text to the current compaction handoff format,
 /// stripping any legacy / current prefix already present.
 pub fn with_summary_prefix(summary: &str) -> String {
-    let trimmed = summary.trim();
+    let sanitized = strip_inline_reasoning_blocks(summary);
+    let trimmed = sanitized.trim();
     let stripped = if let Some(rest) = trimmed.strip_prefix(LEGACY_SUMMARY_PREFIX) {
         rest.trim_start()
     } else if let Some(rest) = trimmed.strip_prefix(SUMMARY_PREFIX) {
@@ -925,13 +992,12 @@ pub fn with_summary_prefix(summary: &str) -> String {
 
 fn summary_body_from_handoff(content: &str) -> Option<String> {
     let trimmed = content.trim();
-    if let Some(rest) = trimmed.strip_prefix(SUMMARY_PREFIX) {
-        Some(rest.trim_start().to_string())
+    let body = if let Some(rest) = trimmed.strip_prefix(SUMMARY_PREFIX) {
+        Some(rest.trim_start())
     } else {
-        trimmed
-            .strip_prefix(LEGACY_SUMMARY_PREFIX)
-            .map(|rest| rest.trim_start().to_string())
-    }
+        trimmed.strip_prefix(LEGACY_SUMMARY_PREFIX).map(str::trim_start)
+    }?;
+    Some(strip_inline_reasoning_blocks(body))
 }
 
 fn is_summary_handoff_message(msg: &Message) -> bool {
