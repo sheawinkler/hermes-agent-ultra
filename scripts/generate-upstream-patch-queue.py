@@ -1598,13 +1598,15 @@ def load_approved_divergence_prefixes(
             )
             continue
         for raw_prefix in raw_prefixes:
-            prefix = str(raw_prefix).strip().replace("\\", "/")
+            prefix = str(raw_prefix)
             pure = PurePosixPath(prefix)
             if (
                 not prefix
                 or prefix.startswith("/")
                 or ".." in pure.parts
                 or "." in pure.parts
+                or "\\" in prefix
+                or prefix != prefix.strip()
             ):
                 errors.add(
                     "intentional_divergence_registry_invalid",
@@ -1616,10 +1618,18 @@ def load_approved_divergence_prefixes(
 
 
 def path_has_approved_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
-    normalized = path.replace("\\", "/").lstrip("./")
+    pure = PurePosixPath(path)
+    if (
+        not path
+        or path.startswith("/")
+        or path.startswith("./")
+        or "\\" in path
+        or ".." in pure.parts
+        or "." in pure.parts
+    ):
+        return False
     return any(
-        normalized == prefix.rstrip("/")
-        or normalized.startswith(prefix.rstrip("/") + "/")
+        path.startswith(prefix) if prefix.endswith("/") else path == prefix
         for prefix in prefixes
     )
 

@@ -209,6 +209,24 @@ def test_commit_is_python_test_only() -> None:
     assert module.commit_is_python_test_only([]) is False
 
 
+def test_approved_prefix_matching_preserves_exact_git_paths() -> None:
+    module = _load_queue_module()
+    approved = ("web/",)
+
+    assert module.path_has_approved_prefix("web/index.ts", approved) is True
+    assert module.path_has_approved_prefix(".web/index.ts", approved) is False
+    assert module.path_has_approved_prefix("./web/index.ts", approved) is False
+    assert module.path_has_approved_prefix("web\\index.ts", approved) is False
+    assert module.path_has_approved_prefix("web", approved) is False
+    assert (
+        module.path_has_approved_prefix(
+            "scripts/release.py/child", ("scripts/release.py",)
+        )
+        is False
+    )
+    assert module.path_has_approved_prefix("web/../index.ts", approved) is False
+
+
 def test_clean_local_source_digest_is_stable_and_queue_generation_stays_verifiable(
     tmp_path: Path,
 ) -> None:
