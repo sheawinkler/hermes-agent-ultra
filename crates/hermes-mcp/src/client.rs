@@ -6,7 +6,9 @@
 //! rediscovers tools and updates the registry.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::OpenOptions;
 use std::future::Future;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -573,6 +575,9 @@ fn is_stale_transport_error(err: &McpError) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+const MAX_MCP_RESOURCE_BYTES: usize = 50 * 1024 * 1024;
+const MAX_MCP_RESOURCE_BASE64_CHARS: usize = MAX_MCP_RESOURCE_BYTES * 4 / 3 + 4;
+
 fn mcp_home_dir() -> PathBuf {
     if let Ok(path) = std::env::var("HERMES_HOME") {
         let trimmed = path.trim();
@@ -592,6 +597,250 @@ fn mcp_home_dir() -> PathBuf {
 fn mcp_image_cache_dir() -> PathBuf {
     mcp_home_dir().join("cache").join("images")
 }
+
+fn mcp_resource_cache_dir() -> PathBuf {
+    mcp_home_dir().join("cache").join("mcp-resources")
+}
+
+fn mcp_resource_extension(mime_type: &str) -> &'static str {
+    match mime_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "application/pdf" => ".pdf",
+        "application/zip" => ".zip",
+        "application/gzip" | "application/x-gzip" => ".gz",
+        "application/json" => ".json",
+        "application/xml" | "text/xml" => ".xml",
+        "text/plain" => ".txt",
+        "audio/mpeg" => ".mp3",
+        "audio/ogg" => ".ogg",
+        "audio/wav" | "audio/x-wav" | "audio/wave" => ".wav",
+        "audio/flac" => ".flac",
+        _ => ".bin",
+    }
+}
+
+fn mcp_resource_filename(uri: &str, mime_type: &str) -> String {
+    let leaf = uri
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("");
+    let mut name: String = leaf
+        .chars()
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                Some(ch)
+            } else if ch.is_control() {
+                None
+            } else {
+                Some('_')
+            }
+        })
+        .collect();
+    name = name.trim_matches('.').to_string();
+    if name.is_empty() {
+        name = format!("resource{}", mcp_resource_extension(mime_type));
+    }
+    if name.len() > 150 {
+        let extension = Path::new(&name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| !extension.is_empty() && extension.len() <= 12)
+            .map(str::to_string);
+        if let Some(extension) = extension {
+            name.truncate(150 - extension.len() - 1);
+            name.push('.');
+            name.push_str(&extension);
+        } else {
+            name.truncate(150);
+        }
+    }
+    name
+}
+
+fn decode_mcp_resource_bytes(blob: &str) -> Result<Vec<u8>, String> {
+    if blob.len() > MAX_MCP_RESOURCE_BASE64_CHARS {
+        return Err(format!(
+            "resource is too large to cache (encoded payload exceeds {} bytes)",
+            MAX_MCP_RESOURCE_BASE64_CHARS
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(blob)
+        .map_err(|err| format!("resource could not be decoded: {err}"))?;
+    if bytes.len() > MAX_MCP_RESOURCE_BYTES {
+        return Err(format!(
+            "resource is too large to cache ({} decoded bytes)",
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
+}
+
+fn cache_mcp_resource_bytes(
+    bytes: &[u8],
+    uri: &str,
+    mime_type: &str,
+) -> Result<PathBuf, String> {
+    let cache_dir = mcp_resource_cache_dir();
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|err| format!("resource cache directory could not be created: {err}"))?;
+    let filename = mcp_resource_filename(uri, mime_type);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    for attempt in 0..8_u128 {
+        let path = cache_dir.join(format!(
+            "mcp-resource-{}-{}-{}",
+            std::process::id(),
+            timestamp.saturating_add(attempt),
+            filename
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes)
+                    .map_err(|err| format!("resource cache write failed: {err}"))?;
+                return Ok(path);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("resource cache file could not be created: {err}")),
+        }
+    }
+    Err("resource cache filename collision limit reached".to_string())
+}
+
+fn cache_mcp_audio_block(item: &Value) -> Option<String> {
+    let typ = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    if !typ.eq_ignore_ascii_case("audio") && !typ.eq_ignore_ascii_case("audio_content") {
+        return None;
+    }
+    let mime_type = item
+        .get("mimeType")
+        .or_else(|| item.get("mime_type"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if !mime_type.to_ascii_lowercase().starts_with("audio/") {
+        return Some("[MCP audio block has an invalid MIME type]".to_string());
+    }
+    let Some(blob) = item.get("data").and_then(|value| value.as_str()) else {
+        return Some("[MCP audio block has no data]".to_string());
+    };
+    match decode_mcp_resource_bytes(blob)
+        .and_then(|bytes| cache_mcp_resource_bytes(&bytes, "audio", mime_type))
+    {
+        Ok(path) => Some(format!("MEDIA:{}", path.display())),
+        Err(error) => {
+            warn!("MCP audio block was not materialized: {}", error);
+            Some(format!("[MCP audio block {error}]"))
+        }
+    }
+}
+
+fn mcp_resource_link_marker(item: &Value, server_name: Option<&str>) -> Option<String> {
+    let uri = item.get("uri").and_then(|value| value.as_str())?.trim();
+    if uri.is_empty() {
+        return Some("[MCP resource link omitted an URI]".to_string());
+    }
+    let name = item.get("name").and_then(|value| value.as_str()).unwrap_or("");
+    let mime_type = item
+        .get("mimeType")
+        .or_else(|| item.get("mime_type"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let reader = server_name
+        .map(|name| mcp_registered_tool_name(name, "read_resource"))
+        .unwrap_or_else(|| "the MCP session's read_resource tool".to_string());
+    let mut details = format!("uri={uri}");
+    if !name.trim().is_empty() {
+        details.push_str(&format!(", name={name}"));
+    }
+    if !mime_type.trim().is_empty() {
+        details.push_str(&format!(", mimeType={mime_type}"));
+    }
+    Some(format!(
+        "[MCP resource link: {details} — fetch it with {reader}]"
+    ))
+}
+
+fn render_mcp_resource_block(item: &Value, server_name: Option<&str>) -> Option<String> {
+    let typ = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    if typ.eq_ignore_ascii_case("resource_link") {
+        return mcp_resource_link_marker(item, server_name);
+    }
+    let resource = item.get("resource").unwrap_or(item);
+    let is_embedded = !item.get("resource").is_none()
+        || typ.eq_ignore_ascii_case("resource")
+        || typ.eq_ignore_ascii_case("embedded_resource")
+        || resource.get("blob").is_some();
+    if !is_embedded {
+        return None;
+    }
+    if let Some(text) = resource.get("text").and_then(|value| value.as_str()) {
+        return Some(text.to_string());
+    }
+    let Some(blob) = resource.get("blob").and_then(|value| value.as_str()) else {
+        return Some("[MCP embedded resource has no text or blob content]".to_string());
+    };
+    let uri = resource.get("uri").and_then(|value| value.as_str()).unwrap_or("");
+    let mime_type = resource
+        .get("mimeType")
+        .or_else(|| resource.get("mime_type"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    match decode_mcp_resource_bytes(blob)
+        .and_then(|bytes| {
+            let byte_len = bytes.len();
+            cache_mcp_resource_bytes(&bytes, uri, mime_type)
+                .map(|path| (path, byte_len))
+        }) {
+        Ok((path, byte_len)) => Some(format!(
+            "[MCP resource saved to {} ({}; {} bytes) — read it with file or terminal tools]",
+            path.display(),
+            if mime_type.trim().is_empty() {
+                "unknown type"
+            } else {
+                mime_type
+            },
+            byte_len
+        )),
+        Err(error) => {
+            warn!("MCP embedded resource was not materialized: {}", error);
+            Some(format!("[MCP embedded resource {error}]"))
+        }
+    }
+}
+
+fn render_mcp_resource_contents(result: &Value, server_name: Option<&str>) -> Option<String> {
+    let contents = result.get("contents").and_then(|value| value.as_array())?;
+    let mut parts = Vec::new();
+    for item in contents {
+        if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+            if !text.is_empty() {
+                parts.push(text.to_string());
+            }
+            continue;
+        }
+        if let Some(rendered) = render_mcp_resource_block(item, server_name) {
+            if !rendered.is_empty() {
+                parts.push(rendered);
+            }
+        } else {
+            warn!("MCP resources/read returned an unsupported content block: {}", item);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
 
 fn mcp_image_extension_for_mime_type(mime_type: &str) -> &'static str {
     match mime_type
@@ -676,18 +925,28 @@ fn cache_mcp_image_block(item: &Value) -> Option<String> {
     Some(format!("MEDIA:{}", file_path.display()))
 }
 
-fn extract_mcp_error_message(result: &Value) -> String {
-    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+fn extract_mcp_error_message(result: &Value, server_name: Option<&str>) -> String {
+    if let Some(content) = result.get("content").and_then(|value| value.as_array()) {
+        let mut parts = Vec::new();
         for item in content {
-            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+            if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    return trimmed.to_string();
+                    parts.push(trimmed.to_string());
+                }
+                continue;
+            }
+            if let Some(rendered) = render_mcp_resource_block(item, server_name) {
+                if !rendered.trim().is_empty() {
+                    parts.push(rendered);
                 }
             }
         }
+        if !parts.is_empty() {
+            return parts.join("\n");
+        }
     }
-    if let Some(message) = result.get("message").and_then(|m| m.as_str()) {
+    if let Some(message) = result.get("message").and_then(|value| value.as_str()) {
         let trimmed = message.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
@@ -696,7 +955,7 @@ fn extract_mcp_error_message(result: &Value) -> String {
     if let Some(kind) = result
         .get("errorType")
         .or_else(|| result.get("error_type"))
-        .and_then(|v| v.as_str())
+        .and_then(|value| value.as_str())
     {
         let trimmed = kind.trim();
         if !trimmed.is_empty() {
@@ -740,6 +999,8 @@ pub struct McpClient {
     sampling_metrics: SamplingMetrics,
     /// Timestamp when the client connected (for uptime tracking).
     connected_at: Option<Instant>,
+    /// Registry identity of this connection, used to render actionable resource links.
+    server_name: Option<String>,
     /// Latched when a server returns JSON-RPC -32601 for optional `ping`.
     ping_unsupported: bool,
 }

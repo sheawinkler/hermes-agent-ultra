@@ -168,6 +168,51 @@ fn register_mcp_tools_in_registry(
         );
         registered.push(registered_name);
     }
+
+    let resource_tool_name = mcp_registered_tool_name(server_name, "read_resource");
+    if seen.insert(resource_tool_name.clone()) {
+        let schema = ToolSchema::new(
+            resource_tool_name.clone(),
+            format!(
+                "Read a resource URI from MCP server '{}'. Use this for resource links returned by its tools.",
+                server_name
+            ),
+            serde_json::from_value(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "uri": {
+                        "type": "string",
+                        "description": "Resource URI returned by this MCP server"
+                    }
+                },
+                "required": ["uri"],
+                "additionalProperties": false
+            }))
+            .expect("static MCP resource schema must be valid"),
+        );
+        let handler = Arc::new(RegisteredMcpResourceHandler {
+            client,
+            schema: schema.clone(),
+            available: Arc::clone(&available),
+        });
+        registry.register(
+            &resource_tool_name,
+            &toolset_name,
+            schema,
+            handler,
+            {
+                let available = Arc::clone(&available);
+                Arc::new(move || available.load(Ordering::SeqCst))
+            },
+            Vec::new(),
+            true,
+            format!("MCP resource reader from server '{}'", server_name),
+            "mcp",
+            None,
+        );
+        registered.push(resource_tool_name);
+    }
+
     registered
 }
 
@@ -228,6 +273,7 @@ impl McpManager {
         }
 
         let mut client = McpClient::new(config);
+        client.set_server_name(name);
         if let Some(config) = self.sampling_config.clone() {
             client.set_sampling_config(config);
         }
@@ -260,6 +306,7 @@ impl McpManager {
             self.disconnect(name).await?;
         }
         let mut client = McpClient::new(config);
+        client.set_server_name(name);
         client.finish_connect_with_transport(transport).await?;
         self.clients.insert(
             name.to_string(),
@@ -301,6 +348,7 @@ impl McpManager {
             tasks.spawn(async move {
                 let transport_type = transport_type_for_config(&config).to_string();
                 let mut client = McpClient::new(config);
+                client.set_server_name(&name);
                 if let Some(config) = sampling_config {
                     client.set_sampling_config(config);
                 }
@@ -479,6 +527,7 @@ impl McpManager {
         };
 
         let mut new_client = McpClient::new(reconnect_config.clone());
+        new_client.set_server_name(server_name);
         if let Some(config) = self.sampling_config.clone() {
             new_client.set_sampling_config(config);
         }
