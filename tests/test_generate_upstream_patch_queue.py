@@ -412,6 +412,22 @@ def test_queue_authority_fails_for_staged_unstaged_and_untracked_local_source(
         assert ledger["local_source"]["tree_state_digest"] != clean["tree_state_digest"]
 
 
+def test_generated_workstream_artifact_is_excluded_from_local_source_dirtiness(
+    tmp_path: Path,
+) -> None:
+    local, _, _, _ = _common_history(tmp_path)
+    artifact = local / "docs/parity/upstream-workstreams.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text('{"old": true}\n', encoding="utf-8")
+    _commit(local, "track generated workstream artifact")
+    artifact.write_text('{"new": true}\n', encoding="utf-8")
+
+    source = _local_source(local)
+
+    assert source["state"] == "clean"
+    assert source["worktree"]["clean"] is True
+
+
 def test_malformed_override_is_fail_closed(tmp_path: Path) -> None:
     local, upstream_work, fork, upstream = _common_history(tmp_path)
     (upstream_work / "delta.txt").write_text("upstream\n", encoding="utf-8")

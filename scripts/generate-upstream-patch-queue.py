@@ -486,6 +486,7 @@ CANONICAL_GENERATED_EVIDENCE_PATHS = frozenset(
         "docs/parity/upstream-missing-queue.json",
         "docs/parity/upstream-missing-queue.md",
         "docs/parity/upstream-source-ledger.json",
+        "docs/parity/upstream-workstreams.json",
         "docs/parity/workstream-status.json",
     }
 )
