@@ -821,6 +821,17 @@ impl PlatformAdapter for MattermostAdapter {
         image_url: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
+        self.send_image_url_with_options(chat_id, image_url, caption, SendMessageOptions::default())
+            .await
+    }
+
+    async fn send_image_url_with_options(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
         let downloaded = download_media_url(&self.client, image_url).await;
 
         let (bytes, content_type) = match downloaded {
@@ -833,7 +844,7 @@ impl PlatformAdapter for MattermostAdapter {
                 );
                 let fallback = image_fallback_text(image_url, caption);
                 return self
-                    .send_message(chat_id, &fallback, Some(ParseMode::Plain))
+                    .send_message_with_options(chat_id, &fallback, Some(ParseMode::Plain), options)
                     .await;
             }
         };
@@ -852,7 +863,9 @@ impl PlatformAdapter for MattermostAdapter {
         })?;
 
         let temp_path_str = temp_path.to_string_lossy().to_string();
-        let send_result = self.send_file(chat_id, &temp_path_str, caption).await;
+        let send_result = self
+            .send_file_with_options(chat_id, &temp_path_str, caption, options.clone())
+            .await;
         if let Err(err) = tokio::fs::remove_file(&temp_path).await {
             warn!(
                 path = %temp_path.display(),
@@ -870,7 +883,7 @@ impl PlatformAdapter for MattermostAdapter {
                     "Mattermost image upload failed; falling back to text"
                 );
                 let fallback = image_fallback_text(image_url, caption);
-                self.send_message(chat_id, &fallback, Some(ParseMode::Plain))
+                self.send_message_with_options(chat_id, &fallback, Some(ParseMode::Plain), options)
                     .await
             }
         }

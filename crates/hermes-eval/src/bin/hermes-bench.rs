@@ -9,8 +9,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
+#[cfg(feature = "agent-loop")]
+use hermes_agent::RunRuntime;
 use hermes_config::{load_config, GatewayConfig};
 use hermes_core::SkillProvider;
+#[cfg(feature = "agent-loop")]
+use hermes_environments::BackendManager;
 #[cfg(feature = "agent-loop")]
 use hermes_eval::AgentLoopRollout;
 use hermes_eval::{
@@ -189,6 +193,15 @@ fn default_output_path(benchmark: &Path) -> PathBuf {
 }
 
 #[cfg(feature = "agent-loop")]
+fn admit_benchmark_execution(
+    config: &GatewayConfig,
+    mode: hermes_core::ResolvedExecutionMode,
+) -> EvalResult<hermes_environments::ExecutionBackendBinding> {
+    BackendManager::execution_backend_binding(config.terminal.clone(), mode)
+        .map_err(|error| EvalError::ContainmentStartup(error.to_string()))
+}
+
+#[cfg(feature = "agent-loop")]
 async fn run_agent_rollout(
     adapter: Arc<ConfiguredBenchmarkAdapter>,
     runner: &Runner,
@@ -196,21 +209,73 @@ async fn run_agent_rollout(
     model: &str,
     full_state: bool,
 ) -> EvalResult<hermes_eval::RunRecord> {
+    // Keep benchmark execution evidence isolated from user state. The tempdir
+    // owns the explicit state root for the entire rollout, while the runtime's
+    // keys remain in memory.
+    let benchmark_temp_dir = tempfile::Builder::new()
+        .prefix("hermes-bench-")
+        .tempdir()
+        .map_err(|error| EvalError::Other(format!("create benchmark state directory: {error}")))?;
+    let benchmark_state_root = benchmark_temp_dir.path().join("state");
+    let run_runtime = Arc::new(
+        RunRuntime::open_for_ephemeral_testing(&benchmark_state_root)
+            .map_err(|error| EvalError::Other(format!("open benchmark run runtime: {error}")))?,
+    );
+    let mut benchmark_config = config.clone();
+    benchmark_config.home_dir = Some(benchmark_state_root.to_string_lossy().into_owned());
+
+    // Admit containment before building providers or registering executable
+    // tools. Closed modes bind one fresh hardened Docker backend to both the
+    // registry and AgentLoop; they never inherit BackendManager's local
+    // fallback behavior.
+    let execution_mode = hermes_config::resolve_runtime_execution_mode(config, None)
+        .map_err(|error| EvalError::ContainmentStartup(error.to_string()))?;
+    let execution_binding = admit_benchmark_execution(&benchmark_config, execution_mode)?;
+    let containment_context = execution_binding.containment_context;
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend = hermes_cli::terminal_backend::build_terminal_backend(config);
-    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_store = Arc::new(FileSkillStore::new(benchmark_state_root.join("skills")));
     let skill_provider: Arc<dyn SkillProvider> = Arc::new(SkillManager::new(skill_store));
-    hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+    hermes_tools::register_builtin_tools_with_execution_context(
+        &tool_registry,
+        execution_binding.terminal_backend,
+        skill_provider,
+        containment_context.clone(),
+    );
     hermes_cli::runtime_tool_wiring::wire_stdio_clarify_backend(&tool_registry);
 
     let agent_tools = Arc::new(hermes_cli::app::bridge_tool_registry(&tool_registry));
-    let provider = hermes_cli::app::build_provider(config, model);
-    let agent_config = hermes_cli::app::build_agent_config(config, model);
-    let agent = Arc::new(hermes_agent::AgentLoop::new(
-        agent_config,
-        agent_tools,
-        provider,
-    ));
+    let provider = hermes_cli::app::build_provider(&benchmark_config, model);
+    let agent_config =
+        hermes_cli::app::build_agent_config(&benchmark_config, model, execution_mode);
+    let agent = Arc::new(
+        hermes_agent::AgentLoop::new(agent_config, agent_tools, provider)
+            .with_execution_containment_context(containment_context)
+            .map_err(|error| EvalError::ContainmentStartup(error.to_string()))?
+            .with_run_runtime(run_runtime),
+    );
     let rollout = Arc::new(AgentLoopRollout::new(agent).with_full_state(full_state));
     runner.run(adapter, rollout).await
+}
+
+#[cfg(all(test, feature = "agent-loop"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_benchmark_rejects_missing_certification_before_provider_or_tool_wiring() {
+        let error = match admit_benchmark_execution(
+            &GatewayConfig::default(),
+            hermes_core::ResolvedExecutionMode {
+                mode: hermes_core::ExecutionMode::Reviewed,
+                source: hermes_core::ExecutionModeSource::Cli,
+            },
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("closed benchmark must not admit the default local backend"),
+        };
+        assert!(matches!(error, EvalError::ContainmentStartup(_)));
+        assert!(error
+            .to_string()
+            .contains("requires a fresh hardened Docker backend"));
+    }
 }

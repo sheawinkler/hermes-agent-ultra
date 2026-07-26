@@ -7,17 +7,22 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, warn};
 
 use hermes_config::hermes_home;
 use hermes_core::errors::GatewayError;
+
+const CHANNEL_PROVIDER_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelEntry {
@@ -188,9 +193,22 @@ pub async fn build_channel_directory_from_providers_at(
     let mut discovered = BTreeSet::new();
 
     for provider in providers {
-        let platform = normalize_platform(provider.platform_name());
-        match provider.list_channel_entries().await {
-            Ok(entries) => {
+        let platform = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            normalize_platform(provider.platform_name())
+        })) {
+            Ok(platform) => platform,
+            Err(_) => {
+                warn!("Channel directory: provider name callback panicked");
+                continue;
+            }
+        };
+        let outcome = tokio::time::timeout(
+            CHANNEL_PROVIDER_TIMEOUT,
+            AssertUnwindSafe(async { provider.list_channel_entries().await }).catch_unwind(),
+        )
+        .await;
+        match outcome {
+            Ok(Ok(Ok(entries))) => {
                 platforms.insert(
                     platform.clone(),
                     merge_entries(
@@ -200,8 +218,18 @@ pub async fn build_channel_directory_from_providers_at(
                 );
                 discovered.insert(platform);
             }
-            Err(err) => {
+            Ok(Ok(Err(err))) => {
                 warn!(platform = %platform, error = %err, "Channel directory: provider failed");
+            }
+            Ok(Err(_)) => {
+                warn!(platform = %platform, "Channel directory: provider panicked");
+            }
+            Err(_) => {
+                warn!(
+                    platform = %platform,
+                    timeout_secs = CHANNEL_PROVIDER_TIMEOUT.as_secs(),
+                    "Channel directory: provider timed out"
+                );
             }
         }
     }

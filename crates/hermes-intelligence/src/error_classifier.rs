@@ -86,7 +86,7 @@ impl ErrorClassifier {
             AgentError::Timeout(_) => ErrorCategory::Timeout,
             AgentError::Gateway(msg) => classify_gateway_message(msg),
             AgentError::ToolExecution(_) => ErrorCategory::Unknown,
-            AgentError::Config(_) => ErrorCategory::InvalidRequest,
+            AgentError::Config(_) | AgentError::PolicyBlocked(_) => ErrorCategory::InvalidRequest,
             AgentError::MaxTurnsExceeded => ErrorCategory::Unknown,
             AgentError::Io(_) => ErrorCategory::NetworkError,
             AgentError::InvalidToolCall(_) => ErrorCategory::Unknown,

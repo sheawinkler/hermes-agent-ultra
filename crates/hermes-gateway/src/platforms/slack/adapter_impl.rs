@@ -8,6 +8,8 @@ pub struct SlackAdapter {
     config: SlackConfig,
     client: Client,
     stop_signal: Arc<Notify>,
+    inbound_tx: Arc<RwLock<Option<mpsc::Sender<crate::gateway::IncomingMessage>>>>,
+    runtime_task: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
     group_dm_scope_warned: Mutex<BTreeSet<String>>,
     user_token_warned: Mutex<BTreeSet<String>>,
 }
@@ -31,6 +33,8 @@ impl SlackAdapter {
             config,
             client,
             stop_signal: Arc::new(Notify::new()),
+            inbound_tx: Arc::new(RwLock::new(None)),
+            runtime_task: AsyncMutex::new(None),
             group_dm_scope_warned: Mutex::new(BTreeSet::new()),
             user_token_warned: Mutex::new(BTreeSet::new()),
         })
@@ -96,6 +100,10 @@ impl SlackAdapter {
         fallback_text: &str,
         thread_ts: Option<&str>,
     ) -> Result<String, GatewayError> {
+        let Some(blocks) = sanitize_slack_blocks(blocks) else {
+            return self.post_message(channel, fallback_text, thread_ts).await;
+        };
+
         let mut body = serde_json::json!({
             "channel": channel,
             "text": fallback_text,
@@ -206,43 +214,7 @@ impl SlackAdapter {
 
     /// Get a WebSocket URL for Socket Mode connection.
     pub async fn get_socket_mode_url(&self) -> Result<String, GatewayError> {
-        let app_token = self.config.app_token.as_ref().ok_or_else(|| {
-            GatewayError::Auth("Socket Mode requires an app-level token (xapp-...)".into())
-        })?;
-
-        let resp = self
-            .client
-            .post(&format!("{}/apps.connections.open", SLACK_API_BASE))
-            .header("Authorization", format!("Bearer {}", app_token))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .send()
-            .await
-            .map_err(|e| {
-                GatewayError::ConnectionFailed(format!(
-                    "Failed to open Socket Mode connection: {}",
-                    e
-                ))
-            })?;
-
-        let body: serde_json::Value = resp.json().await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Failed to parse Socket Mode response: {}", e))
-        })?;
-
-        if body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-            let err = body
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            return Err(GatewayError::ConnectionFailed(format!(
-                "Socket Mode connection failed: {}",
-                err
-            )));
-        }
-
-        body.get("url")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .ok_or_else(|| GatewayError::ConnectionFailed("No URL in Socket Mode response".into()))
+        slack_socket_mode_url(&self.client, self.config.app_token.as_deref()).await
     }
 
     pub(crate) async fn warn_if_slack_auth_test_health_issues(
@@ -413,6 +385,7 @@ impl SlackAdapter {
             .and_then(|v| v.as_str())
             .map(String::from);
         let media_files = parse_slack_media_files(event);
+        let is_dm = slack_event_is_dm(envelope, &channel);
 
         Some(IncomingSlackMessage {
             channel,
@@ -420,6 +393,7 @@ impl SlackAdapter {
             text,
             ts,
             thread_ts,
+            is_dm,
             is_bot: false,
             media_files,
         })

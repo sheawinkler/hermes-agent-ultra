@@ -127,7 +127,7 @@ Start worker:
 python3 scripts/upstream_webhook_sync.py worker \
   --backend sqlite \
   --sqlite-path .sync-queue/upstream-events.db \
-  --repo-root /Users/sheawinkler/Documents/Projects/hermes-agent-ultra \
+  --repo-root /path/to/hermes-agent-ultra \
   --strategy merge \
   --strict-risk-gate \
   --draft-pr \

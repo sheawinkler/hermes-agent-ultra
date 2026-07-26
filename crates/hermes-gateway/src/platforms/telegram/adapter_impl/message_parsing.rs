@@ -29,6 +29,7 @@ impl TelegramAdapter {
         let replied_media = if own_media { None } else { reply };
         let user_id = msg.from.as_ref().map(|u| u.id);
         let username = msg.from.as_ref().and_then(|u| u.username.clone());
+        let is_bot = msg.from.as_ref().and_then(|u| u.is_bot);
 
         let voice = msg
             .voice
@@ -85,6 +86,7 @@ impl TelegramAdapter {
             chat_id: msg.chat.id,
             user_id,
             username,
+            is_bot,
             text,
             message_id: msg.message_id,
             is_voice,
@@ -127,6 +129,7 @@ impl TelegramAdapter {
             chat_id,
             user_id: Some(cq.from.id),
             username: cq.from.username.clone(),
+            is_bot: cq.from.is_bot,
             text: cq.data.clone(),
             message_id,
             is_voice: false,

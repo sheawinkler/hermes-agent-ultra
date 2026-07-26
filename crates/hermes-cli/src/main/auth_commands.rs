@@ -88,27 +88,25 @@ async fn print_auth_status_matrix(cli: &Cli, token_store: &FileTokenStore) -> Re
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AuthVerifyOutcome {
     Valid,
-    ValidRefreshed,
     Unverified,
     Missing,
     Expired,
-    RefreshFailed,
+    ProbeFailed,
 }
 
 impl AuthVerifyOutcome {
     fn as_str(self) -> &'static str {
         match self {
             Self::Valid => "valid",
-            Self::ValidRefreshed => "valid_refreshed",
             Self::Unverified => "unverified",
             Self::Missing => "missing",
             Self::Expired => "expired",
-            Self::RefreshFailed => "refresh_failed",
+            Self::ProbeFailed => "probe_failed",
         }
     }
 
     fn is_success(self) -> bool {
-        matches!(self, Self::Valid | Self::ValidRefreshed | Self::Unverified)
+        matches!(self, Self::Valid | Self::Unverified)
     }
 }
 
@@ -187,28 +185,14 @@ fn oauth_refresh_config_for_provider(provider: &str) -> Option<(String, String)>
     Some((token_url, client_id))
 }
 
-async fn refresh_oauth_store_credential(
-    provider: &str,
-    current: &OAuthCredential,
-) -> Result<OAuthCredential, AgentError> {
-    let refresh_token = current
-        .refresh_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            AgentError::AuthFailed(format!(
-                "OAuth refresh token missing for provider '{}'",
-                provider
-            ))
-        })?;
+fn oauth_refresh_endpoints_for_provider(provider: &str) -> Result<OAuth2Endpoints, AgentError> {
     let (token_url, client_id) = oauth_refresh_config_for_provider(provider).ok_or_else(|| {
         AgentError::AuthFailed(format!(
-            "OAuth refresh not configured for provider '{}'",
-            provider
+            "OAuth refresh handler is not configured for provider '{}'; configure its OAuth endpoints or run `hermes auth login {}`",
+            provider, provider
         ))
     })?;
-    let endpoints = OAuth2Endpoints {
+    Ok(OAuth2Endpoints {
         authorize_url: "http://127.0.0.1/oauth/authorize-unused".to_string(),
         token_url,
         client_id,
@@ -216,45 +200,21 @@ async fn refresh_oauth_store_credential(
         scopes: Vec::new(),
         client_secret: None,
         client_auth_method: hermes_auth::OAuth2ClientAuthMethod::default(),
-    };
-    let mut refreshed = exchange_refresh_token(provider, &endpoints, refresh_token).await?;
-    refreshed.provider = provider.to_string();
-    Ok(refreshed)
+    })
 }
 
-async fn ensure_openai_oauth_credential(
+/// Explicit credential-management effect. It registers a concrete OAuth2
+/// transport and asks `AuthManager` to refresh only an expired stored token.
+async fn refresh_oauth_store_credential(
     provider: &str,
-    token_store: &FileTokenStore,
     manager: &AuthManager,
-) -> Result<Option<OAuthCredential>, AgentError> {
-    if let Some(existing) = token_store.get(provider).await {
-        return Ok(Some(existing));
-    }
-    let imported = if provider == "openai" {
-        discover_existing_openai_oauth()?
-    } else {
-        discover_existing_openai_codex_oauth()?
-    };
-    let Some(imported) = imported else {
-        return Ok(None);
-    };
-    let expires_at = imported
-        .state
-        .tokens
-        .expires_in
-        .filter(|secs| *secs > 0)
-        .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
-    let credential = OAuthCredential {
-        provider: provider.to_string(),
-        access_token: imported.state.tokens.access_token.clone(),
-        refresh_token: imported.state.tokens.refresh_token.clone(),
-        token_type: "bearer".to_string(),
-        scope: None,
-        expires_at,
-    };
-    manager.save_credential(credential.clone()).await?;
-    Ok(Some(credential))
+) -> Result<hermes_auth::RefreshResolution, AgentError> {
+    manager
+        .register_oauth2_refresh_handler(provider, oauth_refresh_endpoints_for_provider(provider)?)
+        .await;
+    manager.refresh_expired_credential(provider).await
 }
+
 
 fn print_auth_verify_result(result: &AuthVerifyResult) {
     println!(
@@ -314,7 +274,7 @@ async fn verify_nous_runtime_credentials_live(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|err| format!("live_probe_failed: build client: {err}"))?;
+        .map_err(|_| "live_probe_failed: client initialization failed".to_string())?;
     let model = std::env::var("HERMES_MODEL")
         .ok()
         .map(|value| value.trim().to_string())
@@ -337,28 +297,12 @@ async fn verify_nous_runtime_credentials_live(
         .json(&payload)
         .send()
         .await
-        .map_err(|err| format!("live_probe_failed: request failed: {err}"))?;
+        .map_err(|_| "live_probe_failed: request failed".to_string())?;
     let status = response.status();
     if status.is_success() {
-        return Ok(());
-    }
-    let body = response.text().await.unwrap_or_default();
-    let detail = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("message")
-                .or_else(|| value.get("error_description"))
-                .or_else(|| value.get("error"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| body.trim().chars().take(240).collect::<String>());
-    if detail.is_empty() {
-        Err(format!("live_probe_failed: HTTP {status}"))
+        Ok(())
     } else {
-        Err(format!("live_probe_failed: HTTP {status}: {detail}"))
+        Err(format!("live_probe_failed: HTTP {status}"))
     }
 }
 
@@ -424,10 +368,49 @@ async fn resolve_or_fresh_login_nous(
     Ok((resolved, auth_path, false, state))
 }
 
+/// Constructs a probe-only Nous credential from the encrypted store. This
+/// intentionally performs no token exchange, state repair, or persistence.
+fn passive_nous_runtime_credentials(
+    credential: &OAuthCredential,
+) -> Result<NousRuntimeCredentials, AgentError> {
+    if credential.is_expired(NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS) {
+        return Err(AgentError::AuthFailed(
+            "Nous OAuth credential is expired; run `hermes auth refresh nous` or `hermes auth login nous`."
+                .to_string(),
+        ));
+    }
+    let api_key = credential.access_token.trim();
+    if api_key.is_empty() {
+        return Err(AgentError::AuthFailed(
+            "Nous OAuth credential is unusable; run `hermes auth login nous`.".to_string(),
+        ));
+    }
+    let base_url = std::env::var("NOUS_INFERENCE_BASE_URL")
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_NOUS_INFERENCE_URL.to_string());
+    let expires_at = credential.expires_at.map(|value| value.to_rfc3339());
+    let expires_in = credential
+        .expires_at
+        .map(|value| (value - chrono::Utc::now()).num_seconds().max(0));
+    Ok(NousRuntimeCredentials {
+        provider: "nous".to_string(),
+        base_url,
+        api_key: api_key.to_string(),
+        key_id: None,
+        expires_at,
+        expires_in,
+        source: "token_store".to_string(),
+        refresh_token: credential.refresh_token.clone(),
+        token_type: credential.token_type.clone(),
+        scope: credential.scope.clone(),
+    })
+}
+
 async fn verify_single_oauth_provider(
     provider: &str,
     token_store: &FileTokenStore,
-    manager: &AuthManager,
 ) -> Result<AuthVerifyResult, AgentError> {
     let provider = normalize_auth_provider(provider);
     let env_present = provider_api_key_from_env(&provider).is_some();
@@ -436,15 +419,10 @@ async fn verify_single_oauth_provider(
     } else {
         read_provider_auth_state(&provider)?.is_some()
     };
-    let mut stored_credential = token_store.get(&provider).await;
-
-    if matches!(provider.as_str(), "openai" | "openai-codex") && stored_credential.is_none() {
-        stored_credential = ensure_openai_oauth_credential(&provider, token_store, manager).await?;
-    }
-
+    let stored_credential = token_store.get(&provider).await;
     let stored_present = stored_credential
         .as_ref()
-        .map(|c| !c.access_token.trim().is_empty())
+        .map(|credential| !credential.access_token.trim().is_empty())
         .unwrap_or(false);
     let mut result = AuthVerifyResult {
         provider: provider.clone(),
@@ -454,330 +432,57 @@ async fn verify_single_oauth_provider(
         oauth_state_present: auth_state_present,
         expires_at: stored_credential
             .as_ref()
-            .and_then(|c| c.expires_at.as_ref().map(|dt| dt.to_rfc3339())),
+            .and_then(|credential| credential.expires_at.as_ref().map(|value| value.to_rfc3339())),
         detail: None,
     };
 
-    match provider.as_str() {
-        "nous" => match resolve_nous_runtime_credentials(
-            false,
-            true,
-            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-        )
-        .await
-        {
-            Ok(creds) => {
-                if let Err(detail) = verify_nous_runtime_credentials_live(&creds).await {
-                    result.outcome = AuthVerifyOutcome::RefreshFailed;
-                    result.source = creds.source;
-                    result.expires_at = creds.expires_at;
-                    result.credential_present = true;
-                    result.detail = Some(detail);
-                    return Ok(result);
-                }
-                let source = creds.source.clone();
-                let expires_at = creds.expires_at.clone();
-                manager
-                    .save_credential(OAuthCredential {
-                        provider: "nous".to_string(),
-                        access_token: creds.api_key,
-                        refresh_token: creds.refresh_token,
-                        token_type: creds.token_type,
-                        scope: creds.scope,
-                        expires_at: parse_rfc3339_utc(creds.expires_at.as_deref()),
-                    })
-                    .await?;
-                result.outcome = if source == "portal" {
-                    AuthVerifyOutcome::ValidRefreshed
-                } else {
-                    AuthVerifyOutcome::Valid
-                };
-                result.source = source;
-                result.expires_at = expires_at;
-                result.credential_present = true;
-                return Ok(result);
-            }
-            Err(err) => {
-                if let Some(credential) = stored_credential.as_ref() {
-                    let expires_at = credential.expires_at.as_ref().map(|dt| dt.to_rfc3339());
-                    if let Ok(state) = nous_auth_state_from_runtime_token(
-                        &credential.access_token,
-                        credential.refresh_token.clone(),
-                        Some(credential.token_type.as_str()),
-                        credential.scope.clone(),
-                        expires_at,
-                    ) {
-                        let _ = save_nous_auth_state(&state)?;
-                        if let Ok(creds) = resolve_nous_runtime_credentials(
-                            false,
-                            true,
-                            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-                            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-                        )
-                        .await
-                        {
-                            if let Err(detail) = verify_nous_runtime_credentials_live(&creds).await
-                            {
-                                let _ = clear_provider_auth_state("nous");
-                                result.outcome = AuthVerifyOutcome::RefreshFailed;
-                                result.source = "vault_invoke_jwt".to_string();
-                                result.expires_at = creds.expires_at;
-                                result.credential_present = true;
-                                result.detail = Some(detail);
-                                return Ok(result);
-                            }
-                            let expires_at_text = creds.expires_at.clone();
-                            manager
-                                .save_credential(OAuthCredential {
-                                    provider: "nous".to_string(),
-                                    access_token: creds.api_key.clone(),
-                                    refresh_token: creds.refresh_token.clone(),
-                                    token_type: creds.token_type.clone(),
-                                    scope: creds.scope.clone(),
-                                    expires_at: parse_rfc3339_utc(expires_at_text.as_deref()),
-                                })
-                                .await?;
-                            result.outcome = AuthVerifyOutcome::ValidRefreshed;
-                            result.source = "vault_invoke_jwt".to_string();
-                            result.expires_at = expires_at_text;
-                            result.credential_present = true;
-                            return Ok(result);
-                        }
-                        let _ = clear_provider_auth_state("nous");
-                    }
-                }
-                result.outcome = if env_present || stored_present || auth_state_present {
-                    AuthVerifyOutcome::RefreshFailed
-                } else {
-                    AuthVerifyOutcome::Missing
-                };
-                result.detail = Some(err.to_string());
-                return Ok(result);
-            }
-        },
-        "qwen-oauth" => match resolve_qwen_runtime_credentials(
-            false,
-            true,
-            QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-        )
-        .await
-        {
-            Ok(creds) => {
-                manager
-                    .save_credential(OAuthCredential {
-                        provider: "qwen-oauth".to_string(),
-                        access_token: creds.api_key.clone(),
-                        refresh_token: creds.refresh_token,
-                        token_type: creds.token_type,
-                        scope: None,
-                        expires_at: parse_unix_millis_utc(creds.expires_at_ms),
-                    })
-                    .await?;
-                result.outcome = if creds.expires_at_ms.is_some() {
-                    AuthVerifyOutcome::ValidRefreshed
-                } else {
-                    AuthVerifyOutcome::Valid
-                };
-                result.source = creds.source;
-                result.expires_at = creds
-                    .expires_at_ms
-                    .and_then(chrono::DateTime::from_timestamp_millis)
-                    .map(|dt| dt.to_rfc3339());
-                result.credential_present = true;
-                return Ok(result);
-            }
-            Err(err) => {
-                result.outcome = if env_present || stored_present || auth_state_present {
-                    AuthVerifyOutcome::RefreshFailed
-                } else {
-                    AuthVerifyOutcome::Missing
-                };
-                result.detail = Some(err.to_string());
-                return Ok(result);
-            }
-        },
-        "google-gemini-cli" => match resolve_gemini_oauth_runtime_credentials(false).await {
-            Ok(creds) => {
-                manager
-                    .save_credential(OAuthCredential {
-                        provider: "google-gemini-cli".to_string(),
-                        access_token: creds.api_key,
-                        refresh_token: creds.refresh_token,
-                        token_type: "bearer".to_string(),
-                        scope: None,
-                        expires_at: parse_unix_millis_utc(creds.expires_at_ms),
-                    })
-                    .await?;
-                result.outcome = AuthVerifyOutcome::Valid;
-                result.source = creds.source;
-                result.expires_at = creds
-                    .expires_at_ms
-                    .and_then(chrono::DateTime::from_timestamp_millis)
-                    .map(|dt| dt.to_rfc3339());
-                result.credential_present = true;
-                return Ok(result);
-            }
-            Err(err) => {
-                result.outcome = if env_present || stored_present || auth_state_present {
-                    AuthVerifyOutcome::RefreshFailed
-                } else {
-                    AuthVerifyOutcome::Missing
-                };
-                result.detail = Some(err.to_string());
-                return Ok(result);
-            }
-        },
-        "anthropic" => {
-            let oauth_state = read_provider_auth_state("anthropic")?;
-            let refresh_token = oauth_state.as_ref().and_then(|state| {
-                let object = state.as_object()?;
-                object
-                    .get("refresh_token")
-                    .or_else(|| object.get("refreshToken"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            });
-            let status = get_anthropic_oauth_status().await;
-            if status.logged_in && status.api_key.is_some() {
-                result.outcome = AuthVerifyOutcome::Valid;
-                result.source = status
-                    .source
-                    .clone()
-                    .unwrap_or_else(|| "anthropic_oauth".to_string());
-                result.expires_at = status
-                    .expires_at_ms
-                    .and_then(chrono::DateTime::from_timestamp_millis)
-                    .map(|dt| dt.to_rfc3339());
-                result.credential_present = true;
-                return Ok(result);
-            }
-            if let Some(refresh_token) = refresh_token {
-                match refresh_oauth_store_credential(
-                    "anthropic",
-                    &OAuthCredential {
-                        provider: "anthropic".to_string(),
-                        access_token: status.api_key.unwrap_or_default(),
-                        refresh_token: Some(refresh_token.clone()),
-                        token_type: "bearer".to_string(),
-                        scope: None,
-                        expires_at: parse_unix_millis_utc(status.expires_at_ms),
-                    },
-                )
-                .await
-                {
-                    Ok(refreshed) => {
-                        manager.save_credential(refreshed.clone()).await?;
-                        let expires_at_ms = refreshed.expires_at.map(|dt| dt.timestamp_millis());
-                        let auth_state = serde_json::json!({
-                            "access_token": refreshed.access_token,
-                            "refresh_token": refreshed.refresh_token,
-                            "expires_at_ms": expires_at_ms,
-                            "source": "hermes_pkce_refresh",
-                        });
-                        let _ = save_provider_auth_state("anthropic", auth_state)?;
-                        result.outcome = AuthVerifyOutcome::ValidRefreshed;
-                        result.source = "hermes_pkce_refresh".to_string();
-                        result.expires_at = refreshed.expires_at.map(|dt| dt.to_rfc3339());
-                        result.credential_present = true;
-                        return Ok(result);
-                    }
-                    Err(err) => {
-                        result.outcome = AuthVerifyOutcome::RefreshFailed;
-                        result.detail = Some(err.to_string());
-                        return Ok(result);
-                    }
-                }
-            }
-            if let Some(expires_ms) = status.expires_at_ms {
-                let expired = chrono::Utc::now().timestamp_millis() >= expires_ms;
-                if expired {
-                    result.outcome = AuthVerifyOutcome::Expired;
-                    result.expires_at = chrono::DateTime::from_timestamp_millis(expires_ms)
-                        .map(|dt| dt.to_rfc3339());
-                } else {
-                    result.outcome = AuthVerifyOutcome::Unverified;
-                }
-            } else {
-                result.outcome = if env_present {
-                    AuthVerifyOutcome::Unverified
-                } else {
-                    AuthVerifyOutcome::Missing
-                };
-            }
-            if let Some(err) = status.error {
-                result.detail = Some(err);
-            }
-            return Ok(result);
-        }
-        "openai" | "openai-codex" => {
-            if let Some(credential) = stored_credential {
-                if !credential.is_expired(60) && !credential.access_token.trim().is_empty() {
-                    result.outcome = AuthVerifyOutcome::Valid;
-                    result.expires_at = credential.expires_at.map(|dt| dt.to_rfc3339());
-                    result.credential_present = true;
-                    return Ok(result);
-                }
-                if credential
-                    .refresh_token
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|v| !v.is_empty())
-                {
-                    match refresh_oauth_store_credential(provider.as_str(), &credential).await {
-                        Ok(refreshed) => {
-                            manager.save_credential(refreshed.clone()).await?;
-                            result.outcome = AuthVerifyOutcome::ValidRefreshed;
-                            result.source = "token_store_refresh".to_string();
-                            result.expires_at = refreshed.expires_at.map(|dt| dt.to_rfc3339());
-                            result.credential_present = true;
-                            return Ok(result);
-                        }
-                        Err(err) => {
-                            result.outcome = AuthVerifyOutcome::RefreshFailed;
-                            result.detail = Some(err.to_string());
-                            return Ok(result);
-                        }
-                    }
-                }
-                result.outcome = AuthVerifyOutcome::Expired;
-                result.expires_at = credential.expires_at.map(|dt| dt.to_rfc3339());
-                return Ok(result);
-            }
-            if env_present {
-                result.outcome = AuthVerifyOutcome::Unverified;
-                result.detail = Some(
-                    "Environment token is present but no OAuth credential state was available."
-                        .to_string(),
-                );
-                return Ok(result);
-            }
+    let Some(credential) = stored_credential.as_ref() else {
+        if env_present {
+            result.outcome = AuthVerifyOutcome::Unverified;
+            result.detail = Some(
+                "Environment token is present but no encrypted OAuth credential is available."
+                    .to_string(),
+            );
+        } else if auth_state_present {
             result.outcome = AuthVerifyOutcome::Missing;
-            return Ok(result);
+            result.detail = Some(
+                "OAuth state exists but no encrypted credential is available; run `hermes auth login <provider>`."
+                    .to_string(),
+            );
         }
-        _ => {}
+        return Ok(result);
+    };
+
+    if credential.is_expired(60) {
+        result.outcome = AuthVerifyOutcome::Expired;
+        return Ok(result);
     }
 
-    if env_present {
-        result.outcome = AuthVerifyOutcome::Unverified;
-        result.detail = Some(
-            "Provider uses env credential source; live OAuth verification is unavailable.".into(),
-        );
-    } else if stored_present {
-        if let Some(cred) = stored_credential {
-            if cred.is_expired(60) {
-                result.outcome = AuthVerifyOutcome::Expired;
-                result.expires_at = cred.expires_at.map(|dt| dt.to_rfc3339());
-            } else {
-                result.outcome = AuthVerifyOutcome::Valid;
-            }
-        } else {
-            result.outcome = AuthVerifyOutcome::Valid;
+    if provider != "nous" {
+        result.outcome = AuthVerifyOutcome::Valid;
+        return Ok(result);
+    }
+
+    // `auth verify nous` explicitly probes the inference endpoint, but remains
+    // read-only: it never uses a refresh token or changes either credential
+    // store. All token exchange and persistence are reserved for `auth refresh`
+    // and login/add flows.
+    let credentials = match passive_nous_runtime_credentials(credential) {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            result.outcome = AuthVerifyOutcome::ProbeFailed;
+            result.detail = Some(error.to_string());
+            return Ok(result);
         }
-    } else {
-        result.outcome = AuthVerifyOutcome::Missing;
+    };
+    result.source = credentials.source.clone();
+    result.expires_at = credentials.expires_at.clone();
+    match verify_nous_runtime_credentials_live(&credentials).await {
+        Ok(()) => result.outcome = AuthVerifyOutcome::Valid,
+        Err(detail) => {
+            result.outcome = AuthVerifyOutcome::ProbeFailed;
+            result.detail = Some(detail);
+        }
     }
     Ok(result)
 }
@@ -785,12 +490,11 @@ async fn verify_single_oauth_provider(
 async fn run_auth_verify(
     provider: &str,
     token_store: &FileTokenStore,
-    manager: &AuthManager,
 ) -> Result<(), AgentError> {
     let targets: Vec<String> = if provider == "all" || provider == "*" {
         hermes_cli::providers::OAUTH_CAPABLE_PROVIDERS
             .iter()
-            .map(|p| p.to_string())
+            .map(|provider| provider.to_string())
             .collect()
     } else {
         vec![normalize_auth_provider(provider)]
@@ -811,7 +515,7 @@ async fn run_auth_verify(
             print_auth_verify_result(&result);
             continue;
         }
-        let result = verify_single_oauth_provider(&target, token_store, manager).await?;
+        let result = verify_single_oauth_provider(&target, token_store).await?;
         print_auth_verify_result(&result);
         if !result.outcome.is_success() {
             failed.push(result);
@@ -821,7 +525,7 @@ async fn run_auth_verify(
     if failed.is_empty() {
         Ok(())
     } else {
-        let failed_ids: Vec<String> = failed.iter().map(|r| r.provider.clone()).collect();
+        let failed_ids: Vec<String> = failed.iter().map(|result| result.provider.clone()).collect();
         Err(AgentError::AuthFailed(format!(
             "OAuth verification failed for provider(s): {}",
             failed_ids.join(", ")

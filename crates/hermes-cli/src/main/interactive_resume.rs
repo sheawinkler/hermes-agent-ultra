@@ -255,7 +255,10 @@ async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
 
 fn run_kanban(args: Vec<String>) -> Result<(), AgentError> {
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    println!("{}", hermes_cli::commands::run_kanban_command(&arg_refs)?);
+    println!(
+        "{}",
+        hermes_cli::commands::run_kanban_command(&hermes_config::hermes_home(), &arg_refs)?
+    );
     Ok(())
 }
 
@@ -269,6 +272,7 @@ struct ResumeSessionPayload {
     system_prompt: Option<String>,
     session_start: Option<String>,
     messages: Vec<hermes_core::Message>,
+    cwd: Option<String>,
 }
 
 async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<(), AgentError> {
@@ -286,6 +290,10 @@ async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<()
         }
         Err(err) => return Err(err),
     };
+    let cwd_restore_notice = restore_recorded_resume_cwd(
+        payload.cwd.as_deref(),
+        cli.no_restore_cwd,
+    );
     let mut app = App::new(cli).await?;
 
     if let Some(model) = payload.model.clone().filter(|m| !m.trim().is_empty()) {
@@ -312,6 +320,9 @@ async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<()
         payload.source_path.display(),
         app.messages.len()
     ));
+    if let Some(notice) = cwd_restore_notice {
+        app.push_ui_assistant(notice);
+    }
 
     hermes_cli::tui::run(app).await
 }
@@ -446,6 +457,13 @@ fn parse_resume_payload_file(
         })
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let cwd = info
+        .and_then(|v| v.get("cwd"))
+        .or_else(|| doc.get("cwd"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .map(ToOwned::to_owned);
 
     let messages_value = doc
         .get("messages")
@@ -467,8 +485,52 @@ fn parse_resume_payload_file(
         personality,
         system_prompt,
         session_start,
+        cwd,
         messages,
     })
+}
+
+fn restore_recorded_resume_cwd(recorded_cwd: Option<&str>, no_restore_cwd: bool) -> Option<String> {
+    if no_restore_cwd {
+        return None;
+    }
+    let recorded_cwd = recorded_cwd?.trim();
+    if recorded_cwd.is_empty() {
+        return None;
+    }
+    let target = PathBuf::from(recorded_cwd);
+    let current = std::env::current_dir().ok();
+    if !target.is_dir() {
+        let staying = current
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        return Some(format!(
+            "Session's recorded workspace directory is gone ({}); staying in {}.",
+            target.display(),
+            staying
+        ));
+    }
+    let same_directory = current.as_deref().is_some_and(|current| {
+        match (std::fs::canonicalize(current), std::fs::canonicalize(&target)) {
+            (Ok(current), Ok(target)) => current == target,
+            _ => current == target.as_path(),
+        }
+    });
+    if same_directory {
+        return None;
+    }
+    match std::env::set_current_dir(&target) {
+        Ok(()) => Some(format!(
+            "Restored workspace directory: {}.",
+            target.display()
+        )),
+        Err(error) => Some(format!(
+            "Could not restore workspace directory {}: {}. Staying in the current directory.",
+            target.display(),
+            error
+        )),
+    }
 }
 
 fn legacy_sessions_dir() -> Option<PathBuf> {
@@ -860,3 +922,38 @@ fn extract_session_objective(messages: &[hermes_core::Message]) -> Option<String
     })
 }
 
+
+#[cfg(test)]
+mod resume_workspace_tests {
+    use super::{parse_resume_payload_file, restore_recorded_resume_cwd};
+
+    #[test]
+    fn parse_resume_payload_reads_recorded_workspace_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("session.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "session_info": {
+                    "session_id": "workspace-session",
+                    "cwd": "/workspace/hermes-agent"
+                },
+                "messages": [{"role": "user", "content": "resume me"}]
+            })
+            .to_string(),
+        )
+        .expect("write session");
+
+        let payload =
+            parse_resume_payload_file("session".to_string(), path).expect("parse session");
+        assert_eq!(payload.cwd.as_deref(), Some("/workspace/hermes-agent"));
+    }
+
+    #[test]
+    fn resume_workspace_restore_is_best_effort_and_opt_outable() {
+        assert!(restore_recorded_resume_cwd(Some("/definitely/missing"), true).is_none());
+        let notice = restore_recorded_resume_cwd(Some("/definitely/missing"), false)
+            .expect("missing directory should report a nonfatal notice");
+        assert!(notice.contains("recorded workspace directory is gone"));
+    }
+}

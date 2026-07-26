@@ -70,6 +70,26 @@ fn build_provider_http_client(request_timeout: Option<Duration>) -> Client {
     })
 }
 
+pub(crate) fn map_reqwest_transport_error(context: &str, error: reqwest::Error) -> AgentError {
+    let detail = format!("{context}: {error}");
+    if error.is_timeout() {
+        AgentError::Timeout(detail)
+    } else if error.is_connect() || error.is_builder() {
+        AgentError::LlmApi(detail)
+    } else {
+        AgentError::Io(detail)
+    }
+}
+
+pub(crate) fn map_reqwest_body_error(context: &str, error: reqwest::Error) -> AgentError {
+    let detail = format!("{context}: {error}");
+    if error.is_timeout() {
+        AgentError::Timeout(detail)
+    } else {
+        AgentError::Io(detail)
+    }
+}
+
 pub fn codex_cloudflare_headers(access_token: Option<&str>) -> Vec<(String, String)> {
     let mut headers = vec![
         (

@@ -33,16 +33,20 @@ pub mod ssrf;
 pub mod sticker_cache;
 pub mod stream;
 pub mod tool_backends;
-pub mod voice;
-pub mod voice_mixer;
 
 // Re-export core types from hermes-core
 pub use hermes_core::errors::GatewayError;
 pub use hermes_core::traits::{ParseMode, PlatformAdapter};
 pub use hermes_core::types::Message;
 
-// Re-export gateway orchestrator and runtime context
-pub use gateway::{Gateway, GatewayRuntimeContext};
+// Re-export gateway orchestrator and authenticated memory-governance contracts.
+pub use gateway::{
+    Gateway, GatewayMemoryExportArtifact, GatewayMemoryExportDownloadMetadata,
+    GatewayMemoryExportHandler, GatewayMemoryExportOpenHandler, GatewayMemoryExportRemediation,
+    GatewayMemoryExportResponse, GatewayMemoryForgetHandler, GatewayMemoryForgetProviderState,
+    GatewayMemoryForgetProviderStatus, GatewayMemoryForgetRemediation, GatewayMemoryForgetResponse,
+    GatewayRuntimeContext,
+};
 
 // Re-export gateway cache/session-control contracts
 pub use agent_cache::{
@@ -51,12 +55,12 @@ pub use agent_cache::{
 };
 pub use session_control::{
     build_session_key, ActiveSessionControl, AgentActivitySummary, BusyInputMode,
-    BusyMessageDecision, BusySessionCoordinator, MessageEvent, MessageType, ProcessingOutcome,
-    SessionSource,
+    BusyMessageDecision, BusySessionCoordinator, GatewayRouteOutcome, MessageEvent, MessageType,
+    ProcessingOutcome, SessionSource,
 };
 
 // Re-export session management
-pub use session::{Session, SessionManager};
+pub use session::{ConversationScope, Session, SessionManager};
 
 // Re-export stream management
 pub use stream::{StreamHandle, StreamManager};

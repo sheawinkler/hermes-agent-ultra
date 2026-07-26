@@ -44,11 +44,11 @@ while external memory providers enrich recall without replacing provenance-backe
 Targeted checks:
 
 ```bash
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy_evals --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools test_shell_substitution_and_chain_laundering_are_guarded --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools harness_cockpit --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools builtin_registry_registers_core_tool_surfaces_for_parity --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-http rpc_harness_autonomy_exposes_dashboard_surface --lib
-CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-cli cli_parse_up_command --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy_evals --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-tools test_shell_substitution_and_chain_laundering_are_guarded --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-tools harness_cockpit --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-tools builtin_registry_registers_core_tool_surfaces_for_parity --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-http rpc_harness_autonomy_exposes_dashboard_surface --lib
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} CARGO_INCREMENTAL=0 cargo test -p hermes-cli cli_parse_up_command --lib
 ```

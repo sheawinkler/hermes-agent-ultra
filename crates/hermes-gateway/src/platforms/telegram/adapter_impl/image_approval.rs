@@ -7,6 +7,26 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
     ) -> Result<(), GatewayError> {
+        self.send_image_url_with_thread_policy(
+            chat_id,
+            image_url,
+            caption,
+            reply_to_message_id,
+            message_thread_id,
+            true,
+        )
+        .await
+    }
+
+    async fn send_image_url_with_thread_policy(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+        reply_to_message_id: Option<i64>,
+        message_thread_id: Option<i64>,
+        allow_thread_fallback: bool,
+    ) -> Result<(), GatewayError> {
         let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
         let message_thread_id = message_thread_id.or(inferred_thread_id);
         let mut body = serde_json::json!({
@@ -24,7 +44,7 @@ impl TelegramAdapter {
             body["message_thread_id"] = serde_json::Value::Number(thread_id.into());
         }
         let _resp: TelegramResponse<SentMessage> = self
-            .send_json_with_thread_fallback("sendPhoto", body)
+            .send_json_with_thread_policy("sendPhoto", body, allow_thread_fallback)
             .await?;
         Ok(())
     }

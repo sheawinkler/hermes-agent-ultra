@@ -664,7 +664,7 @@ fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             if sub == "list" {
                 emit_command_output(
                     app,
-                    "Behavior modes:\n- balanced: generalized execution with evidence checkpoints\n- strict: strongest evidence-first + contradiction discipline\n- autonomous: proactive loop execution until blocked\n- mission (aliases: sigma, perpetual): closed-loop perpetual objective improvement with concrete execution each cycle\n- minimal: concise operator-facing output with decisive actions",
+                    "Behavior modes:\n- balanced: generalized execution with evidence checkpoints\n- strict: strongest evidence-first + contradiction discipline\n- autonomous: proactive loop execution until blocked\n- mission (alias: perpetual): closed-loop perpetual objective improvement with concrete execution each cycle\n- minimal: concise operator-facing output with decisive actions",
                 );
                 return Ok(CommandResult::Handled);
             }
@@ -675,7 +675,7 @@ fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             ) {
                 emit_command_output(
                     app,
-                    "Usage: /objective behavior [status|list|balanced|strict|autonomous|mission|minimal|sigma]",
+                    "Usage: /objective behavior [status|list|balanced|strict|autonomous|mission|minimal]",
                 );
                 return Ok(CommandResult::Handled);
             }

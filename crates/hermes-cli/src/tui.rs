@@ -36,7 +36,7 @@ use tokio::task::JoinHandle;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use hermes_auth::FileTokenStore;
-use hermes_core::{AgentError, AgentResult, Message, StreamChunk};
+use hermes_core::{AgentError, AgentResult, Message};
 
 use crate::app::App;
 use crate::commands;

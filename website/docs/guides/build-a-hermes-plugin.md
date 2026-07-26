@@ -21,14 +21,14 @@ Hermes has several distinct pluggable interfaces — some use Python `register_*
 | A **context-compression engine** | [Context Engine Plugins](/docs/developer-guide/context-engine-plugin) |
 | An **image-generation backend** | [Image Generation Provider Plugins](/docs/developer-guide/image-gen-provider-plugin) |
 | A **TTS backend** (any CLI — Piper, VoxCPM, Kokoro, voice cloning, …) | [TTS custom command providers](/docs/user-guide/features/tts#custom-command-providers) — config-driven, no Python needed |
-| An **STT backend** (custom whisper / ASR CLI) | [Voice Message Transcription](/docs/user-guide/features/tts#voice-message-transcription-stt) — set `HERMES_LOCAL_STT_COMMAND` to a shell template |
+| An **STT backend** | The Rust `transcription` tool is HTTP-only (OpenAI/Nous-managed, Groq, Mistral) — see [Transcription tool](/docs/user-guide/features/tts#transcription-tool-stt). There is no `HERMES_LOCAL_STT_COMMAND` surface in this runtime. |
 | **External tools via MCP** (filesystem, GitHub, Linear, any MCP server) | [MCP](/docs/user-guide/features/mcp) — declare `mcp_servers.<name>` in `config.yaml` |
 | **Gateway event hooks** (fire on startup, session events, commands) | [Event Hooks](/docs/user-guide/features/hooks#gateway-event-hooks) — drop `HOOK.yaml` + `handler.py` into `~/.hermes/hooks/<name>/` |
 | **Shell hooks** (run a shell command on events) | [Shell Hooks](/docs/user-guide/features/hooks#shell-hooks) — declare under `hooks:` in `config.yaml` |
 | **Additional skill sources** (custom GitHub repos, private skill indexes) | [Skills](/docs/user-guide/features/skills) — `hermes skills tap add <repo>` · [Publishing a tap](/docs/user-guide/features/skills#publishing-a-custom-skill-tap) |
 | A first-class **core** inference provider (not a plugin) | [Adding Providers](/docs/developer-guide/adding-providers) |
 
-See the full [Pluggable interfaces table](/docs/user-guide/features/plugins#pluggable-interfaces--where-to-go-for-each) for a consolidated view of every extension surface including config-driven (TTS, STT, MCP, shell hooks) and drop-in directory (gateway hooks) styles.
+See the full [Pluggable interfaces table](/docs/user-guide/features/plugins#pluggable-interfaces--where-to-go-for-each) for a consolidated view of every extension surface including config-driven (TTS, MCP, shell hooks) and drop-in directory (gateway hooks) styles.
 :::
 
 ## What you're building
@@ -985,9 +985,9 @@ Publishing your own tap is just a GitHub repo with `skills/<skill-name>/SKILL.md
 
 **Full guides:** [Skills Hub](/docs/user-guide/features/skills#skills-hub) · [Publishing a custom tap](/docs/user-guide/features/skills#publishing-a-custom-skill-tap) (repo layout, minimal example, non-default paths, trust levels).
 
-### TTS / STT via command templates
+### TTS via command templates
 
-Any CLI that reads/writes audio or text can be plugged in through `config.yaml` — no Python code:
+Any CLI that synthesizes audio from text can be plugged in through `config.yaml` — no Python code:
 
 ```yaml
 tts:
@@ -1000,9 +1000,11 @@ tts:
       voice_compatible: true
 ```
 
-For STT, point `HERMES_LOCAL_STT_COMMAND` at a shell template. Supported placeholders: `{input_path}`, `{output_path}`, `{format}`, `{voice}`, `{model}`, `{speed}` (TTS); `{input_path}`, `{output_dir}`, `{language}`, `{model}` (STT). Any path-interacting CLI is automatically a plugin.
+Supported TTS placeholders include `{input_path}`, `{output_path}`, `{format}`, `{voice}`, `{model}`, and `{speed}`.
 
-**Full guides:** [TTS custom command providers](/docs/user-guide/features/tts#custom-command-providers) · [STT](/docs/user-guide/features/tts#voice-message-transcription-stt).
+There is **no** equivalent local-command STT plugin surface in the Rust `TranscriptionHandler` (`HERMES_LOCAL_STT_COMMAND` is not implemented). Use the HTTP `transcription` tool providers instead.
+
+**Full guides:** [TTS custom command providers](/docs/user-guide/features/tts#custom-command-providers) · [Transcription tool](/docs/user-guide/features/tts#transcription-tool-stt).
 
 ## Distribute via pip
 

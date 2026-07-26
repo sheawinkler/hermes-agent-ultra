@@ -14,7 +14,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         .checked_sub(Duration::from_secs(2))
         .unwrap_or_else(Instant::now);
     let mut last_pet_tick = Instant::now();
-    app.set_stream_handle(Some(StreamHandle::from(tui.stream_sender())));
+    app.set_stream_handle(Some(StreamHandle::new(tui.stream_sender())));
 
     // Spawn crossterm event reader on a dedicated thread. Crossterm polling and
     // reads are synchronous; running them on the Tokio runtime can make abort
@@ -366,19 +366,25 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             state.status_message =
                                                 "Running managed agent turn…".to_string();
                                             draw_frame_now(&mut tui, &app, &mut state)?;
-                                            let stream_tx = tui.stream_sender();
+                                            let completion_tx = tui.stream_sender();
                                             let input_for_task = input.clone();
                                             let task = tokio::spawn(async move {
                                                 let started = Instant::now();
-                                                let result = worker_app
-                                                    .handle_input(&input_for_task)
-                                                    .await
+                                                let run_result =
+                                                    worker_app.handle_input(&input_for_task).await;
+                                                if let Some(handle) = worker_app.stream_handle.as_ref()
+                                                {
+                                                    handle.wait_for_done().await;
+                                                }
+                                                let result = run_result
                                                     .map(|_| Box::new(worker_app))
                                                     .map_err(|e| e.to_string());
-                                                let _ = stream_tx.send(Event::ManagedAppRunComplete {
-                                                    result,
-                                                    elapsed_secs: started.elapsed().as_secs_f64(),
-                                                });
+                                                let _ = completion_tx
+                                                    .send(Event::ManagedAppRunComplete {
+                                                        result,
+                                                        elapsed_secs: started.elapsed().as_secs_f64(),
+                                                    })
+                                                    .await;
                                             });
                                             active_agent_task = Some(task);
                                         } else {
@@ -392,7 +398,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             state.begin_processing_cycle(&app.current_model);
                                             state.status_message = "Processing...".to_string();
 
-                                            let stream_tx = tui.stream_sender();
+                                            let completion_tx = tui.stream_sender();
                                             let agent = app.agent.clone();
                                             let stream_enabled = app.config.streaming.enabled;
                                             let tool_schemas = app.tool_schemas.clone();
@@ -402,37 +408,74 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             let task = tokio::spawn(async move {
                                                 let started = Instant::now();
                                                 let result = if stream_enabled {
-                                                    let stream_cb: Option<
-                                                        Box<
-                                                            dyn Fn(hermes_core::StreamChunk)
-                                                                + Send
-                                                                + Sync,
-                                                        >,
-                                                    > = stream_handle.map(|h| {
-                                                        Box::new(
-                                                            move |chunk: hermes_core::StreamChunk| {
-                                                                h.send_chunk(chunk);
+                                                    if let Some(stream_handle) = stream_handle {
+                                                        let (observer_sink, mut observer_rx) =
+                                                            hermes_agent::AgentObserverSink::channel(
+                                                                256,
+                                                            );
+                                                        let observer_handle = stream_handle.clone();
+                                                        let mut observer_task = tokio::spawn(
+                                                            async move {
+                                                                while let Some(event) =
+                                                                    observer_rx.recv().await
+                                                                {
+                                                                    match event {
+                                                                        hermes_agent::AgentObserverEvent::RenderDelta(delta) => {
+                                                                            observer_handle
+                                                                                .send_render_delta(delta);
+                                                                        }
+                                                                        hermes_agent::AgentObserverEvent::Usage(usage) => {
+                                                                            observer_handle
+                                                                                .send_usage(usage);
+                                                                        }
+                                                                        _ => {}
+                                                                    }
+                                                                }
                                                             },
-                                                        )
-                                                            as Box<
-                                                                dyn Fn(hermes_core::StreamChunk)
-                                                                    + Send
-                                                                    + Sync,
-                                                            >
-                                                    });
-                                                    agent.run_stream(
-                                                        messages,
-                                                        Some(tool_schemas),
-                                                        stream_cb,
-                                                    )
-                                                    .await
+                                                        );
+                                                        let result = agent
+                                                            .run_stream(
+                                                                messages,
+                                                                Some(tool_schemas),
+                                                                observer_sink.clone(),
+                                                            )
+                                                            .await;
+                                                        let flushed = observer_sink.flush().await;
+                                                        let dropped = observer_sink
+                                                            .take_dropped_event_count();
+                                                        if dropped > 0 {
+                                                            stream_handle
+                                                                .record_upstream_drops(dropped);
+                                                        }
+                                                        drop(observer_sink);
+                                                        if !flushed
+                                                            || tokio::time::timeout(
+                                                                Duration::from_millis(100),
+                                                                &mut observer_task,
+                                                            )
+                                                            .await
+                                                            .is_err()
+                                                        {
+                                                            observer_task.abort();
+                                                        }
+                                                        stream_handle.send_done();
+                                                        stream_handle.wait_for_done().await;
+                                                        result
+                                                    } else {
+                                                        agent
+                                                            .run(messages, Some(tool_schemas))
+                                                            .await
+                                                    }
                                                 } else {
                                                     agent.run(messages, Some(tool_schemas)).await
                                                 };
-                                                let _ = stream_tx.send(Event::AgentRunComplete {
-                                                    result: result.map_err(|e| e.to_string()),
-                                                    elapsed_secs: started.elapsed().as_secs_f64(),
-                                                });
+                                                let _ = agent.flush_observer().await;
+                                                let _ = completion_tx
+                                                    .send(Event::AgentRunComplete {
+                                                        result: result.map_err(|e| e.to_string()),
+                                                        elapsed_secs: started.elapsed().as_secs_f64(),
+                                                    })
+                                                    .await;
                                             });
                                             active_agent_task = Some(task);
                                         }
@@ -522,8 +565,10 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         app.running = false;
                         break 'main_loop;
                     }
-                    Some(Event::StreamDelta(_)) | Some(Event::StreamChunk(_)) | Some(Event::AgentDone) => {
-                        // Stream events are consumed on the dedicated stream lane.
+                    Some(event) => {
+                        if process_stream_lane_event(&mut app, &mut state, event) {
+                            needs_redraw = true;
+                        }
                     }
                     None => {
                         // Channel closed

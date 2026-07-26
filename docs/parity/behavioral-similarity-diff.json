@@ -9,7 +9,7 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/commands.rs",
+          "file": "crates/hermes-cli/src/commands/mod.rs",
           "name": "test_golden_upstream_surface_aliases_are_registered"
         },
         {
@@ -23,7 +23,7 @@
       ],
       "score": 1.0,
       "source_artifacts": [
-        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/commands/mod.rs",
         "crates/hermes-cli/src/main/tests/env_profile_diagnostics/gateway_runtime.rs",
         "crates/hermes-source-parity-tests/tests/cli_command_contract.rs"
       ],
@@ -73,11 +73,11 @@
       "rust_tests": [
         {
           "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
-          "name": "test_build_search_payload_includes_project_and_topic"
+          "name": "search_payloads_and_routes_are_partitioned_per_subject"
         },
         {
           "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
-          "name": "test_apply_pressure_tuning_forces_fast_mode_and_sources"
+          "name": "pressure_tuning_preserves_subject_scoped_payload"
         },
         {
           "file": "crates/hermes-cli/src/app.rs",
@@ -173,11 +173,11 @@
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+          "name": "oneshot_oauth_remediation_provider_supports_core_oauth_providers"
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt"
+          "name": "auth_refresh_uses_registered_oauth_handler_and_encrypted_store"
         },
         {
           "file": "crates/hermes-app-runtime/src/lib.rs",
@@ -191,7 +191,7 @@
         "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-acp/src/auth.rs"
       ],
-      "ultra_behavior": "Rust auth and routing cover upstream provider aliases, core OAuth refreshable providers, provider-specific API modes, and Nous stale singleton repair.",
+      "ultra_behavior": "Rust auth and routing cover upstream provider aliases, core OAuth remediation guidance, explicit OAuth refresh through registered handlers backed by an encrypted vault, and provider-specific API modes.",
       "upstream_behavior": "Provider auth, OAuth refresh, model routing, and provider aliases should recover cleanly from stale credentials and route to the selected provider.",
       "verified": true,
       "why": "This keeps interactive model/provider behavior aligned with upstream while using Rust config and auth stores."
@@ -315,7 +315,7 @@
       "rust_tests": [
         {
           "file": "crates/hermes-cli/src/main.rs",
-          "name": "telegram_gateway_message_preserves_group_topic_in_chat_id"
+          "name": "telegram_gateway_message_keeps_group_parent_and_topic_separate"
         },
         {
           "file": "crates/hermes-cli/src/main.rs",
@@ -358,7 +358,7 @@
         },
         {
           "file": "crates/hermes-skills/src/guard.rs",
-          "name": "trust_level_resolution_matches_known_skill_sources"
+          "name": "source_labels_never_claim_trust"
         },
         {
           "file": "crates/hermes-skills/src/guard.rs",
@@ -405,8 +405,13 @@
       "why": "This is a deliberate runtime-safety improvement over direct Python vendoring."
     },
     {
-      "classification": "superior",
+      "classification": "intentional_divergence",
       "domain": "protocol-and-fault-tolerance",
+      "evidence_scope": {
+        "capability_promotion_authoritative": false,
+        "coverage_kind": "fixture_reference_regression",
+        "production_complete": false
+      },
       "id": "fault-and-protocol-resilience",
       "issues": [],
       "missing_rust_test_refs": [],
@@ -414,15 +419,15 @@
       "rust_tests": [
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "sota_harness_matrix_gate_passes_and_references_real_tests"
+          "name": "fixture_reference_matrix_gate_passes_and_references_real_tests"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "fault_injection_matrix_covers_required_classes"
+          "name": "fault_injection_fixture_reference_matrix_covers_required_categories"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/global_parity_governance.rs",
-          "name": "test_sota_harness_matrix_gate_passes"
+          "name": "test_fixture_reference_matrix_gate_passes"
         }
       ],
       "score": 1.0,
@@ -431,10 +436,10 @@
         "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
         "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
       ],
-      "ultra_behavior": "Ultra has a SOTA harness matrix with workflow replay, protocol differential contracts, and chaos scenarios covering timeouts, 5xx, rate limits, connection resets, auth expiry, malformed tool payloads, and partial stream drops.",
+      "ultra_behavior": "Ultra maintains a fixture-reference regression matrix for workflow, protocol, and fault categories. Its registry/fixtures and referenced Rust test names are non-authoritative for capability promotion and do not establish executable protocol, client, or external chaos behavior.",
       "upstream_behavior": "Protocol adapters and runtime loops should behave deterministically under transport failures, malformed tool payloads, auth expiry, and stream interruptions.",
       "verified": true,
-      "why": "This turns resilience into a measured behavior surface rather than relying on happy-path parity."
+      "why": "This preserves useful fixture-reference regression hygiene; it is not a production-resilience proof or product-completeness claim."
     }
   ],
   "gate": {
@@ -448,14 +453,15 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-24T00:21:16.048264+00:00",
+  "generated_at_utc": "2026-07-26T02:51:48.370703+00:00",
   "manifest": "docs/parity/behavioral-similarity-cases.json",
   "schema_version": 1,
   "summary": {
     "behavioral_similarity_ratio": 1.0,
     "classification_counts": {
       "equivalent": 5,
-      "superior": 8
+      "intentional_divergence": 1,
+      "superior": 7
     },
     "domain_counts": {
       "agent-loop-and-runtime": 1,
@@ -474,12 +480,12 @@
     "equal_or_better_cases": 13,
     "equivalent_cases": 5,
     "gaps": 0,
-    "intentional_divergence_cases": 0,
+    "intentional_divergence_cases": 1,
     "min_superiority_cases": 5,
     "missing_rust_test_refs": 0,
     "missing_source_artifacts": 0,
     "regressions": 0,
-    "superior_cases": 8,
+    "superior_cases": 7,
     "total_cases": 13,
     "unverified_cases": 0
   }

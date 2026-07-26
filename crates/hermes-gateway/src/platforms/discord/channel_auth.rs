@@ -443,11 +443,18 @@ pub fn discord_allows_message_without_mention(
     bot_participated_in_thread: bool,
     bot_mentioned: bool,
 ) -> bool {
-    if bot_mentioned || !require_mention || context.is_dm || controls.allows_free_response(context)
-    {
+    if bot_mentioned || context.is_dm {
         return true;
     }
-    context.is_thread && bot_participated_in_thread && !controls.thread_require_mention
+    // An explicit thread policy is stricter than the parent channel's
+    // free-response setting and than prior bot participation.
+    if context.is_thread && controls.thread_require_mention {
+        return false;
+    }
+    if !require_mention || controls.allows_free_response(context) {
+        return true;
+    }
+    context.is_thread && bot_participated_in_thread
 }
 
 /// Discord SendResult-style success handling for unauthorized slash notifications.

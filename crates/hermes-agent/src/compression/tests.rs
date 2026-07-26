@@ -8,7 +8,10 @@ mod tests {
     use futures::stream::BoxStream;
     use hermes_core::{LlmProvider, LlmResponse, StreamChunk, ToolSchema, UsageStats};
     use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Mutex,
+    };
 
     // ---------- helpers ----------
 
@@ -63,6 +66,7 @@ mod tests {
         canned: String,
         calls: Mutex<usize>,
         prompts: Mutex<Vec<String>>,
+        max_tokens: AtomicU32,
     }
 
     impl CannedSummaryProvider {
@@ -71,6 +75,7 @@ mod tests {
                 canned: canned.into(),
                 calls: Mutex::new(0),
                 prompts: Mutex::new(Vec::new()),
+                max_tokens: AtomicU32::new(u32::MAX),
             })
         }
         fn call_count(&self) -> usize {
@@ -78,6 +83,10 @@ mod tests {
         }
         fn last_prompt(&self) -> Option<String> {
             self.prompts.lock().unwrap().last().cloned()
+        }
+        fn last_max_tokens(&self) -> Option<u32> {
+            let max_tokens = self.max_tokens.load(Ordering::SeqCst);
+            (max_tokens != u32::MAX).then_some(max_tokens)
         }
     }
 
@@ -87,12 +96,14 @@ mod tests {
             &self,
             messages: &[Message],
             _tools: &[ToolSchema],
-            _max_tokens: Option<u32>,
+            max_tokens: Option<u32>,
             _temperature: Option<f64>,
             model: Option<&str>,
             _extra_body: Option<&serde_json::Value>,
         ) -> Result<LlmResponse, AgentError> {
             *self.calls.lock().unwrap() += 1;
+            self.max_tokens
+                .store(max_tokens.unwrap_or(u32::MAX), Ordering::SeqCst);
             self.prompts.lock().unwrap().push(
                 messages
                     .first()
@@ -300,11 +311,44 @@ mod tests {
         };
         let compressor =
             ContextCompressor::new(cfg, aux_with_provider(CannedSummaryProvider::new("x")));
-        assert!(!compressor.should_compress(Some(40_000)));
-        assert!(compressor.should_compress(Some(50_000)));
-        assert!(compressor.should_compress(Some(60_000)));
+        assert!(!compressor.should_compress(Some(74_999)));
+        assert!(compressor.should_compress(Some(75_000)));
+        assert!(compressor.should_compress(Some(80_000)));
     }
 
+
+    #[test]
+    fn small_context_threshold_floor_is_raise_only() {
+        let auxiliary = aux_with_provider(CannedSummaryProvider::new("x"));
+        let raised = ContextCompressor::new(
+            CompressorConfig {
+                context_length: 100_000,
+                threshold_percent: 0.50,
+                ..quiet_config()
+            },
+            auxiliary.clone(),
+        );
+        let configured_higher = ContextCompressor::new(
+            CompressorConfig {
+                context_length: 100_000,
+                threshold_percent: 0.85,
+                ..quiet_config()
+            },
+            auxiliary.clone(),
+        );
+        let large_context = ContextCompressor::new(
+            CompressorConfig {
+                context_length: SMALL_CONTEXT_WINDOW_LIMIT,
+                threshold_percent: 0.50,
+                ..quiet_config()
+            },
+            auxiliary,
+        );
+
+        assert_eq!(raised.threshold_tokens(), 75_000);
+        assert_eq!(configured_higher.threshold_tokens(), 85_000);
+        assert_eq!(large_context.threshold_tokens(), 256_000);
+    }
     #[test]
     fn should_compress_uses_prompt_tokens_only() {
         let cfg = CompressorConfig {
@@ -318,7 +362,7 @@ mod tests {
         compressor.update_from_usage(40_000);
         assert!(!compressor.should_compress(None));
         assert!(!compressor.should_compress(Some(40_000)));
-        assert!(compressor.should_compress(Some(110_000)));
+        assert!(compressor.should_compress(Some(150_000)));
     }
 
     #[test]
@@ -419,6 +463,28 @@ mod tests {
         assert!(block.len() < huge.len());
     }
 
+    #[test]
+    fn serialize_excludes_assistant_inline_and_native_reasoning() {
+        let compressor =
+            ContextCompressor::new(quiet_config(), aux_with_provider(CannedSummaryProvider::new("x")));
+        let mut assistant = msg(
+            MessageRole::Assistant,
+            "visible answer <think>private scratch trace</think><reasoning>more scratch</reasoning>",
+        );
+        assistant.reasoning_content = Some("native reasoning trace".to_string());
+        let turns = vec![
+            msg(MessageRole::User, "literal user <think>text is preserved</think>"),
+            assistant,
+        ];
+
+        let block = compressor.serialize_for_summary(&turns);
+        assert!(block.contains("visible answer"));
+        assert!(block.contains("literal user <think>text is preserved</think>"));
+        assert!(!block.contains("private scratch trace"));
+        assert!(!block.contains("more scratch"));
+        assert!(!block.contains("native reasoning trace"));
+    }
+
     // ---------- generate_summary ----------
 
     #[tokio::test]
@@ -437,6 +503,54 @@ mod tests {
         let s2 = compressor.generate_summary(&turns).await.unwrap().unwrap();
         assert!(s2.contains("Goal: build it."));
         assert_eq!(provider.call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn generate_summary_omits_wire_cap_and_strips_reasoning_traces() {
+        let provider = CannedSummaryProvider::new(
+            "<think>summarizer scratch trace</think>Goal: durable result\napi_key=sk-response-secret-123456",
+        );
+        let aux = aux_with_provider(provider.clone());
+        let mut compressor = ContextCompressor::new(quiet_config(), aux);
+        let turns = vec![msg(
+            MessageRole::Assistant,
+            "visible work <think>assistant scratch trace</think>",
+        )];
+
+        let summary = compressor.generate_summary(&turns).await.unwrap().unwrap();
+        assert!(summary.contains("Goal: durable result"));
+        assert!(summary.contains("[redacted]"));
+        assert!(!summary.contains("summarizer scratch trace"));
+        assert!(!summary.contains("sk-response-secret-123456"));
+        assert_eq!(provider.call_count(), 1);
+        assert_eq!(
+            provider.last_max_tokens(),
+            None,
+            "compression must not impose a transport max_tokens cap"
+        );
+        let first_prompt = provider.last_prompt().expect("first summary prompt");
+        assert!(!first_prompt.contains("assistant scratch trace"));
+
+        let _ = compressor.generate_summary(&turns).await.unwrap().unwrap();
+        let second_prompt = provider.last_prompt().expect("iterative summary prompt");
+        assert!(!second_prompt.contains("summarizer scratch trace"));
+    }
+
+    #[tokio::test]
+    async fn generate_summary_keeps_a_thinking_only_response_nonempty() {
+        let provider = CannedSummaryProvider::new("<think>only provider trace</think>");
+        let aux = aux_with_provider(provider.clone());
+        let mut compressor = ContextCompressor::new(quiet_config(), aux);
+        let turns = vec![msg(MessageRole::User, "preserve the compaction result")];
+
+        let summary = compressor.generate_summary(&turns).await.unwrap().unwrap();
+
+        assert!(summary.contains(REASONING_ONLY_SUMMARY_FALLBACK));
+        assert!(
+            !summary.contains("only provider trace"),
+            "private reasoning must never become durable summary content"
+        );
+        assert_eq!(provider.call_count(), 1);
     }
 
     fn messages_with_handoff(summary_body: &str) -> Vec<Message> {

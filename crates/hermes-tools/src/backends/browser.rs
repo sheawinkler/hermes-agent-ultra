@@ -210,13 +210,18 @@ fn env_bool(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
-fn env_duration_seconds(name: &str) -> Option<Duration> {
-    let seconds = env_optional_nonempty(name)?.parse::<f64>().ok()?;
-    if seconds.is_finite() && seconds > 0.0 {
-        Some(Duration::from_secs_f64(seconds))
-    } else {
-        None
+fn checked_positive_duration(seconds: f64) -> Option<Duration> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
     }
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
+fn env_duration_seconds(name: &str) -> Option<Duration> {
+    env_optional_nonempty(name)?
+        .parse::<f64>()
+        .ok()
+        .and_then(checked_positive_duration)
 }
 
 fn cdp_command_timeout() -> Duration {
@@ -274,6 +279,7 @@ fn tool_error_message(err: ToolError) -> String {
         | ToolError::InvalidParams(message)
         | ToolError::NotFound(message)
         | ToolError::Timeout(message)
+        | ToolError::OutcomeUnknown(message)
         | ToolError::SchemaViolation(message) => message,
     }
 }
@@ -799,3 +805,31 @@ include!("browser/cloud_backend_impls.rs");
 include!("browser/local_backends.rs");
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn browser_timeout_accepts_fractional_seconds() {
+        assert_eq!(
+            checked_positive_duration(1.25),
+            Some(Duration::from_millis(1_250))
+        );
+    }
+
+    #[test]
+    fn browser_timeout_rejects_invalid_or_unrepresentable_seconds() {
+        for seconds in [
+            1e300,
+            1e308,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.0,
+            0.0,
+        ] {
+            assert_eq!(checked_positive_duration(seconds), None);
+        }
+    }
+}

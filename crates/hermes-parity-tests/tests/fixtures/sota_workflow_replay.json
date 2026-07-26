@@ -5,7 +5,7 @@
   "workflows": [
     {
       "id": "operator_status_triage",
-      "purpose": "Exercise the operator's first diagnostic path across model, tools, auth, gateway, and non-TTY fallback surfaces.",
+      "purpose": "Exercise the operator's first diagnostic path across model, tools, auth, gateway, availability, release evidence, and non-TTY fallback surfaces.",
       "steps": [
         {
           "id": "model_status",
@@ -65,22 +65,23 @@
     },
     {
       "id": "release_binary_confidence",
-      "purpose": "Exercise release-facing one-true-harness, memory, provider/QoS, and systems proof surfaces through non-interactive CLI commands.",
+      "purpose": "Exercise the release-facing audited capability inventory, memory, provider/QoS, and availability surfaces through non-interactive CLI commands.",
       "steps": [
-        {
-          "id": "systems_status_json",
-          "args": [
-            "systems",
-            "status",
-            "--json"
-          ],
-          "snapshot_role": "release_systems_status",
-          "expected_stdout_contains": [
-            "\"kind\": \"hermes.systems.status\"",
-            "Provider capability registry",
-            "Release gate"
-          ]
-        },
+      {
+        "id": "systems_a2a_availability_json",
+        "args": [
+          "systems",
+          "a2a-availability",
+          "show",
+          "--json"
+        ],
+        "snapshot_role": "surface_availability",
+        "expected_stdout_contains": [
+          "\"kind\": \"hermes.a2a.availability\"",
+          "\"available\": false",
+          "\"production_complete\": false"
+        ]
+      },
         {
           "id": "systems_release_json",
           "args": [
@@ -88,10 +89,11 @@
             "release",
             "--json"
           ],
-          "snapshot_role": "release_gate",
+          "snapshot_role": "release_evidence_inventory",
           "expected_stdout_contains": [
-            "\"kind\": \"hermes.systems.release_gate\"",
-            "\"passed\": true"
+            "\"kind\": \"hermes.systems.release_evidence_inventory\"",
+            "\"validation_executed\": false",
+            "\"release_ready\": false"
           ]
         },
         {

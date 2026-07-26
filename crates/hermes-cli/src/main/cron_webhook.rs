@@ -1,29 +1,51 @@
-fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler, AgentError> {
-    let config =
-        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+fn build_live_cron_scheduler(
+    cli: &Cli,
+    data_dir: &Path,
+    config: &hermes_config::GatewayConfig,
+    execution_mode: hermes_core::ResolvedExecutionMode,
+    execution_backend: &hermes_environments::ExecutionBackendBinding,
+) -> Result<CronScheduler, AgentError> {
     let current_model = config
         .model
         .clone()
         .unwrap_or_else(|| "gpt-5.5".to_string());
     let current_model = select_startup_model_with_fallback_and_auth_resolver(
-        &config,
+        config,
         &current_model,
         Some(&provider_oauth_token_from_auth_state),
     )
     .selected_model;
-    let provider = build_provider(&config, &current_model);
+    let provider = build_provider(config, &current_model);
+    let run_runtime = Arc::new(
+        RunRuntime::open(hermes_state_root(cli))
+            .map_err(|error| AgentError::Io(format!("run-record startup failed: {error}")))?,
+    );
 
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend = build_terminal_backend(&config);
     let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
-    hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
-
-    let runner = Arc::new(CronRunner::new(
-        provider,
-        Arc::new(bridge_tool_registry(&tool_registry)),
+    hermes_tools::register_builtin_tools(
+        &tool_registry,
+        Arc::clone(&execution_backend.terminal_backend),
+        skill_provider,
+    );
+    let agent_tools = Arc::new(bridge_tool_registry(&tool_registry));
+    agent_tools.set_execution_containment_context(Arc::clone(
+        &execution_backend.containment_context,
     ));
+
+    let runner = Arc::new(
+        CronRunner::new(
+            provider,
+            agent_tools,
+            run_runtime,
+            execution_mode,
+            Arc::clone(&execution_backend.containment_context),
+            config,
+        )
+        .map_err(|error| AgentError::Config(error.to_string()))?,
+    );
     let persistence = Arc::new(FileJobPersistence::with_dir(data_dir.to_path_buf()));
     Ok(CronScheduler::new(persistence, runner))
 }
@@ -91,11 +113,36 @@ async fn run_cron(
     workdir: Option<String>,
     all: bool,
 ) -> Result<(), AgentError> {
-    let data_dir = hermes_state_root(&cli).join("cron");
+    let runtime_config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    let execution_mode = hermes_config::resolve_runtime_execution_mode(
+        &runtime_config,
+        cli.execution_mode.as_deref(),
+    )
+    .map_err(|error| AgentError::Config(error.to_string()))?;
+    let execution_backend = hermes_cli::terminal_backend::build_execution_backend_binding(
+        &runtime_config,
+        execution_mode,
+    )?;
+    let state_root = hermes_state_root(&cli);
+    let data_dir = state_root.join("cron");
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| AgentError::Io(format!("cron dir {}: {}", data_dir.display(), e)))?;
-    let sched = cron_scheduler_for_data_dir(data_dir.clone());
-    sched.load_persisted_jobs().await.map_err(cron_cli_error)?;
+    let run_runtime = Arc::new(
+        RunRuntime::open(&state_root)
+            .map_err(|error| AgentError::Io(format!("run-record startup failed: {error}")))?,
+    );
+    let cron_agent_tools = Arc::new(hermes_agent::agent_loop::ToolRegistry::new());
+    cron_agent_tools
+        .set_execution_containment_context(Arc::clone(&execution_backend.containment_context));
+    let sched = cron_scheduler_for_data_dir(
+        data_dir.clone(),
+        cron_agent_tools,
+        run_runtime,
+        execution_mode,
+        Arc::clone(&execution_backend.containment_context),
+    )
+    .map_err(|error| AgentError::Config(error.to_string()))?;
     let resolved_id = job_id.or(id).filter(|s| !s.trim().is_empty());
 
     match action.as_deref().unwrap_or("list") {
@@ -301,7 +348,13 @@ async fn run_cron(
                     println!("Resumed job {}", jid);
                 }
                 "run" => {
-                    let live_sched = build_live_cron_scheduler(&cli, &data_dir)?;
+                    let live_sched = build_live_cron_scheduler(
+                        &cli,
+                        &data_dir,
+                        &runtime_config,
+                        execution_mode,
+                        &execution_backend,
+                    )?;
                     live_sched
                         .load_persisted_jobs()
                         .await
@@ -354,7 +407,13 @@ async fn run_cron(
                 println!("No due jobs at {}.", now);
                 return Ok(());
             }
-            let live_sched = build_live_cron_scheduler(&cli, &data_dir)?;
+            let live_sched = build_live_cron_scheduler(
+                &cli,
+                &data_dir,
+                &runtime_config,
+                execution_mode,
+                &execution_backend,
+            )?;
             live_sched
                 .load_persisted_jobs()
                 .await

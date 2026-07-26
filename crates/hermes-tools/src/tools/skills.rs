@@ -6,56 +6,84 @@ use serde_json::{json, Value};
 
 use hermes_core::{tool_schema, JsonSchema, SkillProvider, ToolError, ToolHandler, ToolSchema};
 
-use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+
+use super::skill_utils::{
+    discover_verified_skills, load_verified_skill_by_selector, read_verified_skill_file,
+    render_skill_provenance_tag, SkillTrustRuntime,
+};
 
 // ---------------------------------------------------------------------------
 // SkillsListHandler
 // ---------------------------------------------------------------------------
 
-/// Tool for listing all available skills.
+/// Tool for listing only v2-admitted skills.
 pub struct SkillsListHandler {
-    provider: Arc<dyn SkillProvider>,
+    skill_roots: Vec<PathBuf>,
+    trust_runtime: Option<SkillTrustRuntime>,
 }
 
 impl SkillsListHandler {
-    pub fn new(provider: Arc<dyn SkillProvider>) -> Self {
-        Self { provider }
+    pub fn new(_provider: Arc<dyn SkillProvider>) -> Self {
+        Self::with_skill_roots(_provider, default_skill_roots())
+    }
+
+    pub fn with_skill_roots(_provider: Arc<dyn SkillProvider>, skill_roots: Vec<PathBuf>) -> Self {
+        Self {
+            skill_roots,
+            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
+        }
+    }
+
+    pub fn with_skill_roots_and_trust(
+        _provider: Arc<dyn SkillProvider>,
+        skill_roots: Vec<PathBuf>,
+        trust_runtime: SkillTrustRuntime,
+    ) -> Self {
+        Self {
+            skill_roots,
+            trust_runtime: Some(trust_runtime),
+        }
     }
 }
 
 #[async_trait]
 impl ToolHandler for SkillsListHandler {
     async fn execute(&self, _params: Value) -> Result<String, ToolError> {
-        let mut skills = self
-            .provider
-            .list_skills()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-        skills.sort_by(|a, b| {
-            a.name
-                .cmp(&b.name)
-                .then_with(|| a.category.cmp(&b.category))
-        });
-
-        let names: Vec<String> = skills.iter().map(|s| s.name.clone()).collect();
-        let result: Vec<Value> = skills
+        let trust = self.trust_runtime.as_ref().ok_or_else(|| {
+            ToolError::ExecutionFailed("no core skill trust verifier is configured".into())
+        })?;
+        let catalog = discover_verified_skills(&self.skill_roots, trust);
+        let names: Vec<String> = catalog
+            .available
             .iter()
-            .map(|s| {
+            .map(|skill| skill.name.clone())
+            .collect();
+        let skills: Vec<Value> = catalog
+            .available
+            .iter()
+            .map(|skill| {
                 json!({
-                    "name": s.name,
-                    "category": s.category,
-                    "description": s.description,
+                    "name": skill.name,
+                    "category": skill.frontmatter.get("category").and_then(Value::as_str),
+                    "description": skill.frontmatter.get("description").and_then(Value::as_str),
+                    "provenance": skill.provenance(),
                 })
             })
             .collect();
+        let blocked: Vec<Value> = catalog
+            .blocked
+            .iter()
+            .map(|skill| json!({"name": skill.name, "reason": skill.reason}))
+            .collect();
 
         Ok(serde_json::to_string_pretty(&json!({
-            "count": result.len(),
+            "count": skills.len(),
             "names": names,
-            "skills": result,
+            "skills": skills,
+            "blocked_count": blocked.len(),
+            "blocked": blocked,
         }))
         .unwrap_or_else(|_| "[]".to_string()))
     }
@@ -63,7 +91,7 @@ impl ToolHandler for SkillsListHandler {
     fn schema(&self) -> ToolSchema {
         tool_schema(
             "skills_list",
-            "List all available skills with their metadata.",
+            "List v2 lock-backed skills admitted by the core trust verifier.",
             JsonSchema::new("object"),
         )
     }
@@ -73,21 +101,32 @@ impl ToolHandler for SkillsListHandler {
 // SkillViewHandler
 // ---------------------------------------------------------------------------
 
-/// Tool for viewing a specific skill's content.
+/// Tool for viewing a specific, freshly reverified skill package.
 pub struct SkillViewHandler {
-    provider: Arc<dyn SkillProvider>,
     skill_roots: Vec<PathBuf>,
+    trust_runtime: Option<SkillTrustRuntime>,
 }
 
 impl SkillViewHandler {
-    pub fn new(provider: Arc<dyn SkillProvider>) -> Self {
-        Self::with_skill_roots(provider, default_skill_roots())
+    pub fn new(_provider: Arc<dyn SkillProvider>) -> Self {
+        Self::with_skill_roots(_provider, default_skill_roots())
     }
 
-    pub fn with_skill_roots(provider: Arc<dyn SkillProvider>, skill_roots: Vec<PathBuf>) -> Self {
+    pub fn with_skill_roots(_provider: Arc<dyn SkillProvider>, skill_roots: Vec<PathBuf>) -> Self {
         Self {
-            provider,
             skill_roots,
+            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
+        }
+    }
+
+    pub fn with_skill_roots_and_trust(
+        _provider: Arc<dyn SkillProvider>,
+        skill_roots: Vec<PathBuf>,
+        trust_runtime: SkillTrustRuntime,
+    ) -> Self {
+        Self {
+            skill_roots,
+            trust_runtime: Some(trust_runtime),
         }
     }
 }
@@ -97,96 +136,67 @@ impl ToolHandler for SkillViewHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
         let name = params
             .get("name")
-            .and_then(|v| v.as_str())
+            .and_then(|value| value.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
+        let trust = self.trust_runtime.as_ref().ok_or_else(|| {
+            ToolError::ExecutionFailed("no core skill trust verifier is configured".into())
+        })?;
+        let skill = load_verified_skill_by_selector(&self.skill_roots, name, trust)
+            .map_err(ToolError::ExecutionFailed)?
+            .ok_or_else(|| ToolError::NotFound(format!("Skill '{}' not found", name)))?;
 
         if let Some(file_path) = params
             .get("file_path")
-            .and_then(|v| v.as_str())
+            .and_then(|value| value.as_str())
             .map(str::trim)
-            .filter(|v| !v.is_empty())
+            .filter(|value| !value.is_empty())
         {
-            // Security hardening (parity with Python): reject obvious traversal
-            // patterns before resolving any filesystem paths.
             if has_traversal_component(file_path) {
                 return Ok(json!({
                     "success": false,
                     "error": "Path traversal ('..') is not allowed.",
-                    "hint": "Use a relative path within the skill directory"
+                    "hint": "Use a relative path within the verified package"
                 })
                 .to_string());
             }
 
-            let Some(skill_dir) = resolve_skill_dir(name, &self.skill_roots) else {
-                return Ok(json!({
-                    "success": false,
-                    "error": format!("Skill '{}' not found.", name),
-                    "hint": "Use skills_list to see all available skills"
-                })
-                .to_string());
-            };
-
-            let target_file = skill_dir.join(file_path);
-            if let Err(err) = validate_within_skill_dir(&target_file, &skill_dir) {
-                return Ok(json!({
-                    "success": false,
-                    "error": err,
-                    "hint": "Use a relative path within the skill directory"
-                })
-                .to_string());
-            }
-
-            if !target_file.exists() {
-                return Ok(json!({
-                    "success": false,
-                    "error": format!("File '{}' not found in skill '{}'.", file_path, name),
-                    "available_files": collect_available_skill_files(&skill_dir),
-                    "hint": "Use one of the available file paths listed above"
-                })
-                .to_string());
-            }
-
-            let bytes = match std::fs::read(&target_file) {
-                Ok(b) => b,
-                Err(e) => {
+            let bytes = match read_verified_skill_file(&skill, file_path, trust) {
+                Ok(bytes) => bytes,
+                Err(error) => {
                     return Ok(json!({
                         "success": false,
-                        "error": format!("Failed to read '{}': {}", file_path, e)
+                        "error": format!("File '{}' is unavailable from the verified package: {}", file_path, error),
+                        "hint": "Use a relative path contained in the admitted package"
                     })
                     .to_string())
                 }
             };
+            let content = String::from_utf8(bytes).map_err(|_| {
+                ToolError::ExecutionFailed(
+                    "verified package contained a non-UTF-8 file despite trust verification".into(),
+                )
+            })?;
 
-            let filename = target_file
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("file");
-
-            return match String::from_utf8(bytes) {
-                Ok(content) => Ok(json!({
-                    "success": true,
-                    "name": name,
-                    "file": file_path,
-                    "content": content,
-                    "file_type": target_file.extension().and_then(|ext| ext.to_str()).map(|ext| format!(".{}", ext)).unwrap_or_default()
-                })
-                .to_string()),
-                Err(e) => Ok(json!({
-                    "success": true,
-                    "name": name,
-                    "file": file_path,
-                    "content": format!("[Binary file: {}, size: {} bytes]", filename, e.as_bytes().len()),
-                    "is_binary": true
-                })
-                .to_string()),
-            };
+            return Ok(json!({
+                "success": true,
+                "name": skill.name,
+                "file": file_path,
+                "content": content,
+                "file_type": Path::new(file_path)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(|extension| format!(".{}", extension))
+                    .unwrap_or_default(),
+                "provenance": skill.provenance(),
+            })
+            .to_string());
         }
 
-        match self.provider.get_skill(name).await {
-            Ok(Some(skill)) => Ok(skill.content.clone()),
-            Ok(None) => Err(ToolError::NotFound(format!("Skill '{}' not found", name))),
-            Err(e) => Err(ToolError::ExecutionFailed(e.to_string())),
-        }
+        Ok(format!(
+            "{}\n\n{}",
+            render_skill_provenance_tag(skill.provenance()),
+            skill.content
+        ))
     }
 
     fn schema(&self) -> ToolSchema {
@@ -195,46 +205,31 @@ impl ToolHandler for SkillViewHandler {
             "name".into(),
             json!({
                 "type": "string",
-                "description": "Name of the skill to view"
+                "description": "Canonical package name of the skill to view"
             }),
         );
         props.insert(
             "file_path".into(),
             json!({
                 "type": "string",
-                "description": "Optional relative path to a specific file within the skill directory (e.g., references/api.md)"
+                "description": "Optional relative file inside the verified package (e.g., references/api.md)"
             }),
         );
 
         tool_schema(
             "skill_view",
-            "View a skill by name, or read a specific file inside the skill with file_path.",
+            "View a v2-admitted skill or a contained reverified package file.",
             JsonSchema::object(props, vec!["name".into()]),
         )
     }
 }
 
 fn default_skill_roots() -> Vec<PathBuf> {
-    let mut roots = vec![hermes_config::skills_dir()];
-    if let Some(home) = user_home_dir() {
-        roots.push(home.join(".hermes").join("skills"));
-    }
-    roots.sort();
-    roots.dedup();
-    roots
-}
-
-fn user_home_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("USERPROFILE")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .map(PathBuf::from)
-        })
+    // `hermes_config::skills_dir` already performs the sole supported
+    // legacy-home migration decision. Adding a second legacy root here would
+    // create a competing lock authority and admit a package from the wrong
+    // store.
+    vec![hermes_config::skills_dir()]
 }
 
 fn has_traversal_component(path: &str) -> bool {
@@ -250,184 +245,16 @@ fn has_traversal_component(path: &str) -> bool {
     })
 }
 
-fn resolve_skill_dir(name: &str, roots: &[PathBuf]) -> Option<PathBuf> {
-    if has_traversal_component(name) {
-        return None;
-    }
-    let name_is_path_like = name.contains('/') || name.contains('\\');
-    for root in roots.iter().filter(|r| r.exists()) {
-        let direct = root.join(name);
-        if direct.is_dir() && direct.join("SKILL.md").exists() {
-            return Some(direct);
-        }
-        if name_is_path_like {
-            continue;
-        }
-        if let Some(found) = find_skill_dir_by_name(root, name) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn find_skill_dir_by_name(root: &Path, name: &str) -> Option<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if path.file_name() != Some(OsStr::new("SKILL.md")) {
-                continue;
-            }
-            let Some(parent) = path.parent() else {
-                continue;
-            };
-            let Some(dirname) = parent.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if dirname == name {
-                return Some(parent.to_path_buf());
-            }
-        }
-    }
-    None
-}
-
-fn validate_within_skill_dir(path: &Path, root: &Path) -> Result<(), String> {
-    let root_resolved = root
-        .canonicalize()
-        .map_err(|e| format!("Path escapes skill directory boundary: {}", e))?;
-
-    // Walk up to the nearest existing ancestor so we can still detect
-    // symlink escapes for non-existing leaf paths.
-    let mut probe = path.to_path_buf();
-    while !probe.exists() {
-        if !probe.pop() {
-            break;
-        }
-    }
-    if !probe.exists() {
-        return Err("Invalid file path".to_string());
-    }
-
-    let probe_resolved = probe
-        .canonicalize()
-        .map_err(|e| format!("Path escapes skill directory boundary: {}", e))?;
-
-    if probe_resolved.strip_prefix(&root_resolved).is_err() {
-        return Err("Path escapes skill directory boundary.".to_string());
-    }
-    Ok(())
-}
-
-fn collect_available_skill_files(skill_dir: &Path) -> Value {
-    let mut categories: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    categories.insert("references", Vec::new());
-    categories.insert("templates", Vec::new());
-    categories.insert("assets", Vec::new());
-    categories.insert("scripts", Vec::new());
-    categories.insert("other", Vec::new());
-
-    let mut stack = vec![skill_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if path.file_name() == Some(OsStr::new("SKILL.md")) {
-                continue;
-            }
-            let Ok(rel) = path.strip_prefix(skill_dir) else {
-                continue;
-            };
-            let rel_str = normalize_relative_path(rel);
-            if rel_str.is_empty() {
-                continue;
-            }
-
-            if rel_str.starts_with("references/") {
-                categories
-                    .get_mut("references")
-                    .expect("category exists")
-                    .push(rel_str);
-                continue;
-            }
-            if rel_str.starts_with("templates/") {
-                categories
-                    .get_mut("templates")
-                    .expect("category exists")
-                    .push(rel_str);
-                continue;
-            }
-            if rel_str.starts_with("assets/") {
-                categories
-                    .get_mut("assets")
-                    .expect("category exists")
-                    .push(rel_str);
-                continue;
-            }
-            if rel_str.starts_with("scripts/") {
-                categories
-                    .get_mut("scripts")
-                    .expect("category exists")
-                    .push(rel_str);
-                continue;
-            }
-
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if matches!(
-                ext.as_str(),
-                "md" | "py" | "yaml" | "yml" | "json" | "tex" | "sh"
-            ) {
-                categories
-                    .get_mut("other")
-                    .expect("category exists")
-                    .push(rel_str);
-            }
-        }
-    }
-
-    for files in categories.values_mut() {
-        files.sort();
-    }
-
-    let mut out = serde_json::Map::new();
-    for (category, files) in categories {
-        if !files.is_empty() {
-            out.insert(category.to_string(), json!(files));
-        }
-    }
-    Value::Object(out)
-}
-
-fn normalize_relative_path(path: &Path) -> String {
-    path.components()
-        .filter_map(|c| match c {
-            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 // ---------------------------------------------------------------------------
 // SkillManageHandler
 // ---------------------------------------------------------------------------
+
+fn local_authored_staging_message(name: &str, action: &str) -> String {
+    format!(
+        "Skill '{}' {} as LocalAuthored staging and remains quarantined. An owner must record an explicit attestation before it can be loaded or used for effects.",
+        name, action
+    )
+}
 
 /// Tool for creating, updating, and deleting skills.
 pub struct SkillManageHandler {
@@ -461,7 +288,7 @@ impl ToolHandler for SkillManageHandler {
                 self.provider.create_skill(name, content, category)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' created successfully", name))
+                Ok(local_authored_staging_message(name, "was created"))
             }
             "update" => {
                 let name = params.get("name")
@@ -474,7 +301,7 @@ impl ToolHandler for SkillManageHandler {
                 self.provider.update_skill(name, content)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' updated successfully", name))
+                Ok(local_authored_staging_message(name, "was updated"))
             }
             "delete" => {
                 let name = params.get("name")
@@ -484,7 +311,10 @@ impl ToolHandler for SkillManageHandler {
                 self.provider.delete_skill(name)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' deleted successfully", name))
+                Ok(format!(
+                    "Skill '{}' was removed from the skill store and is no longer loadable.",
+                    name
+                ))
             }
             "auto_create" => {
                 let name = params.get("name")
@@ -508,7 +338,7 @@ impl ToolHandler for SkillManageHandler {
                 self.provider.create_skill(name, &content, Some("auto-generated"))
                     .await
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' auto-created", name))
+                Ok(local_authored_staging_message(name, "was auto-created"))
             }
             "self_improve" => {
                 let name = params.get("name")
@@ -525,7 +355,7 @@ impl ToolHandler for SkillManageHandler {
                 self.provider.update_skill(name, &improved)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' improved", name))
+                Ok(local_authored_staging_message(name, "was improved"))
             }
             "sync" => Ok("Skill sync request accepted (provider-specific hub sync path).".to_string()),
             "install_builtins" => {
@@ -533,7 +363,7 @@ impl ToolHandler for SkillManageHandler {
                     "planning","debugging","refactoring","testing","docs","git","review","web-research",
                     "terminal","file-edit","security","performance","api-design","db-migrations",
                     "incident-response","release","prompting","agent-orchestration","mcp","gateway",
-                    "voice-mode","cron","memory","session-search","tool-authoring","skill-authoring"
+                    "cron","memory","session-search","tool-authoring","skill-authoring"
                 ];
                 let mut created = 0usize;
                 for name in builtins {
@@ -549,7 +379,10 @@ impl ToolHandler for SkillManageHandler {
                         created += 1;
                     }
                 }
-                Ok(format!("Installed {} built-in skills", created))
+                Ok(format!(
+                    "Staged {} generated skills as LocalAuthored. Each remains quarantined pending explicit owner attestation.",
+                    created
+                ))
             }
             other => Err(ToolError::InvalidParams(format!("Unknown action: '{}'. Use create/update/delete/auto_create/self_improve/sync/install_builtins.", other))),
         }
@@ -573,7 +406,7 @@ impl ToolHandler for SkillManageHandler {
             "content".into(),
             json!({
                 "type": "string",
-                "description": "Skill content (for create/update)"
+                "description": "Skill content (for create/update). New or changed content is staged as LocalAuthored and requires explicit owner attestation before loading."
             }),
         );
         props.insert(
@@ -608,7 +441,7 @@ impl ToolHandler for SkillManageHandler {
 
         tool_schema(
             "skill_manage",
-            "Create, update, or delete skills.",
+            "Create, update, or delete skills. Create and update stage LocalAuthored content; they do not make it executable.",
             JsonSchema::object(props, vec!["action".into(), "name".into()]),
         )
     }
@@ -618,7 +451,17 @@ impl ToolHandler for SkillManageHandler {
 mod tests {
     use super::*;
     use hermes_core::{AgentError, Skill, SkillMeta};
+    use hermes_skills::{
+        canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
+        LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
+        SkillLockV2, SkillManager, SkillPackageIdentityV2, SkillPackageManifestV2,
+        SkillPackageProof, SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature,
+        SkillSigningKey, SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
+        SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+    };
+    use std::collections::BTreeMap;
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     struct MockSkillProvider;
@@ -665,31 +508,192 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_skills_list() {
-        let handler = SkillsListHandler::new(Arc::new(MockSkillProvider));
-        let result = handler.execute(json!({})).await.unwrap();
-        assert!(result.contains("test"));
-        let payload: Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(payload["count"], json!(1));
-        assert_eq!(payload["names"][0], Value::String("test".to_string()));
+    async fn install_attested_local_skill(
+        skills_root: &Path,
+        name: &str,
+        content: &str,
+        extra_files: &[(&str, &str)],
+    ) {
+        let skill_dir = skills_root.join(name);
+        for (relative_path, bytes) in extra_files {
+            let path = skill_dir.join(relative_path);
+            fs::create_dir_all(path.parent().expect("fixture parent")).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let store = FileSkillStore::new(skills_root.to_path_buf());
+        store
+            .save(&Skill {
+                name: name.to_string(),
+                content: content.to_string(),
+                category: None,
+                description: Some("verified test skill".to_string()),
+            })
+            .await
+            .unwrap();
+        let digest = canonical_bundle_digest(&skill_dir).unwrap();
+        store
+            .attest_local_skill(
+                name,
+                LocalOwnerAttestation::new(
+                    "test-owner",
+                    format!("test-attestation-{name}"),
+                    digest,
+                    "2026-07-20T00:00:00Z",
+                ),
+            )
+            .unwrap();
+    }
+
+    fn install_signed_remote_skill(skills_root: &Path) -> (SkillTrustRuntime, SkillSigningKey) {
+        let name = "signed-skill";
+        let package_root = skills_root.join(name);
+        fs::create_dir_all(&package_root).unwrap();
+        fs::write(
+            package_root.join("SKILL.md"),
+            "---\nname: signed-skill\ndescription: Signed fixture\n---\n# Signed\n\n1. Follow verified instructions",
+        )
+        .unwrap();
+        let signer = SkillSigningKey::from_seed([41; 32]);
+        let identity = SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/signed-skill",
+            "publisher.example",
+            "0123456789abcdef0123456789abcdef01234567",
+            canonical_bundle_digest(&package_root).unwrap(),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = SkillPackageManifestV2::new(
+            SkillPackageSource::Remote,
+            identity,
+            SkillPackageProof::RemoteSignature(SkillSignature::ed25519("test-key", "")),
+            full_skill_scan(&package_root),
+            SkillCompatibility::default(),
+            SkillPermissions::default(),
+            Vec::new(),
+        );
+        signer.sign_manifest(&mut manifest, "test-key").unwrap();
+        store_lock(
+            skills_root,
+            &SkillLockV2 {
+                schema_version: SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![SkillLockEntryV2 {
+                    install_path: name.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .unwrap();
+        let verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(vec![signer.trusted_key("test-key", true)]).unwrap(),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        (SkillTrustRuntime::new(verifier), signer)
+    }
+
+    fn revoke_signed_remote_skill(skills_root: &Path, signer: &SkillSigningKey) {
+        let mut revocations = SignedSkillRevocationList {
+            schema_version: SKILL_REVOCATION_SCHEMA_VERSION,
+            issued_at: "2026-07-20T00:00:00Z".to_string(),
+            signature: None,
+            revoked: vec![SkillRevocation {
+                name: Some("signed-skill".to_string()),
+                publisher_id: None,
+                immutable_source_revision: None,
+                content_digest: None,
+                key_id: None,
+                reason: "fixture revocation".to_string(),
+                revoked_at: "2026-07-20T00:00:00Z".to_string(),
+            }],
+        };
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
+        store_revocations(skills_root, &revocations).unwrap();
     }
 
     #[tokio::test]
-    async fn test_skill_view() {
-        let handler = SkillViewHandler::new(Arc::new(MockSkillProvider));
-        let result = handler.execute(json!({"name": "test"})).await.unwrap();
-        assert_eq!(result, "skill content");
-    }
-
-    #[tokio::test]
-    async fn test_skill_view_file_path_reads_reference_file() {
+    async fn test_skills_list_excludes_unlocked_provider_rows() {
         let tmp = tempdir().unwrap();
         let skills_root = tmp.path().join("skills");
-        let skill_dir = skills_root.join("test-skill");
-        fs::create_dir_all(skill_dir.join("references")).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "# Test Skill").unwrap();
-        fs::write(skill_dir.join("references/api.md"), "API docs here").unwrap();
+        install_attested_local_skill(&skills_root, "locked-skill", "skill content", &[]).await;
+
+        let handler =
+            SkillsListHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
+        let result = handler.execute(json!({})).await.unwrap();
+        let payload: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(payload["count"], json!(1));
+        assert_eq!(
+            payload["names"][0],
+            Value::String("locked-skill".to_string())
+        );
+        assert_eq!(
+            payload["skills"][0]["provenance"]["source"],
+            Value::String("local_authored".to_string())
+        );
+        assert_eq!(
+            payload["skills"][0]["provenance"]["effects_allowed"],
+            Value::Bool(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_skill_view_returns_fresh_provenance_and_content() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill(&skills_root, "test", "skill content", &[]).await;
+
+        let handler =
+            SkillViewHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
+        let result = handler.execute(json!({"name": "test"})).await.unwrap();
+        assert!(result.contains("<skill_provenance package=\"test\""));
+        assert!(result.contains("skill content"));
+    }
+
+    #[tokio::test]
+    async fn signed_skill_view_and_list_load_then_revocation_denies_both() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        let (trust, signer) = install_signed_remote_skill(&skills_root);
+        let list = SkillsListHandler::with_skill_roots_and_trust(
+            Arc::new(MockSkillProvider),
+            vec![skills_root.clone()],
+            trust.clone(),
+        );
+        let view = SkillViewHandler::with_skill_roots_and_trust(
+            Arc::new(MockSkillProvider),
+            vec![skills_root.clone()],
+            trust.clone(),
+        );
+        let initial_list: Value =
+            serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
+        assert_eq!(initial_list["count"], Value::from(1));
+        let initial_view = view.execute(json!({"name": "signed-skill"})).await.unwrap();
+        assert!(initial_view.contains("Follow verified instructions"));
+        assert!(initial_view.contains("key_id=\"test-key\""));
+
+        revoke_signed_remote_skill(&skills_root, &signer);
+        assert!(view.execute(json!({"name": "signed-skill"})).await.is_err());
+        let revoked_list: Value =
+            serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
+        assert_eq!(revoked_list["count"], Value::from(0));
+        assert_eq!(revoked_list["blocked_count"], Value::from(1));
+    }
+
+    #[tokio::test]
+    async fn test_skill_view_file_path_reads_reverified_reference_file() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill(
+            &skills_root,
+            "test-skill",
+            "skill content",
+            &[("references/api.md", "API docs here")],
+        )
+        .await;
 
         let handler =
             SkillViewHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
@@ -703,25 +707,33 @@ mod tests {
             payload["content"],
             Value::String("API docs here".to_string())
         );
+        assert_eq!(
+            payload["provenance"]["package_name"],
+            Value::String("test-skill".to_string())
+        );
     }
 
     #[tokio::test]
-    async fn test_skill_view_empty_file_path_uses_provider_content() {
-        let handler = SkillViewHandler::new(Arc::new(MockSkillProvider));
+    async fn test_skill_view_empty_file_path_uses_verified_content() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill(&skills_root, "test", "skill content", &[]).await;
+
+        let handler =
+            SkillViewHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
         let result = handler
             .execute(json!({"name": "test", "file_path": ""}))
             .await
             .unwrap();
-        assert_eq!(result, "skill content");
+        assert!(result.contains("skill content"));
+        assert!(result.contains("skill_provenance"));
     }
 
     #[tokio::test]
     async fn test_skill_view_file_path_blocks_dotdot_traversal() {
         let tmp = tempdir().unwrap();
         let skills_root = tmp.path().join("skills");
-        let skill_dir = skills_root.join("test-skill");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "# Test Skill").unwrap();
+        install_attested_local_skill(&skills_root, "test-skill", "skill content", &[]).await;
         fs::write(tmp.path().join(".env"), "SECRET_API_KEY=sk-do-not-leak").unwrap();
 
         let handler =
@@ -739,37 +751,84 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn test_skill_view_file_path_blocks_symlink_escape() {
+    async fn test_skill_view_tampered_symlink_is_quarantined_before_read() {
         use std::os::unix::fs as unix_fs;
 
         let tmp = tempdir().unwrap();
         let skills_root = tmp.path().join("skills");
-        let skill_dir = skills_root.join("test-skill");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "# Test Skill").unwrap();
+        install_attested_local_skill(&skills_root, "test-skill", "skill content", &[]).await;
         let secret = tmp.path().join("secret.txt");
         fs::write(&secret, "TOP SECRET DATA").unwrap();
-        unix_fs::symlink(&secret, skill_dir.join("evil-link")).unwrap();
+        unix_fs::symlink(&secret, skills_root.join("test-skill").join("evil-link")).unwrap();
 
         let handler =
             SkillViewHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
-        let result = handler
+        let error = handler
             .execute(json!({"name": "test-skill", "file_path": "evil-link"}))
             .await
+            .unwrap_err();
+        assert!(!error.to_string().contains("TOP SECRET DATA"));
+        assert!(
+            error.to_string().contains("quarantined")
+                || error.to_string().contains("symlink")
+                || error.to_string().contains("digest")
+        );
+    }
+    #[tokio::test]
+    async fn test_skill_manage_create_stages_pending_local_package() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        let store = Arc::new(FileSkillStore::new(skills_root.clone()));
+        let manager = Arc::new(SkillManager::new(store.clone()));
+        let handler = SkillManageHandler::new(manager);
+
+        let result = handler
+            .execute(json!({
+                "action": "create",
+                "name": "new-skill",
+                "content": "# Local draft\n\n1. Review the draft"
+            }))
+            .await
             .unwrap();
-        let payload: Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(payload["success"], Value::Bool(false));
-        let error = payload["error"].as_str().unwrap_or("").to_ascii_lowercase();
-        assert!(error.contains("escapes") || error.contains("boundary"));
+        assert!(result.contains("LocalAuthored staging"));
+
+        let list =
+            SkillsListHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
+        let payload: Value = serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
+        assert_eq!(payload["count"], Value::from(0));
+        assert_eq!(payload["blocked_count"], Value::from(1));
+        assert!(payload["blocked"][0]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("PendingOwnerAttestation"));
+        assert!(store.load("new-skill").await.is_err());
     }
 
     #[tokio::test]
-    async fn test_skill_manage_create() {
-        let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
-        let result = handler
-            .execute(json!({"action": "create", "name": "new_skill", "content": "hello"}))
+    async fn test_skill_manage_delete_removes_pending_package_from_verified_catalog() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        let store = Arc::new(FileSkillStore::new(skills_root.clone()));
+        let handler = SkillManageHandler::new(Arc::new(SkillManager::new(store.clone())));
+
+        handler
+            .execute(json!({
+                "action": "create",
+                "name": "remove-me",
+                "content": "# Local draft\n\n1. Review the draft"
+            }))
             .await
             .unwrap();
-        assert!(result.contains("created"));
+        handler
+            .execute(json!({"action": "delete", "name": "remove-me"}))
+            .await
+            .unwrap();
+
+        assert!(store.load("remove-me").await.unwrap().is_none());
+        let list =
+            SkillsListHandler::with_skill_roots(Arc::new(MockSkillProvider), vec![skills_root]);
+        let payload: Value = serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
+        assert_eq!(payload["count"], Value::from(0));
+        assert_eq!(payload["blocked_count"], Value::from(0));
     }
 }

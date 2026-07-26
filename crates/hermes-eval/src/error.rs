@@ -27,6 +27,9 @@ pub enum EvalError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("evaluation containment startup failed: {0}")]
+    ContainmentStartup(String),
+
     #[error("{0}")]
     Other(String),
 }

@@ -9,6 +9,7 @@ description = "Core types, traits, and error types for Hermes Agent"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
@@ -20,3 +21,5 @@ url = { workspace = true }
 bytes = { workspace = true }
 indexmap = { workspace = true }
 futures = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"

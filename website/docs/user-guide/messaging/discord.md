@@ -6,7 +6,7 @@ description: "Set up Hermes Agent as a Discord bot"
 
 # Discord Setup
 
-Hermes Agent integrates with Discord as a bot, letting you chat with your AI assistant through direct messages or server channels. The bot receives your messages, processes them through the Hermes Agent pipeline (including tool use, memory, and reasoning), and responds in real time. It supports text, voice messages, file attachments, and slash commands.
+Hermes Agent integrates with Discord as a bot, letting you chat with your AI assistant through direct messages or server channels. The bot receives your messages, processes them through the Hermes Agent pipeline (including tool use, memory, and reasoning), and responds in real time. It supports text, inbound audio attachments (may be labeled `[transcription_candidate]`; STT only if the model calls `transcription`), optional `text_to_speech` media attachments, file attachments, and slash commands. Live Discord voice-channel join/listen/speak is **not** shipped.
 
 Before setup, here's the part most people want to know: how Hermes behaves once it's in your server.
 
@@ -529,16 +529,17 @@ DISCORD_HOME_CHANNEL_NAME="#bot-updates"
 
 Replace the ID with the actual channel ID (right-click → Copy Channel ID with Developer Mode on).
 
-## Voice Messages
+## Voice and audio
 
-Hermes Agent supports Discord voice messages:
+Shipped Discord audio surfaces:
 
-- **Incoming voice messages** are automatically transcribed using the configured STT provider: local `faster-whisper` (no key), Groq Whisper (`GROQ_API_KEY`), or OpenAI Whisper (`VOICE_TOOLS_OPENAI_KEY`).
-- **Text-to-speech**: Use `/voice tts` to have the bot send spoken audio responses alongside text replies.
-- **Discord voice channels**: Hermes can also join a voice channel, listen to users speaking, and talk back in the channel.
+- **Incoming voice notes** are not auto-transcribed. Ingress may prepend `[transcription_candidate]`; a transcript appears only if the agent calls the `transcription` tool (OpenAI/Nous-managed, Groq, or Mistral — no local faster-whisper path). See [Voice & TTS](/docs/user-guide/features/tts#transcription-tool-stt).
+- **`text_to_speech`** generates a validated media file that the gateway **may** attach on the current turn as an audio attachment — not an always-on speak engine and not a guaranteed native voice bubble.
+- **`/voice`** returns fixed status that no separate interactive voice engine is active. It does not inspect TTS/STT configuration. There is no `/voice tts` toggle and no Discord voice-channel join/listen/speak.
 
-For the full setup and operational guide, see:
+For the honest contract and setup, see:
 - [Voice Mode](/docs/user-guide/features/voice-mode)
+- [Voice & TTS](/docs/user-guide/features/tts)
 - [Use Voice Mode with Hermes](/docs/guides/use-voice-mode-with-hermes)
 
 ## Forum Channels

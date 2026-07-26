@@ -125,8 +125,10 @@ TTS settings are read from **two** OpenClaw config locations with this priority:
 | ElevenLabs model ID | `config.yaml` → `tts.elevenlabs.model_id` |
 | OpenAI model | `config.yaml` → `tts.openai.model` |
 | OpenAI voice | `config.yaml` → `tts.openai.voice` |
-| Edge TTS voice | `config.yaml` → `tts.edge.voice` (OpenClaw renamed "edge" to "microsoft" — both are recognized) |
+| MiniMax settings | `config.yaml` → `tts.minimax.*` when present |
 | TTS assets | `~/.hermes/tts/` (file copy) |
+
+The Rust TTS runtime implements **OpenAI**, **ElevenLabs**, **MiniMax**, **Piper**, and custom **command** providers only. Upstream-only names such as `edge` / `microsoft`, `xai`, `mistral`, `gemini`, `neutts`, and `kittentts` are **not** supported and fail closed — migration may copy the legacy provider string, but you must switch `tts.provider` to a supported built-in or a `tts.providers.<name>` command provider. See [Voice & TTS](/docs/user-guide/features/tts).
 
 ### Messaging platforms
 
@@ -247,4 +249,4 @@ Imported skills land in `~/.hermes/skills/openclaw-imports/`. Start a new sessio
 
 ### TTS voice not migrated
 
-OpenClaw stores TTS settings in two places: `messages.tts.providers.*` and the top-level `talk` config. The migration checks both. If your voice ID was set via the OpenClaw UI (stored in a different path), you may need to set it manually: `hermes config set tts.elevenlabs.voice_id YOUR_VOICE_ID`.
+OpenClaw stores TTS settings in two places: `messages.tts.providers.*` and the top-level `talk` config. The migration checks both. If your voice ID was set via the OpenClaw UI (stored in a different path), set it manually for a supported provider — for example `hermes config set tts.elevenlabs.voice_id YOUR_VOICE_ID` or `hermes config set tts.openai.voice alloy`. If migration left `tts.provider` on an unsupported legacy name (`edge`, `microsoft`, and similar), choose OpenAI, ElevenLabs, MiniMax, Piper, or a command provider; Hermes does not fall back silently.

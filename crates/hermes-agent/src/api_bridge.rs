@@ -21,8 +21,8 @@ use hermes_core::{
 
 use crate::credential_pool::CredentialPool;
 use crate::provider::{
-    codex_cloudflare_headers, is_openai_dynamic_model_alias, OPENAI_CODEX_BASE_URL,
-    OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
+    codex_cloudflare_headers, is_openai_dynamic_model_alias, map_reqwest_body_error,
+    map_reqwest_transport_error, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
 };
 use crate::rate_limit::RateLimitTracker;
 
@@ -489,7 +489,7 @@ impl CodexProvider {
 
         while let Some(chunk_result) = byte_stream.next().await {
             let chunk_bytes =
-                chunk_result.map_err(|e| AgentError::LlmApi(format!("Stream read error: {e}")))?;
+                chunk_result.map_err(|error| map_reqwest_body_error("Stream read error", error))?;
             buffer.push_str(&String::from_utf8_lossy(&chunk_bytes));
 
             while let Some(event_end) = buffer.find("\n\n") {
@@ -517,32 +517,21 @@ impl CodexProvider {
         }
 
         if let Some(response) = completed_response {
-            if let Ok(parsed) = Self::parse_response(&response) {
-                if parsed.message.content.is_some() || parsed.message.tool_calls.is_some() {
-                    return Ok(parsed);
-                }
-            }
+            return Self::parse_response(&response).map_err(|error| {
+                AgentError::LlmApi(format!(
+                    "invalid response.completed frame from Codex provider: {error}"
+                ))
+            });
         }
 
-        Ok(LlmResponse {
-            message: Message {
-                role: MessageRole::Assistant,
-                content: if content_text.is_empty() {
-                    None
-                } else {
-                    Some(content_text)
-                },
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-                reasoning_content: None,
-                anthropic_content_blocks: None,
-                cache_control: None,
-            },
-            usage: None,
-            model: effective_model.to_string(),
-            finish_reason: Some("stop".to_string()),
-        })
+        let detail = if content_text.is_empty() {
+            "before any output"
+        } else {
+            "after partial output"
+        };
+        Err(AgentError::LlmApi(format!(
+            "Codex response stream closed {detail} without response.completed"
+        )))
     }
 }
 
@@ -577,7 +566,7 @@ impl LlmProvider for CodexProvider {
             .request_builder(&url, &api_key, &body)
             .send()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("HTTP request failed: {e}")))?;
+            .map_err(|error| map_reqwest_transport_error("HTTP request failed", error))?;
 
         self.update_rate_limit(resp.headers());
 
@@ -598,10 +587,12 @@ impl LlmProvider for CodexProvider {
                 .await;
         }
 
-        let resp_json: Value = resp
-            .json()
+        let response_bytes = resp
+            .bytes()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("Failed to parse response: {e}")))?;
+            .map_err(|error| map_reqwest_body_error("Failed to read response body", error))?;
+        let resp_json: Value = serde_json::from_slice(&response_bytes)
+            .map_err(|error| AgentError::LlmApi(format!("Failed to parse response: {error}")))?;
 
         Self::parse_response(&resp_json)
     }
@@ -645,7 +636,7 @@ impl LlmProvider for CodexProvider {
             {
                 Ok(r) => r,
                 Err(e) => {
-                    yield Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+                    yield Err(map_reqwest_transport_error("HTTP request failed", e));
                     return;
                 }
             };
@@ -666,7 +657,7 @@ impl LlmProvider for CodexProvider {
                 let chunk_bytes = match chunk_result {
                     Ok(b) => b,
                     Err(e) => {
-                        yield Err(AgentError::LlmApi(format!("Stream read error: {e}")));
+                        yield Err(map_reqwest_body_error("Stream read error", e));
                         return;
                     }
                 };

@@ -47,6 +47,46 @@ impl PlatformAdapter for TelegramAdapter {
         Ok(())
     }
 
+    async fn send_message_threaded(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let thread_id = parse_telegram_thread_id(thread_id)?;
+        let parse_mode = self.resolve_parse_mode(parse_mode);
+        self.send_text_with_thread_policy(
+            chat_id,
+            text,
+            parse_mode,
+            thread_id,
+            false,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn send_message_with_options(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let thread_id = parse_telegram_thread_id(options.thread_id.as_deref())?;
+        let parse_mode = self.resolve_parse_mode(parse_mode);
+        self.send_text_with_thread_policy(
+            chat_id,
+            text,
+            parse_mode,
+            thread_id,
+            options.notify,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn send_or_update_status(
         &self,
         chat_id: &str,
@@ -114,6 +154,37 @@ impl PlatformAdapter for TelegramAdapter {
         Ok(())
     }
 
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let message_thread_id = parse_telegram_thread_id(options.thread_id.as_deref())?;
+        let extension = std::path::Path::new(file_path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let (method, field_name) =
+            Self::media_method_for_delivery(&extension, options.send_as_voice);
+        self.send_multipart_with_thread_policy(
+            TelegramMultipartRequest {
+                chat_id,
+                file_path,
+                caption,
+                method,
+                field_name,
+                reply_to_message_id: None,
+                message_thread_id,
+            },
+            options.notify,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn send_image_url(
         &self,
         chat_id: &str,
@@ -122,6 +193,25 @@ impl PlatformAdapter for TelegramAdapter {
     ) -> Result<(), GatewayError> {
         self.send_image_url_with_options(chat_id, image_url, caption, None, None)
             .await
+    }
+
+    async fn send_image_url_with_options(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let message_thread_id = parse_telegram_thread_id(options.thread_id.as_deref())?;
+        self.send_image_url_with_thread_policy(
+            chat_id,
+            image_url,
+            caption,
+            None,
+            message_thread_id,
+            options.notify,
+        )
+        .await
     }
 
     async fn delete_message(&self, chat_id: &str, message_id: &str) -> Result<bool, GatewayError> {
@@ -189,34 +279,45 @@ impl PlatformAdapter for TelegramAdapter {
 // Utility functions
 // ---------------------------------------------------------------------------
 
+fn parse_telegram_thread_id(thread_id: Option<&str>) -> Result<Option<i64>, GatewayError> {
+    let Some(thread_id) = thread_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = thread_id.parse::<i64>().map_err(|error| {
+        GatewayError::SendFailed(format!(
+            "invalid Telegram thread id '{thread_id}': {error}"
+        ))
+    })?;
+    match parsed {
+        0 => Ok(None),
+        value if value > 0 => Ok(Some(value)),
+        _ => Err(GatewayError::SendFailed(format!(
+            "invalid Telegram thread id '{thread_id}': expected a positive integer"
+        ))),
+    }
+}
+
 /// Split a message into chunks that fit within the given max length,
 /// preferring to break at newline boundaries.
-fn split_message(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
+fn split_message(text: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 {
         return vec![text.to_string()];
     }
 
     let mut chunks = Vec::new();
-    let mut start = 0;
-
-    while start < text.len() {
-        let end = (start + max_len).min(text.len());
-
-        if end >= text.len() {
-            chunks.push(text[start..].to_string());
+    let mut remaining = text;
+    loop {
+        let Some((hard_end, _)) = remaining.char_indices().nth(max_chars) else {
+            chunks.push(remaining.to_string());
             break;
-        }
-
-        // Try to break at a newline near the boundary.
-        let break_at = text[start..end]
+        };
+        let break_at = remaining[..hard_end]
             .rfind('\n')
-            .map(|pos| start + pos + 1)
-            .unwrap_or(end);
-
-        chunks.push(text[start..break_at].to_string());
-        start = break_at;
+            .map(|position| position + 1)
+            .unwrap_or(hard_end);
+        chunks.push(remaining[..break_at].to_string());
+        remaining = &remaining[break_at..];
     }
-
     chunks
 }
 

@@ -1,6 +1,7 @@
 use super::*;
 
-static TEST_STATE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static TEST_STATE_LOCK: LazyLock<std::sync::Mutex<()>> =
+    LazyLock::new(|| std::sync::Mutex::new(()));
 
 fn lock_test_state() -> std::sync::MutexGuard<'static, ()> {
     TEST_STATE_LOCK
@@ -38,30 +39,12 @@ impl Drop for EnvGuard {
 }
 
 fn reset_approval_state_unlocked() {
-    SESSION_APPROVED
-        .lock()
-        .expect("session approval lock poisoned")
-        .clear();
-    SESSION_YOLO
-        .lock()
-        .expect("session yolo lock poisoned")
-        .clear();
-    PERMANENT_APPROVED
-        .lock()
-        .expect("permanent approval lock poisoned")
-        .clear();
-    GATEWAY_QUEUES
-        .lock()
-        .expect("gateway queue lock poisoned")
-        .clear();
-    GATEWAY_NOTIFY_CBS
-        .lock()
-        .expect("gateway notify lock poisoned")
-        .clear();
-    APPROVAL_OBSERVERS
-        .lock()
-        .expect("approval observer lock poisoned")
-        .clear();
+    SESSION_APPROVED.lock().clear();
+    SESSION_YOLO.lock().clear();
+    PERMANENT_APPROVED.lock().clear();
+    GATEWAY_QUEUES.lock().clear();
+    GATEWAY_NOTIFY_CBS.lock().clear();
+    APPROVAL_OBSERVERS.lock().clear();
     NEXT_APPROVAL_OBSERVER_ID.store(1, Ordering::SeqCst);
 }
 

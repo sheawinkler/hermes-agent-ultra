@@ -204,39 +204,17 @@ fn probe_mem0_self_hosted_reachability(base_url: &str, api_key: &str) -> Result<
     Ok(())
 }
 
-fn active_honcho_host_key_for_cli() -> String {
-    if let Ok(explicit) = std::env::var("HERMES_HONCHO_HOST") {
-        let explicit = explicit.trim();
-        if !explicit.is_empty() {
-            return explicit.to_string();
-        }
-    }
-    let profile = std::env::var("HERMES_PROFILE").unwrap_or_default();
-    let profile = profile.trim();
-    if profile.is_empty() || matches!(profile, "default" | "custom") {
-        "hermes".to_string()
-    } else {
-        let sanitized = profile
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>()
-            .trim_matches('_')
-            .to_string();
-        format!(
-            "hermes_{}",
-            if sanitized.is_empty() {
-                "profile"
-            } else {
-                sanitized.as_str()
-            }
-        )
-    }
+fn active_honcho_host_key_for_cli() -> Result<String, AgentError> {
+    std::env::var("HERMES_HONCHO_HOST")
+        .ok()
+        .map(|host| host.trim().to_string())
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| {
+            AgentError::Config(
+                "Honcho setup requires an explicit HERMES_HONCHO_HOST; no default profile identity is used."
+                    .into(),
+            )
+        })
 }
 
 fn legacy_honcho_host_key_for_cli(host: &str) -> Option<String> {
@@ -288,41 +266,11 @@ fn honcho_config_has_oauth_grant(path: &Path, host: &str) -> bool {
         .is_some_and(honcho_host_value_has_oauth_grant)
 }
 
-fn honcho_ai_peer_for_host(host: &str) -> String {
-    host.strip_prefix("hermes.")
-        .or_else(|| host.strip_prefix("hermes_"))
-        .filter(|profile| !profile.trim().is_empty())
-        .unwrap_or(host)
-        .to_string()
-}
-
-fn parse_honcho_aliases(raw: &str) -> serde_json::Map<String, serde_json::Value> {
-    let mut aliases = serde_json::Map::new();
-    for entry in raw.split(',') {
-        let Some((key, value)) = entry.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        let value = value.trim();
-        if !key.is_empty() && !value.is_empty() {
-            aliases.insert(
-                key.to_string(),
-                serde_json::Value::String(value.to_string()),
-            );
-        }
-    }
-    aliases
-}
-
 struct HonchoSetupConfigInput<'a> {
     host: &'a str,
     deployment: &'a str,
     api_key: &'a str,
     base_url: &'a str,
-    peer_name: &'a str,
-    shape: &'a str,
-    runtime_peer_prefix: &'a str,
-    aliases: &'a serde_json::Map<String, serde_json::Value>,
 }
 
 fn build_honcho_setup_config(input: HonchoSetupConfigInput<'_>) -> serde_json::Value {
@@ -349,51 +297,6 @@ fn build_honcho_setup_config(input: HonchoSetupConfigInput<'_>) -> serde_json::V
     }
 
     host_block.insert("enabled".to_string(), serde_json::Value::Bool(true));
-    host_block.insert(
-        "workspace".to_string(),
-        serde_json::Value::String("hermes".to_string()),
-    );
-    host_block.insert(
-        "aiPeer".to_string(),
-        serde_json::Value::String(honcho_ai_peer_for_host(input.host)),
-    );
-    if !input.peer_name.trim().is_empty() {
-        host_block.insert(
-            "peerName".to_string(),
-            serde_json::Value::String(input.peer_name.to_string()),
-        );
-    }
-
-    match input.shape {
-        "single" => {
-            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(true));
-        }
-        "hybrid" => {
-            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(false));
-            if !input.aliases.is_empty() {
-                host_block.insert(
-                    "userPeerAliases".to_string(),
-                    serde_json::Value::Object(input.aliases.clone()),
-                );
-            }
-            if !input.runtime_peer_prefix.trim().is_empty() {
-                host_block.insert(
-                    "runtimePeerPrefix".to_string(),
-                    serde_json::Value::String(input.runtime_peer_prefix.to_string()),
-                );
-            }
-        }
-        _ => {
-            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(false));
-            if !input.runtime_peer_prefix.trim().is_empty() {
-                host_block.insert(
-                    "runtimePeerPrefix".to_string(),
-                    serde_json::Value::String(input.runtime_peer_prefix.to_string()),
-                );
-            }
-        }
-    }
-
     let mut hosts = serde_json::Map::new();
     hosts.insert(
         input.host.to_string(),
@@ -407,9 +310,6 @@ fn setup_mem0_provider(options: &MemorySetupCliOptions) -> Result<MemorySetupRes
     const MEM0_CLOUD_BASE_URL: &str = "https://api.mem0.ai/v1";
 
     let api_key_default = std::env::var("MEM0_API_KEY").unwrap_or_default();
-    let user_id_default =
-        std::env::var("MEM0_USER_ID").unwrap_or_else(|_| "hermes-user".to_string());
-    let agent_id_default = std::env::var("MEM0_AGENT_ID").unwrap_or_else(|_| "hermes".to_string());
     let base_url_default = options
         .host
         .as_deref()
@@ -450,9 +350,6 @@ fn setup_mem0_provider(options: &MemorySetupCliOptions) -> Result<MemorySetupRes
         "Mem0 self-hosted API key (blank for no-auth server)"
     };
     let api_key = prompt_memory_setup_value(api_label, Some(&api_key_default), options.yes)?;
-    let user_id = prompt_memory_setup_value("Mem0 user_id", Some(&user_id_default), options.yes)?;
-    let agent_id =
-        prompt_memory_setup_value("Mem0 agent_id", Some(&agent_id_default), options.yes)?;
     let base_url = if mode.uses_host() {
         prompt_memory_setup_value("Mem0 self-hosted host", Some(&base_url_default), options.yes)?
     } else {
@@ -474,8 +371,6 @@ fn setup_mem0_provider(options: &MemorySetupCliOptions) -> Result<MemorySetupRes
         "mode": mode.config_mode(),
         "api_key": "",
         "host": if mode.uses_host() { base_url.as_str() } else { "" },
-        "user_id": user_id,
-        "agent_id": agent_id,
         "base_url": base_url,
         "rerank": false
     });
@@ -532,8 +427,6 @@ fn setup_supermemory_provider(yes: bool) -> Result<MemorySetupResult, AgentError
     let api_key_default = std::env::var("SUPERMEMORY_API_KEY").unwrap_or_default();
     let base_url_default = std::env::var("SUPERMEMORY_BASE_URL")
         .unwrap_or_else(|_| "https://api.supermemory.ai".to_string());
-    let container_default =
-        std::env::var("SUPERMEMORY_CONTAINER_TAG").unwrap_or_else(|_| "hermes".to_string());
 
     if !yes {
         println!("Get your Supermemory API key at {API_KEY_URL}");
@@ -546,8 +439,6 @@ fn setup_supermemory_provider(yes: bool) -> Result<MemorySetupResult, AgentError
         )));
     }
     let base_url = prompt_memory_setup_value("Supermemory API base URL", Some(&base_url_default), yes)?;
-    let container_tag =
-        prompt_memory_setup_value("Supermemory container tag", Some(&container_default), yes)?;
     let auto_recall = memory_setup_bool_value(
         &prompt_memory_setup_value("Supermemory auto_recall (true|false)", Some("true"), yes)?,
         true,
@@ -560,7 +451,6 @@ fn setup_supermemory_provider(yes: bool) -> Result<MemorySetupResult, AgentError
     let config = serde_json::json!({
         "api_key": api_key,
         "base_url": base_url,
-        "container_tag": container_tag,
         "auto_recall": auto_recall,
         "auto_capture": auto_capture,
         "search_mode": "hybrid"
@@ -569,12 +459,8 @@ fn setup_supermemory_provider(yes: bool) -> Result<MemorySetupResult, AgentError
         .save_config(&config)
         .map_err(AgentError::Config)?;
 
-    let container = config
-        .get("container_tag")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("hermes");
     println!(
-        "Supermemory setup summary: container={container}, auto_recall={}, auto_capture={}",
+        "Supermemory setup summary: auto_recall={}, auto_capture={}",
         if auto_recall { "on" } else { "off" },
         if auto_capture { "on" } else { "off" }
     );
@@ -623,7 +509,7 @@ fn setup_honcho_provider(yes: bool) -> Result<MemorySetupResult, AgentError> {
     } else {
         "cloud"
     };
-    let host = active_honcho_host_key_for_cli();
+    let host = active_honcho_host_key_for_cli()?;
     let existing_oauth_grant =
         honcho_config_has_oauth_grant(&hermes_config::hermes_home().join("honcho.json"), &host);
 
@@ -654,42 +540,11 @@ fn setup_honcho_provider(yes: bool) -> Result<MemorySetupResult, AgentError> {
         ));
     }
 
-    let peer_default = std::env::var("HERMES_USER").unwrap_or_default();
-    let peer_name = prompt_memory_setup_value("Honcho peerName", Some(&peer_default), yes)?;
-    let shape_input = prompt_memory_setup_value(
-        "Deployment shape (single|multi|hybrid)",
-        Some("single"),
-        yes,
-    )?
-    .to_ascii_lowercase();
-    let shape = match shape_input.as_str() {
-        "single" | "hybrid" => shape_input,
-        _ => "multi".to_string(),
-    };
-    let runtime_peer_prefix = if shape == "multi" || shape == "hybrid" {
-        prompt_memory_setup_value("Runtime peer prefix", Some(""), yes)?
-    } else {
-        String::new()
-    };
-    let alias_raw = if shape == "hybrid" {
-        prompt_memory_setup_value(
-            "Runtime aliases (comma key=peer, blank for none)",
-            Some(""),
-            yes,
-        )?
-    } else {
-        String::new()
-    };
-    let aliases = parse_honcho_aliases(&alias_raw);
     let config = build_honcho_setup_config(HonchoSetupConfigInput {
         host: &host,
         deployment,
         api_key: &api_key,
         base_url: &base_url,
-        peer_name: &peer_name,
-        shape: &shape,
-        runtime_peer_prefix: &runtime_peer_prefix,
-        aliases: &aliases,
     });
 
     hermes_agent::memory_plugins::honcho::HonchoMemoryPlugin::new()
@@ -734,9 +589,6 @@ struct OpenVikingSetupConfigInput<'a> {
     endpoint: &'a str,
     api_key: &'a str,
     api_key_type: &'a str,
-    account: &'a str,
-    user: &'a str,
-    agent: &'a str,
 }
 
 fn build_openviking_setup_config(
@@ -751,33 +603,11 @@ fn build_openviking_setup_config(
             "OpenViking {api_key_type} setup requires an API key."
         )));
     }
-    let account = input.account.trim();
-    let user = input.user.trim();
-    if api_key_type == "root" && (account.is_empty() || user.is_empty()) {
-        return Err(AgentError::Config(
-            "OpenViking root API key setup requires account and user.".into(),
-        ));
-    }
-    let account = if account.is_empty() {
-        "default"
-    } else {
-        account
-    };
-    let user = if user.is_empty() { "default" } else { user };
-    let agent = if input.agent.trim().is_empty() {
-        "hermes"
-    } else {
-        input.agent.trim()
-    };
-
     Ok(serde_json::json!({
         "enabled": true,
         "endpoint": endpoint,
         "api_key": api_key,
         "api_key_type": api_key_type,
-        "account": account,
-        "user": user,
-        "agent": agent,
         "setup_mode": "manual"
     }))
 }
@@ -817,27 +647,10 @@ fn setup_openviking_provider(yes: bool) -> Result<MemorySetupResult, AgentError>
         };
         prompt_memory_setup_value(label, Some(&api_key_default), yes)?
     };
-    let account_default = std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "default".into());
-    let user_default = std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into());
-    let account = if key_type == "root" || key_type == "none" {
-        prompt_memory_setup_value("OpenViking account", Some(&account_default), yes)?
-    } else {
-        account_default
-    };
-    let user = if key_type == "root" || key_type == "none" {
-        prompt_memory_setup_value("OpenViking user", Some(&user_default), yes)?
-    } else {
-        user_default
-    };
-    let agent_default = std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| "hermes".into());
-    let agent = prompt_memory_setup_value("OpenViking agent", Some(&agent_default), yes)?;
     let config = build_openviking_setup_config(OpenVikingSetupConfigInput {
         endpoint: &endpoint,
         api_key: &api_key,
         api_key_type: &key_type,
-        account: &account,
-        user: &user,
-        agent: &agent,
     })?;
 
     hermes_agent::memory_plugins::openviking::OpenVikingMemoryPlugin::new()
@@ -928,6 +741,8 @@ mod mem0_setup_tests {
         assert_eq!(value["base_url"], "http://127.0.0.1:24220");
         assert_eq!(value["api_key"], "");
         assert_eq!(value["rerank"], false);
+        assert!(value.get("user_id").is_none());
+        assert!(value.get("agent_id").is_none());
     }
 
     #[test]
@@ -983,6 +798,26 @@ mod mem0_setup_tests {
         assert!(result.dry_run);
         assert!(!result.config_path.exists());
         assert!(!tmp.path().join(".env").exists());
+    }
+
+    #[test]
+    fn provider_setup_never_persists_static_identity_defaults() {
+        let _guard = env_test_lock();
+        let _host = EnvGuard::remove("HERMES_HONCHO_HOST");
+        assert!(matches!(
+            active_honcho_host_key_for_cli(),
+            Err(AgentError::Config(_))
+        ));
+
+        let config = build_openviking_setup_config(OpenVikingSetupConfigInput {
+            endpoint: "http://127.0.0.1:1933",
+            api_key: "",
+            api_key_type: "none",
+        })
+        .expect("local OpenViking setup config");
+        assert!(config.get("account").is_none());
+        assert!(config.get("user").is_none());
+        assert!(config.get("agent").is_none());
     }
 
     #[test]

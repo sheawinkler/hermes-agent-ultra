@@ -14,7 +14,6 @@ use chrono::Utc;
 use hermes_core::providers::{known_providers, provider_capability_for};
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 use indexmap::IndexMap;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::tools::auth_snapshot::auth_status_snapshot;
@@ -196,7 +195,7 @@ impl ToolHandler for IntegrationsSnapshotHandler {
             "include_plugins".into(),
             json!({
                 "type": "boolean",
-                "description": "Include local plugin manifest counts and rows. Defaults to true."
+                "description": "Request plugin diagnostic status. Raw plugin manifests are never parsed or labeled by this tool; defaults to true."
             }),
         );
         tool_schema(
@@ -354,12 +353,11 @@ fn gateway_panel_with_config_path(
                 hermes_config::GatewayConfig::default(),
             ),
         };
-    let plugin_rows = if include_plugins {
-        discover_plugin_surface()
+    let plugin_diagnostic_status = if include_plugins {
+        "unavailable_unverified_plugin_discovery_disabled"
     } else {
-        Vec::new()
+        "not_requested"
     };
-    let enabled_plugins = plugin_rows.iter().filter(|row| row.enabled).count();
 
     json!({
         "config_path": config_path.display().to_string(),
@@ -372,9 +370,10 @@ fn gateway_panel_with_config_path(
         "registered_tools": registry.list_tools().len(),
         "plugins": {
             "included": include_plugins,
-            "count": plugin_rows.len(),
-            "enabled": enabled_plugins,
-            "rows": plugin_rows,
+            "status": plugin_diagnostic_status,
+            "count": 0,
+            "enabled": 0,
+            "rows": Vec::<Value>::new(),
         },
     })
 }
@@ -479,99 +478,6 @@ fn env_nonempty(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-struct PluginSurfaceEntry {
-    name: String,
-    version: String,
-    description: String,
-    kind: Option<String>,
-    source: String,
-    path: String,
-    enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct PluginManifest {
-    name: String,
-    #[serde(default)]
-    version: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    kind: Option<String>,
-}
-
-fn discover_plugin_surface() -> Vec<PluginSurfaceEntry> {
-    let mut rows = Vec::new();
-    rows.extend(scan_plugin_manifest_root(
-        &hermes_config::hermes_home().join("plugins"),
-        "user",
-    ));
-    if hermes_config::env_var_enabled("HERMES_ENABLE_PROJECT_PLUGINS") {
-        if let Ok(cwd) = std::env::current_dir() {
-            rows.extend(scan_plugin_manifest_root(
-                &cwd.join(".hermes").join("plugins"),
-                "project",
-            ));
-        }
-    }
-    rows.sort_by(|a, b| {
-        a.source.cmp(&b.source).then_with(|| {
-            a.name
-                .to_ascii_lowercase()
-                .cmp(&b.name.to_ascii_lowercase())
-        })
-    });
-    rows
-}
-
-fn scan_plugin_manifest_root(root: &Path, source: &str) -> Vec<PluginSurfaceEntry> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if !path.is_dir() {
-                return None;
-            }
-            let manifest_path = path.join("plugin.yaml");
-            let raw = std::fs::read_to_string(&manifest_path).ok()?;
-            let manifest = serde_yaml::from_str::<PluginManifest>(&raw).ok()?;
-            Some(PluginSurfaceEntry {
-                name: manifest.name,
-                version: manifest.version,
-                description: manifest.description,
-                kind: coerce_memory_provider_kind(&path, manifest.kind),
-                source: source.to_string(),
-                path: path.display().to_string(),
-                enabled: !path.join(".disabled").exists(),
-            })
-        })
-        .collect()
-}
-
-fn coerce_memory_provider_kind(path: &Path, kind: Option<String>) -> Option<String> {
-    let explicit = kind
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-    if explicit.is_some() {
-        return explicit;
-    }
-    let Ok(source) = std::fs::read_to_string(path.join("__init__.py")) else {
-        return None;
-    };
-    let probe = source.get(..8192).unwrap_or(source.as_str());
-    if probe.contains("register_memory_provider") || probe.contains("MemoryProvider") {
-        Some("exclusive".to_string())
-    } else {
-        None
-    }
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {
@@ -785,6 +691,36 @@ mod tests {
         assert_eq!(payload["mutable"], false);
         assert_eq!(payload["secret_values_emitted"], false);
         assert!(!raw.contains("sk-"));
+    }
+
+    #[tokio::test]
+    async fn snapshot_never_labels_raw_plugin_manifests_as_plugins() {
+        let _lock = env_lock().await;
+        let home = tempdir().expect("home");
+        let plugin_root = home.path().join("plugins").join("raw-plugin");
+        std::fs::create_dir_all(&plugin_root).expect("create raw plugin root");
+        std::fs::write(
+            plugin_root.join("plugin.yaml"),
+            "name: forged-plugin\nversion: \"999.0.0\"\nkind: exclusive\n",
+        )
+        .expect("write raw manifest");
+        std::fs::write(
+            plugin_root.join("__init__.py"),
+            "raise AssertionError('snapshot must not inspect plugin payloads')\n",
+        )
+        .expect("write raw payload");
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+
+        let panel = gateway_panel(&ToolRegistry::new(), true);
+
+        assert_eq!(
+            panel["plugins"]["status"],
+            "unavailable_unverified_plugin_discovery_disabled"
+        );
+        assert_eq!(panel["plugins"]["count"], 0);
+        assert_eq!(panel["plugins"]["enabled"], 0);
+        assert_eq!(panel["plugins"]["rows"], json!([]));
+        assert!(!panel.to_string().contains("forged-plugin"));
     }
 
     #[test]

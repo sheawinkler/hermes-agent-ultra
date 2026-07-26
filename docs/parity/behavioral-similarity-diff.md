@@ -1,16 +1,16 @@
 # Behavioral Similarity Diff
 
-Generated: `2026-06-24T00:21:16.048264+00:00`
+Generated: `2026-07-19T00:53:41.466421+00:00`
 
 ## Gate
 
-- Gate: **PASS**
+- Gate: **FAIL**
 - Similarity ratio: `1.0`
-- Superior cases: `8`
+- Superior cases: `7`
 - Regressions: `0`
 - Gaps: `0`
 - Unverified cases: `0`
-- Missing Rust test refs: `0`
+- Missing Rust test refs: `24`
 
 ## Summary
 
@@ -18,14 +18,14 @@ Generated: `2026-06-24T00:21:16.048264+00:00`
 | --- | ---: |
 | `total_cases` | 13 |
 | `equal_or_better_cases` | 13 |
-| `superior_cases` | 8 |
+| `superior_cases` | 7 |
 | `equivalent_cases` | 5 |
-| `intentional_divergence_cases` | 0 |
+| `intentional_divergence_cases` | 1 |
 | `regressions` | 0 |
 | `gaps` | 0 |
 | `unverified_cases` | 0 |
-| `missing_rust_test_refs` | 0 |
-| `missing_source_artifacts` | 0 |
+| `missing_rust_test_refs` | 24 |
+| `missing_source_artifacts` | 1 |
 | `behavioral_similarity_ratio` | 1.0 |
 
 ## Classification Counts
@@ -33,7 +33,8 @@ Generated: `2026-06-24T00:21:16.048264+00:00`
 | Classification | Count |
 | --- | ---: |
 | `equivalent` | 5 |
-| `superior` | 8 |
+| `intentional_divergence` | 1 |
+| `superior` | 7 |
 
 ## Domain Counts
 
@@ -68,13 +69,38 @@ Generated: `2026-06-24T00:21:16.048264+00:00`
 | `telegram-cron-topic-delivery` | `cron-and-scheduler-runtime` | `superior` | 1.0 |
 | `skills-governance-and-marketplace` | `skills-management-contract` | `superior` | 1.0 |
 | `runtime-rust-only-safety` | `rust-only-runtime` | `superior` | 1.0 |
-| `fault-and-protocol-resilience` | `protocol-and-fault-tolerance` | `superior` | 1.0 |
+| `fault-and-protocol-resilience` | `protocol-and-fault-tolerance` | `intentional_divergence` | 1.0 |
 
 ## Gate Failures
 
-- none
+- `missing_rust_test_refs`: behavioral cases reference missing Rust tests
+- `missing_source_artifacts`: behavioral cases reference missing source artifacts
 
 ## Case Issues
 
-- none
+- `interactive-slash-command-surface` `missing_source_artifact`: source artifact does not exist
+- `interactive-slash-command-surface` `missing_rust_test_ref`: referenced Rust test was not found
+- `tool-use-and-web-research` `missing_rust_test_ref`: referenced Rust test was not found
+- `tool-use-and-web-research` `missing_rust_test_ref`: referenced Rust test was not found
+- `contextlattice-memory-first-loop` `missing_rust_test_ref`: referenced Rust test was not found
+- `contextlattice-memory-first-loop` `missing_rust_test_ref`: referenced Rust test was not found
+- `repo-research-planning-contract` `missing_rust_test_ref`: referenced Rust test was not found
+- `source-synthesis-quorum` `missing_rust_test_ref`: referenced Rust test was not found
+- `source-synthesis-quorum` `missing_rust_test_ref`: referenced Rust test was not found
+- `source-synthesis-quorum` `missing_rust_test_ref`: referenced Rust test was not found
+- `provider-auth-repair-and-model-routing` `missing_rust_test_ref`: referenced Rust test was not found
+- `provider-auth-repair-and-model-routing` `missing_rust_test_ref`: referenced Rust test was not found
+- `provider-auth-repair-and-model-routing` `missing_rust_test_ref`: referenced Rust test was not found
+- `provider-auth-repair-and-model-routing` `missing_rust_test_ref`: referenced Rust test was not found
+- `openai-pro-oauth-responses-backend` `missing_rust_test_ref`: referenced Rust test was not found
+- `openai-pro-oauth-responses-backend` `missing_rust_test_ref`: referenced Rust test was not found
+- `local-openai-compatible-backends` `missing_rust_test_ref`: referenced Rust test was not found
+- `local-openai-compatible-backends` `missing_rust_test_ref`: referenced Rust test was not found
+- `local-openai-compatible-backends` `missing_rust_test_ref`: referenced Rust test was not found
+- `gateway-platform-authorization` `missing_rust_test_ref`: referenced Rust test was not found
+- `gateway-platform-authorization` `missing_rust_test_ref`: referenced Rust test was not found
+- `gateway-platform-authorization` `missing_rust_test_ref`: referenced Rust test was not found
+- `telegram-cron-topic-delivery` `missing_rust_test_ref`: referenced Rust test was not found
+- `telegram-cron-topic-delivery` `missing_rust_test_ref`: referenced Rust test was not found
+- `telegram-cron-topic-delivery` `missing_rust_test_ref`: referenced Rust test was not found
 

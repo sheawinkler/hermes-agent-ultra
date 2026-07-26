@@ -95,7 +95,6 @@ When resuming a previous session (`hermes -c` or `hermes --resume <id>`), a "Pre
 | `Alt+Enter`, `Ctrl+J`, or `Shift+Enter` | New line (multi-line input). `Shift+Enter` requires a terminal that distinguishes it from `Enter` — see below. On Windows Terminal, `Alt+Enter` is captured by the terminal (fullscreen toggle); use `Ctrl+Enter` or `Ctrl+J` instead. |
 | `Alt+V` | Paste an image from the clipboard when supported by the terminal |
 | `Ctrl+V` | Paste text and opportunistically attach clipboard images |
-| `Ctrl+B` | Start/stop voice recording when voice mode is enabled (`voice.record_key`, default: `ctrl+b`) |
 | `Ctrl+G` | Open the current input buffer in `$EDITOR` (vim/nvim/nano/VS Code/etc.). Save and quit to send the edited text as the next prompt — ideal for long, multi-paragraph prompts. |
 | `Ctrl+X Ctrl+E` | Emacs-style alternate binding for the external editor (same behavior as `Ctrl+G`). |
 | `Ctrl+C` | Interrupt agent (double-press within 2s to force exit) |
@@ -121,14 +120,13 @@ Common examples:
 | `/skills browse` | Browse the skills hub and official optional skills |
 | `/background <prompt>` | Run a prompt in a separate background session |
 | `/skin` | Show or switch the active CLI skin |
-| `/voice on` | Enable CLI voice mode (press `Ctrl+B` to record) |
-| `/voice tts` | Toggle spoken playback for Hermes replies |
+| `/voice` | Fixed status only — no separate interactive voice engine is active (does not inspect TTS/STT config, capture mic, or auto-speak) |
 | `/reasoning high` | Increase reasoning effort |
 | `/title My Session` | Name the current session |
 
 For the full built-in CLI and messaging lists, see [Slash Commands Reference](../reference/slash-commands.md).
 
-For setup, providers, silence tuning, and messaging/Discord voice usage, see [Voice Mode](features/voice-mode.md).
+For `text_to_speech`, the callable `transcription` tool, and the fixed status-only `/voice` command, see [Voice Mode](features/voice-mode.md) and [Voice & TTS](features/tts.md).
 
 :::tip
 Commands are case-insensitive — `/HELP` works the same as `/help`. Installed skills also become slash commands automatically.

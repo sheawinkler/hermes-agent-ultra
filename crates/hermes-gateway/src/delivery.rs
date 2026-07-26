@@ -4,18 +4,20 @@
 //! for specifying where messages should be routed, and a `DeliveryRouter`
 //! that holds registered adapters and dispatches messages accordingly.
 
+use futures::FutureExt;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::media::validate_media_delivery_path;
+use crate::media::stage_media_delivery_path;
 use hermes_core::errors::{GatewayError, SendErrorKind};
 use hermes_core::traits::{PlatformAdapter, SendMessageOptions};
 
@@ -23,6 +25,8 @@ use hermes_core::traits::{PlatformAdapter, SendMessageOptions};
 pub(crate) const MAX_PLATFORM_OUTPUT: usize = 4000;
 static AUDIT_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const DEAD_TARGETS_FILE: &str = "dead_targets.json";
+const ADAPTER_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
+const ADAPTER_FILE_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub(crate) fn prepare_platform_message_for_adapter<'a>(
     adapter: &dyn PlatformAdapter,
@@ -47,17 +51,30 @@ fn prepare_platform_message_for_adapter_at<'a>(
         return Ok(Cow::Borrowed(message));
     }
 
-    let label = sanitized_audit_label(audit_label, adapter.platform_name());
-    if adapter.splits_long_messages() {
+    let platform_name =
+        std::panic::catch_unwind(AssertUnwindSafe(|| adapter.platform_name().to_string()))
+            .map_err(|_| {
+                GatewayError::Platform("platform adapter name callback panicked".to_string())
+            })?;
+    let splits_long_messages =
+        std::panic::catch_unwind(AssertUnwindSafe(|| adapter.splits_long_messages())).map_err(
+            |_| {
+                GatewayError::Platform(format!(
+                    "platform adapter '{platform_name}' chunking callback panicked"
+                ))
+            },
+        )?;
+    let label = sanitized_audit_label(audit_label, &platform_name);
+    if splits_long_messages {
         match save_full_platform_output_at(message, &label, hermes_home) {
             Ok(saved_path) => info!(
-                platform = adapter.platform_name(),
+                platform = %platform_name,
                 path = %saved_path.display(),
                 chars = message.chars().count(),
                 "Preserved long platform output for chunking adapter"
             ),
             Err(err) => warn!(
-                platform = adapter.platform_name(),
+                platform = %platform_name,
                 error = %err,
                 chars = message.chars().count(),
                 "Failed to save long platform output audit copy; delivering full content"
@@ -79,7 +96,7 @@ fn prepare_platform_message_for_adapter_at<'a>(
     let mut truncated = message.chars().take(visible).collect::<String>();
     truncated.push_str(&footer);
     info!(
-        platform = adapter.platform_name(),
+        platform = %platform_name,
         path = %saved_path.display(),
         original_chars = message.chars().count(),
         delivered_chars = truncated.chars().count(),
@@ -638,9 +655,11 @@ impl DeliveryRouter {
                 message,
                 SendMessageOptions {
                     thread_id: target.thread_id.clone(),
+                    reply_to_message_id: None,
                     explicit_chat_id: target.is_explicit,
                     notify: false,
                     non_conversational: false,
+                    send_as_voice: false,
                     delivery_audit_label: None,
                 },
             )
@@ -679,50 +698,76 @@ impl DeliveryRouter {
             return Ok(());
         }
 
-        let adapters = self.adapters.read().await;
-        match adapters.get(platform_name) {
-            Some(adapter) => {
-                if !adapter.is_running() {
-                    warn!(
-                        platform = platform_name,
-                        "Adapter is not running, attempting delivery anyway"
-                    );
-                }
-                let message = prepare_platform_message_for_adapter(
-                    adapter.as_ref(),
-                    message,
-                    options.delivery_audit_label.as_deref(),
-                )?;
-                let result = adapter
+        let adapter = self.adapters.read().await.get(platform_name).cloned();
+        let Some(adapter) = adapter else {
+            error!(
+                platform = platform_name,
+                "No adapter registered for platform"
+            );
+            self.fallback_queue.enqueue(DeliveryItem {
+                platform: platform_name.to_string(),
+                chat_id: chat_id.to_string(),
+                text: message.to_string(),
+            });
+            return Err(GatewayError::SendFailed(format!(
+                "No adapter registered for platform '{}'",
+                platform_name
+            )));
+        };
+
+        let running =
+            std::panic::catch_unwind(AssertUnwindSafe(|| adapter.is_running())).map_err(|_| {
+                GatewayError::Platform(format!(
+                    "platform adapter '{platform_name}' panicked during health check"
+                ))
+            })?;
+        if !running {
+            warn!(
+                platform = platform_name,
+                "Adapter is not running, attempting delivery anyway"
+            );
+        }
+        let message = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            prepare_platform_message_for_adapter(
+                adapter.as_ref(),
+                message,
+                options.delivery_audit_label.as_deref(),
+            )
+        }))
+        .map_err(|_| {
+            GatewayError::Platform(format!(
+                "platform adapter '{platform_name}' panicked while preparing delivery"
+            ))
+        })??;
+        let result = match tokio::time::timeout(
+            ADAPTER_DELIVERY_TIMEOUT,
+            AssertUnwindSafe(async {
+                adapter
                     .send_message_with_options(chat_id, message.as_ref(), None, options)
-                    .await;
-                match result {
-                    Ok(()) => {
-                        self.dead_targets.clear(platform_name, chat_id);
-                        Ok(())
-                    }
-                    Err(err) => {
-                        if let Some(reason) = dead_target_reason_from_error(&err) {
-                            self.dead_targets.mark_dead(platform_name, chat_id, reason);
-                        }
-                        Err(err)
-                    }
-                }
+                    .await
+            })
+            .catch_unwind(),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(GatewayError::Platform(format!(
+                "platform adapter '{platform_name}' panicked during delivery"
+            ))),
+            Err(_) => Err(GatewayError::Platform(format!(
+                "platform adapter '{platform_name}' timed out during delivery"
+            ))),
+        };
+        match result {
+            Ok(()) => {
+                self.dead_targets.clear(platform_name, chat_id);
+                Ok(())
             }
-            None => {
-                error!(
-                    platform = platform_name,
-                    "No adapter registered for platform"
-                );
-                self.fallback_queue.enqueue(DeliveryItem {
-                    platform: platform_name.to_string(),
-                    chat_id: chat_id.to_string(),
-                    text: message.to_string(),
-                });
-                Err(GatewayError::SendFailed(format!(
-                    "No adapter registered for platform '{}'",
-                    platform_name
-                )))
+            Err(err) => {
+                if let Some(reason) = dead_target_reason_from_error(&err) {
+                    self.dead_targets.mark_dead(platform_name, chat_id, reason);
+                }
+                Err(err)
             }
         }
     }
@@ -761,55 +806,71 @@ impl DeliveryRouter {
             ))
         })?;
 
-        let validated_path = validate_media_delivery_path(file_path).ok_or_else(|| {
+        let validated_delivery = stage_media_delivery_path(file_path).await.ok_or_else(|| {
             GatewayError::SendFailed("Refusing to deliver unsafe local file path".to_string())
         })?;
-        let validated_path = validated_path.to_str().ok_or_else(|| {
+        let validated_path = validated_delivery.staged_path().to_str().ok_or_else(|| {
             GatewayError::SendFailed("Refusing to deliver non-UTF-8 local file path".to_string())
         })?;
 
-        let adapters = self.adapters.read().await;
-        match adapters.get(platform_name) {
-            Some(adapter) => {
-                if self.dead_targets.is_dead(platform_name, chat_id) {
-                    info!(
-                        platform = platform_name,
-                        chat_id = chat_id,
-                        "Skipping file delivery to confirmed-dead target"
-                    );
-                    return Ok(());
-                }
-                let result = adapter
+        let adapter = self.adapters.read().await.get(platform_name).cloned();
+        let adapter = adapter.ok_or_else(|| {
+            GatewayError::SendFailed(format!(
+                "No adapter registered for platform '{}'",
+                platform_name
+            ))
+        })?;
+        if self.dead_targets.is_dead(platform_name, chat_id) {
+            info!(
+                platform = platform_name,
+                chat_id = chat_id,
+                "Skipping file delivery to confirmed-dead target"
+            );
+            return Ok(());
+        }
+        let result = match tokio::time::timeout(
+            ADAPTER_FILE_DELIVERY_TIMEOUT,
+            AssertUnwindSafe(async {
+                adapter
                     .send_file_with_options(
                         chat_id,
                         validated_path,
                         caption,
                         SendMessageOptions {
                             thread_id: target.thread_id.clone(),
+                            reply_to_message_id: None,
                             explicit_chat_id: target.is_explicit,
                             notify: false,
                             non_conversational: false,
+                            send_as_voice: false,
                             delivery_audit_label: None,
                         },
                     )
-                    .await;
-                match result {
-                    Ok(()) => {
-                        self.dead_targets.clear(platform_name, chat_id);
-                        Ok(())
-                    }
-                    Err(err) => {
-                        if let Some(reason) = dead_target_reason_from_error(&err) {
-                            self.dead_targets.mark_dead(platform_name, chat_id, reason);
-                        }
-                        Err(err)
-                    }
-                }
-            }
-            None => Err(GatewayError::SendFailed(format!(
-                "No adapter registered for platform '{}'",
-                platform_name
+                    .await
+            })
+            .catch_unwind(),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(GatewayError::Platform(format!(
+                "platform adapter '{platform_name}' panicked during file delivery"
             ))),
+            Err(_) => Err(GatewayError::Platform(format!(
+                "platform adapter '{platform_name}' timed out during file delivery"
+            ))),
+        };
+        match result {
+            Ok(()) => {
+                self.dead_targets.clear(platform_name, chat_id);
+                Ok(())
+            }
+            Err(err) => {
+                if let Some(reason) = dead_target_reason_from_error(&err) {
+                    self.dead_targets.mark_dead(platform_name, chat_id, reason);
+                }
+                Err(err)
+            }
         }
     }
 
@@ -830,10 +891,13 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use hermes_core::traits::ParseMode;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
+
+    type RecordedFile = (String, Vec<u8>);
 
     struct FileRecordingAdapter {
-        files: Arc<Mutex<Vec<String>>>,
+        files: Arc<Mutex<Vec<RecordedFile>>>,
+        should_fail: bool,
     }
 
     type RecordedMessage = (String, String, Option<String>, bool);
@@ -847,6 +911,8 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         error_text: &'static str,
     }
+
+    struct PanickingMessageAdapter;
 
     #[async_trait]
     impl PlatformAdapter for FileRecordingAdapter {
@@ -882,8 +948,19 @@ mod tests {
             file_path: &str,
             _caption: Option<&str>,
         ) -> Result<(), GatewayError> {
-            self.files.lock().unwrap().push(file_path.to_string());
-            Ok(())
+            let contents = std::fs::read(file_path).map_err(|error| {
+                GatewayError::SendFailed(format!(
+                    "recording adapter failed to read staged file: {error}"
+                ))
+            })?;
+            self.files.lock().push((file_path.to_string(), contents));
+            if self.should_fail {
+                Err(GatewayError::SendFailed(
+                    "recording adapter intentional failure".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
         }
 
         fn is_running(&self) -> bool {
@@ -911,12 +988,9 @@ mod tests {
             text: &str,
             _parse_mode: Option<ParseMode>,
         ) -> Result<(), GatewayError> {
-            self.messages.lock().unwrap().push((
-                chat_id.to_string(),
-                text.to_string(),
-                None,
-                false,
-            ));
+            self.messages
+                .lock()
+                .push((chat_id.to_string(), text.to_string(), None, false));
             Ok(())
         }
 
@@ -927,7 +1001,7 @@ mod tests {
             _parse_mode: Option<ParseMode>,
             options: SendMessageOptions,
         ) -> Result<(), GatewayError> {
-            self.messages.lock().unwrap().push((
+            self.messages.lock().push((
                 chat_id.to_string(),
                 text.to_string(),
                 options.thread_id,
@@ -983,7 +1057,7 @@ mod tests {
             _text: &str,
             _parse_mode: Option<ParseMode>,
         ) -> Result<(), GatewayError> {
-            self.calls.lock().unwrap().push(chat_id.to_string());
+            self.calls.lock().push(chat_id.to_string());
             Err(GatewayError::SendFailed(self.error_text.to_string()))
         }
 
@@ -994,7 +1068,7 @@ mod tests {
             _parse_mode: Option<ParseMode>,
             _options: SendMessageOptions,
         ) -> Result<(), GatewayError> {
-            self.calls.lock().unwrap().push(chat_id.to_string());
+            self.calls.lock().push(chat_id.to_string());
             Err(GatewayError::SendFailed(self.error_text.to_string()))
         }
 
@@ -1022,6 +1096,52 @@ mod tests {
 
         fn platform_name(&self) -> &str {
             "telegram"
+        }
+    }
+
+    #[async_trait]
+    impl PlatformAdapter for PanickingMessageAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            _chat_id: &str,
+            _text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            panic!("deterministic deferred delivery panic");
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "panic"
         }
     }
 
@@ -1242,7 +1362,7 @@ mod tests {
             .expect("explicit ntfy target should route");
 
         assert_eq!(
-            messages.lock().unwrap().as_slice(),
+            messages.lock().as_slice(),
             &[("alerts-channel".to_string(), "done".to_string(), None, true,)]
         );
     }
@@ -1267,13 +1387,13 @@ mod tests {
         let first = router.route_delivery(&target, "hello", None, None).await;
         assert!(first.is_err());
         assert!(registry.is_dead("telegram", "42"));
-        assert_eq!(calls.lock().unwrap().as_slice(), &["42".to_string()]);
+        assert_eq!(calls.lock().as_slice(), &["42".to_string()]);
 
         router
             .route_delivery(&target, "hello again", None, None)
             .await
             .expect("dead target short-circuits successfully");
-        assert_eq!(calls.lock().unwrap().as_slice(), &["42".to_string()]);
+        assert_eq!(calls.lock().as_slice(), &["42".to_string()]);
     }
 
     #[tokio::test]
@@ -1308,6 +1428,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn route_delivery_contains_adapter_panic_without_holding_registry_lock() {
+        let router = DeliveryRouter::new();
+        router
+            .register_adapter("panic", Arc::new(PanickingMessageAdapter))
+            .await;
+        let target = DeliveryTarget::platform_chat("panic", "chat1");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            router.route_delivery(&target, "hello", None, None),
+        )
+        .await
+        .expect("adapter panic must remain bounded")
+        .expect_err("adapter panic must become an error");
+        assert!(result.to_string().contains("panicked during delivery"));
+
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            router.register_adapter(
+                "panic",
+                Arc::new(MessageRecordingAdapter {
+                    messages: messages.clone(),
+                    splits_long_messages: true,
+                }),
+            ),
+        )
+        .await
+        .expect("adapter registry write must not be blocked by delivery");
+        router
+            .route_delivery(&target, "recovered", None, None)
+            .await
+            .expect("replacement adapter should deliver");
+        assert_eq!(messages.lock().len(), 1);
+    }
+
+    #[tokio::test]
     async fn route_file_delivery_validates_and_canonicalizes_path_before_adapter_send() {
         let router = DeliveryRouter::new();
         let files = Arc::new(Mutex::new(Vec::new()));
@@ -1316,6 +1473,7 @@ mod tests {
                 "test",
                 Arc::new(FileRecordingAdapter {
                     files: files.clone(),
+                    should_fail: false,
                 }),
             )
             .await;
@@ -1335,13 +1493,20 @@ mod tests {
             .await
             .expect("safe file should deliver");
 
+        let recorded_files = files.lock();
+        assert_eq!(recorded_files.len(), 1);
+        let (staged_path, contents) = &recorded_files[0];
         assert_eq!(
-            files.lock().unwrap().as_slice(),
-            &[std::fs::canonicalize(&report)
-                .unwrap()
-                .to_string_lossy()
-                .to_string()]
+            Path::new(staged_path).file_name(),
+            report.file_name(),
+            "staging preserves the adapter-visible filename"
         );
+        assert_eq!(contents, b"%PDF-1.4");
+        assert!(
+            !Path::new(staged_path).exists(),
+            "the staged snapshot must be removed after a successful send"
+        );
+        drop(recorded_files);
 
         let err = router
             .route_file_delivery(
@@ -1354,6 +1519,45 @@ mod tests {
             .await
             .expect_err("system file should be rejected");
         assert!(err.to_string().contains("unsafe local file path"));
-        assert_eq!(files.lock().unwrap().len(), 1);
+        assert_eq!(files.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn route_file_delivery_removes_staged_snapshot_after_adapter_failure() {
+        let router = DeliveryRouter::new();
+        let files = Arc::new(Mutex::new(Vec::new()));
+        router
+            .register_adapter(
+                "test",
+                Arc::new(FileRecordingAdapter {
+                    files: files.clone(),
+                    should_fail: true,
+                }),
+            )
+            .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let report = tmp.path().join("report.pdf");
+        std::fs::write(&report, b"%PDF-1.4").unwrap();
+
+        let error = router
+            .route_file_delivery(
+                &DeliveryTarget::platform_chat("test", "chat1"),
+                &report.to_string_lossy(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect_err("adapter failure should propagate");
+        assert!(error.to_string().contains("intentional failure"));
+
+        let files = files.lock();
+        assert_eq!(files.len(), 1);
+        let (staged_path, contents) = &files[0];
+        assert_eq!(contents, b"%PDF-1.4");
+        assert!(
+            !Path::new(staged_path).exists(),
+            "the staged snapshot must be removed after a failed send"
+        );
     }
 }

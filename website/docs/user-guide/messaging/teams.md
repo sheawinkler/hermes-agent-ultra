@@ -166,36 +166,37 @@ When the agent needs to run a potentially dangerous command, it sends an Adaptiv
 
 Clicking a button resolves the approval inline and replaces the card with the decision.
 
-### Meeting Summary Delivery (Teams Meeting Pipeline)
+### Meeting Summary Delivery (optional Python/source only)
 
-When the [Teams meeting pipeline plugin](/docs/user-guide/messaging/msgraph-webhook) is enabled, this adapter also handles outbound delivery of meeting summaries — one Teams integration surface, not two. After a meeting's transcript is summarized, the writer posts the summary into your chosen Teams target.
+**Not part of the Rust release artifact.** Outbound meeting-summary writers (`delivery_mode`, incoming webhook URL, team/channel/chat targets, `TEAMS_*` env vars) apply only if you separately run an upstream/source-tree Python `teams_pipeline` (or equivalent) plugin. The shipped Rust path is manual CLI only — see [Teams Meetings](/docs/user-guide/messaging/teams-meetings).
 
-Pipeline summary delivery is configured under the `teams` platform entry alongside the bot config:
+On Rust:
+
+- `hermes teams-pipeline` does **not** post summaries to Teams/Notion/Linear
+- `TeamsPipelineConfig` **rejects** `notion` / `linear` / `teams_delivery` under `meeting_pipeline`
+- `build_pipeline_runtime_config` / `validate` do **not** read `platforms.teams` delivery fields or `TEAMS_*` env vars
+- The Teams **messaging** adapter on this page is the chat bot — unrelated to pipeline sink wiring
+
+Historical source-plugin delivery shape (reference only — **ignored by Rust**):
 
 ```yaml
+# Optional Python/source plugin only. Not consumed by the Rust release binary.
 platforms:
   teams:
     enabled: true
     extra:
-      # existing bot config (client_id, client_secret, tenant_id, port) ...
-
-      # Meeting summary delivery (only used when the teams_pipeline plugin is enabled)
+      # bot config (client_id, client_secret, tenant_id, port) ...
       delivery_mode: "graph"       # or "incoming_webhook"
-      # For delivery_mode: graph — pick ONE of:
-      chat_id: "19:meeting_..."    # post into a Teams chat
-      # team_id: "..."             # OR post into a channel
+      # chat_id: "19:meeting_..."
+      # team_id: "..."
       # channel_id: "..."
-      # access_token: "..."        # optional; falls back to MSGRAPH_* app credentials
-      # For delivery_mode: incoming_webhook:
       # incoming_webhook_url: "https://outlook.office.com/webhook/..."
 ```
 
-| Mode | Use when | Trade-off |
-|------|----------|-----------|
-| `incoming_webhook` | Simple "post a summary into this channel" with a static Teams-generated URL. | No reply threading, no reactions, shows as the webhook's configured identity. |
-| `graph` | Threaded channel posts or 1:1/group chat posts under the bot's identity via Microsoft Graph. | Requires the [Graph app registration](/docs/guides/microsoft-graph-app-registration) with `ChannelMessage.Send` (channel) or `Chat.ReadWrite.All` (chat) application permissions. |
-
-If the `teams_pipeline` plugin is **not** enabled, these settings are inert — they only wire up when the pipeline runtime binds to the Graph webhook ingress.
+| Mode (Python/source only) | Notes |
+|------|----------|
+| `incoming_webhook` | Static Teams webhook URL posting — **not** wired in Rust CLI. |
+| `graph` | Graph channel/chat post under plugin credentials — **not** wired in Rust CLI; would need app permissions only if you run that separate plugin. |
 
 ---
 

@@ -596,6 +596,12 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
 /// - All LLM providers with an api_key set have a non-empty value
 /// - Terminal timeout > 0
 pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
+    validate_execution_mode_config_value(
+        &config.execution_mode,
+        ExecutionModeSource::ConfigFile,
+        None,
+        "in-memory config",
+    )?;
     if config.max_turns == 0 {
         return Err(ConfigError::ValidationError(
             "max_turns must be greater than 0".into(),

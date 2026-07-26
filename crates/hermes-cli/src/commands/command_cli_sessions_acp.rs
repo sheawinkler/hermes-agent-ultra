@@ -1,6 +1,56 @@
 const CLI_SESSIONS_ACTIONS: &str =
     "list, export, delete, prune, optimize, repair, stats, rename, browse";
 
+/// Session cleanup intentionally does not govern persistent memory.
+const SESSION_MEMORY_REMAINS_NOTICE: &str =
+    "Persistent memory remains unchanged. Session cleanup does not erase memory; use `hermes memory forget` with an authorized subject.";
+
+fn render_session_delete_completion(session_id: &str) -> String {
+    format!("Deleted session '{}'.\n{}", session_id, SESSION_MEMORY_REMAINS_NOTICE)
+}
+
+fn render_session_prune_completion(pruned: u32) -> String {
+    format!(
+        "Pruned {} session(s).\n{}",
+        pruned, SESSION_MEMORY_REMAINS_NOTICE
+    )
+}
+
+fn session_export_memory_notice() -> &'static str {
+    "Session export contains session data only; persistent memory was not exported."
+}
+
+#[cfg(test)]
+mod session_memory_governance_tests {
+    use super::{
+        render_session_delete_completion, render_session_prune_completion,
+        session_export_memory_notice,
+    };
+
+    #[test]
+    fn session_delete_reports_that_memory_remains() {
+        let receipt = render_session_delete_completion("session-1");
+        assert!(receipt.contains("Deleted session 'session-1'."));
+        assert!(receipt.contains("Persistent memory remains unchanged."));
+        assert!(receipt.contains("hermes memory forget"));
+    }
+
+    #[test]
+    fn session_prune_reports_that_memory_remains() {
+        let receipt = render_session_prune_completion(2);
+        assert!(receipt.contains("Pruned 2 session(s)."));
+        assert!(receipt.contains("Persistent memory remains unchanged."));
+    }
+
+    #[test]
+    fn session_export_never_claims_to_export_memory() {
+        assert_eq!(
+            session_export_memory_notice(),
+            "Session export contains session data only; persistent memory was not exported."
+        );
+    }
+}
+
 pub struct CliSessionsOptions {
     pub action: Option<String>,
     pub session: Option<String>,
@@ -13,7 +63,10 @@ pub struct CliSessionsOptions {
     pub redact: bool,
     pub yes: bool,
     pub source: Option<String>,
+    pub workspace: Option<String>,
     pub older_than: Option<u64>,
+    /// Maximum rows shown by `sessions list` after sort/classification.
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +100,55 @@ fn read_session_snapshot_source(path: &Path) -> Option<String> {
         .map(str::trim)
         .filter(|source| !source.is_empty())
         .map(ToString::to_string)
+}
+
+fn read_session_snapshot_workspace_key(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value
+        .pointer("/session_info/cwd")
+        .or_else(|| value.pointer("/cwd"))
+        .or_else(|| value.pointer("/metadata/cwd"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .map(ToString::to_string)
+}
+
+fn session_workspace_matches(workspace: Option<&str>, needle: &str) -> bool {
+    let needle = needle.trim().to_ascii_lowercase();
+    let Some(workspace) = workspace
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+    else {
+        return false;
+    };
+    if needle.is_empty() {
+        return true;
+    }
+    let workspace = workspace.to_ascii_lowercase();
+    let basename = workspace
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(workspace.as_str());
+    workspace.contains(&needle) || basename == needle
+}
+
+fn session_workspace_label(workspace: Option<&str>) -> String {
+    let Some(workspace) = workspace
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+    else {
+        return "—".to_string();
+    };
+    workspace
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(workspace)
+        .to_string()
 }
 
 fn list_session_snapshot_entries(
@@ -882,6 +984,29 @@ fn render_prune_preview(candidates: &[SessionSnapshotEntry]) -> String {
     )
 }
 
+/// Normalize `--limit` so an explicit zero still shows at least one row.
+fn sessions_list_row_limit(limit: usize) -> usize {
+    limit.max(1)
+}
+
+/// Sort key for `sessions list`: canonical first, then message count, mtime, id.
+fn sort_sessions_list_entries(
+    entries: &mut [(String, u64, std::time::SystemTime, bool, bool, usize, Option<String>)],
+) {
+    entries.sort_by(|a, b| {
+        b.3.cmp(&a.3)
+            .then_with(|| b.5.cmp(&a.5))
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+}
+
+/// Bound displayed rows after sort; returns `(shown_count, omitted_count)`.
+fn sessions_list_visible_range(total: usize, limit: usize) -> (usize, usize) {
+    let shown = total.min(sessions_list_row_limit(limit));
+    (shown, total.saturating_sub(shown))
+}
+
 /// Handle `hermes sessions [action] [--id ...] [--name ...]`.
 pub async fn handle_cli_sessions(
     options: CliSessionsOptions,
@@ -900,7 +1025,16 @@ pub async fn handle_cli_sessions(
         yes,
         source,
         older_than,
+        workspace,
+        limit,
     } = options;
+    // Bound is applied only after classification/sort below.
+    let list_limit = sessions_list_row_limit(limit);
+    let workspace_filter = workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+        .map(ToOwned::to_owned);
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -908,8 +1042,15 @@ pub async fn handle_cli_sessions(
                 println!("No sessions directory found.");
                 return Ok(());
             }
-            let mut entries: Vec<(String, u64, std::time::SystemTime, bool, bool, usize)> =
-                Vec::new();
+            let mut entries: Vec<(
+                String,
+                u64,
+                std::time::SystemTime,
+                bool,
+                bool,
+                usize,
+                Option<String>,
+            )> = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
                 for entry in rd.filter_map(|e| e.ok()) {
                     let path = entry.path();
@@ -926,6 +1067,12 @@ pub async fn handle_cli_sessions(
                             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                         let integrity = inspect_snapshot_integrity(&path);
                         let canonical = is_canonical_snapshot_name(&stem, &integrity);
+                        let workspace = read_session_snapshot_workspace_key(&path);
+                        if let Some(needle) = workspace_filter.as_deref() {
+                            if !session_workspace_matches(workspace.as_deref(), needle) {
+                                continue;
+                            }
+                        }
                         entries.push((
                             stem,
                             size,
@@ -933,28 +1080,27 @@ pub async fn handle_cli_sessions(
                             canonical,
                             integrity.valid,
                             integrity.message_count,
+                            workspace,
                         ));
                     }
                 }
             }
-            entries.sort_by(|a, b| {
-                b.3.cmp(&a.3)
-                    .then_with(|| b.5.cmp(&a.5))
-                    .then_with(|| b.2.cmp(&a.2))
-                    .then_with(|| a.0.cmp(&b.0))
-            });
+            sort_sessions_list_entries(&mut entries);
             if entries.is_empty() {
                 println!("No saved sessions.");
             } else {
+                let total = entries.len();
                 let canonical_count = entries.iter().filter(|entry| entry.3).count();
-                let artifact_count = entries.len().saturating_sub(canonical_count);
+                let artifact_count = total.saturating_sub(canonical_count);
                 println!(
                     "Saved sessions ({} total; {} canonical; {} artifacts):",
-                    entries.len(),
-                    canonical_count,
-                    artifact_count
+                    total, canonical_count, artifact_count
                 );
-                for (name, size, _, canonical, valid, messages) in &entries {
+                let (shown, omitted) = sessions_list_visible_range(total, list_limit);
+                let has_workspace =
+                    workspace_filter.is_some() || entries.iter().any(|entry| entry.6.is_some());
+                for (name, size, _, canonical, valid, messages, workspace) in entries.iter().take(shown)
+                {
                     let kind = if *canonical {
                         "session"
                     } else if *valid {
@@ -962,7 +1108,24 @@ pub async fn handle_cli_sessions(
                     } else {
                         "invalid"
                     };
-                    println!("  • {} ({} bytes, {} msgs, {})", name, size, messages, kind);
+                    if has_workspace {
+                        println!(
+                            "  • {} (Workspace: {}, {} bytes, {} msgs, {})",
+                            name,
+                            session_workspace_label(workspace.as_deref()),
+                            size,
+                            messages,
+                            kind
+                        );
+                    } else {
+                        println!("  • {} ({} bytes, {} msgs, {})", name, size, messages, kind);
+                    }
+                }
+                if omitted > 0 {
+                    println!(
+                        "… {} more session(s). Use `--limit` to change row count.",
+                        omitted
+                    );
                 }
             }
         }
@@ -1019,6 +1182,7 @@ pub async fn handle_cli_sessions(
 
             let rendered = render_session_exports(&snapshots, export_format, export_only)?;
             write_session_export_output(export_output.as_deref(), &rendered)?;
+            eprintln!("{}", session_export_memory_notice());
             if let Some(output) = export_output.as_deref().filter(|value| *value != "-") {
                 let count = if export_only == Some(SessionExportOnly::UserPrompts) {
                     iter_user_prompt_records(&snapshots).len()
@@ -1059,7 +1223,7 @@ pub async fn handle_cli_sessions(
             }
             let deleted = delete_session_snapshot_by_query(&sessions_dir, &resolved.id)?
                 .unwrap_or_else(|| resolved.id.clone());
-            println!("Deleted session '{}'.", deleted);
+            println!("{}", render_session_delete_completion(&deleted));
         }
         "stats" => {
             if !sessions_dir.exists() {
@@ -1115,7 +1279,7 @@ pub async fn handle_cli_sessions(
                     pruned += 1;
                 }
             }
-            println!("Pruned {} session(s).", pruned);
+            println!("{}", render_session_prune_completion(pruned));
         }
         "optimize" => {
             let persistence = SessionPersistence::new(hermes_config::hermes_home());

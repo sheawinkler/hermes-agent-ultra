@@ -20,8 +20,9 @@ fn handle_session_compat_command(
 }
 
 fn handle_clear_queue_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let jobs_dir = app.state_root.join("background_jobs");
     let mut removed = 0usize;
+    let mut cancellation_attempts = 0usize;
     if let Ok(read_dir) = std::fs::read_dir(&jobs_dir) {
         for entry in read_dir.flatten() {
             let path = entry.path();
@@ -36,32 +37,33 @@ fn handle_clear_queue_command(app: &mut App) -> Result<CommandResult, AgentError
             let status = map
                 .get("status")
                 .and_then(|x| x.as_str())
-                .unwrap_or_default()
-                .to_string();
-            if matches!(
-                status.as_str(),
-                "queued" | "running" | "failed" | "completed"
-            ) {
-                if status == "running" {
-                    let pid = map
-                        .get("pid")
-                        .and_then(|v| v.as_u64())
-                        .and_then(|raw| u32::try_from(raw).ok());
-                    if let Some(pid) = pid {
-                        if process_running(pid) {
-                            let _ = terminate_pid(pid);
-                        }
+                .unwrap_or_default();
+            if status == "running" {
+                let job_id = map
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty());
+                if let Some(job_id) = job_id {
+                    if terminate_background_job(&app.state_root, job_id).is_ok() {
+                        cancellation_attempts += 1;
                     }
                 }
-                if std::fs::remove_file(&path).is_ok() {
-                    removed += 1;
-                }
+                continue;
+            }
+            if matches!(status, "queued" | "failed" | "completed")
+                && std::fs::remove_file(&path).is_ok()
+            {
+                removed += 1;
             }
         }
     }
     emit_command_output(
         app,
-        format!("Cleared {} queued/background status file(s).", removed),
+        format!(
+            "Cleared {} queued/background terminal status file(s); processed {} running job(s) with safe cancellation.",
+            removed, cancellation_attempts
+        ),
     );
     Ok(CommandResult::Handled)
 }
@@ -287,7 +289,7 @@ async fn handle_integrations_command(
     };
 
     let tools_count = app.tool_registry.list_tools().len();
-    let plugins_count = discover_plugin_surface(true).len();
+    let plugins_count = discover_plugin_surface().len();
     let mcp_count = app.config.mcp_servers.len();
     let platforms_count = app.config.platforms.len();
 

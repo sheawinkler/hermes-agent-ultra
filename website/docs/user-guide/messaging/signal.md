@@ -152,7 +152,7 @@ The adapter supports sending and receiving media in both directions.
 **Incoming** (user → agent):
 
 - **Images** — PNG, JPEG, GIF, WebP (auto-detected via signature bytes)
-- **Audio** — MP3, OGG, WAV, M4A (voice messages transcribed if Whisper is configured)
+- **Audio** — MP3, OGG, WAV, M4A (may be labeled `[transcription_candidate]`; STT only if `transcription` is called)
 - **Documents** — PDF, ZIP, and other file types
 
 **Outgoing** (agent → user):

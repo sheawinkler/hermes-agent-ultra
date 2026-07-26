@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::Utc;
+use hermes_agent::{CronScheduleSource, RunInvocationContext};
 use hermes_core::{AgentResult, MessageRole};
 use tokio::sync::{broadcast, Mutex, Notify};
 use tokio::time::{self, Duration};
@@ -37,7 +38,11 @@ const MAX_STORED_OUTPUT_CHARS: usize = 32_000;
 
 #[async_trait::async_trait]
 trait CronJobExecutor: Send + Sync {
-    async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError>;
+    async fn run_job(
+        &self,
+        job: &CronJob,
+        context: RunInvocationContext,
+    ) -> Result<AgentResult, CronError>;
     async fn deliver_error(
         &self,
         error_text: &str,
@@ -47,8 +52,12 @@ trait CronJobExecutor: Send + Sync {
 
 #[async_trait::async_trait]
 impl CronJobExecutor for CronRunner {
-    async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
-        CronRunner::run_job(self, job).await
+    async fn run_job(
+        &self,
+        job: &CronJob,
+        context: RunInvocationContext,
+    ) -> Result<AgentResult, CronError> {
+        CronRunner::run_job_with_context(self, job, context).await
     }
 
     async fn deliver_error(
@@ -206,9 +215,6 @@ pub struct CronScheduler {
     /// Job IDs currently executing. Due ticks skip these instead of queuing
     /// duplicate runs behind a long task.
     running_job_ids: Arc<Mutex<HashSet<String>>>,
-    /// Jobs with per-run process-global context (currently workdir) are
-    /// serialized without blocking the scheduler tick.
-    sequential_run_lock: Arc<Mutex<()>>,
     /// Optional externally managed one-shot provider for hosted scale-to-zero.
     managed_provider: Option<Arc<dyn ManagedCronProvider>>,
 }
@@ -244,7 +250,6 @@ impl CronScheduler {
             stop_notify: Arc::new(Notify::new()),
             running: Arc::new(Mutex::new(false)),
             running_job_ids: Arc::new(Mutex::new(HashSet::new())),
-            sequential_run_lock: Arc::new(Mutex::new(())),
             managed_provider,
         }
     }
@@ -305,26 +310,6 @@ impl CronScheduler {
         let ev = CronCompletionEvent::new(job, trigger, outcome);
         if let Err(e) = sender.send(ev) {
             tracing::debug!("cron completion broadcast dropped: {}", e);
-        }
-    }
-
-    fn requires_sequential_run(job: &CronJob) -> bool {
-        job.workdir
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|s| !s.is_empty())
-    }
-
-    async fn execute_with_optional_sequential_guard(
-        runner: Arc<dyn CronJobExecutor>,
-        sequential_run_lock: Arc<Mutex<()>>,
-        job: CronJob,
-    ) -> Result<AgentResult, CronError> {
-        if Self::requires_sequential_run(&job) {
-            let _guard = sequential_run_lock.lock().await;
-            runner.run_job(&job).await
-        } else {
-            runner.run_job(&job).await
         }
     }
 
@@ -438,7 +423,6 @@ impl CronScheduler {
         persistence: Arc<dyn JobPersistence>,
         completion_tx: Option<broadcast::Sender<CronCompletionEvent>>,
         running_job_ids: Arc<Mutex<HashSet<String>>>,
-        sequential_run_lock: Arc<Mutex<()>>,
         managed_provider: Option<Arc<dyn ManagedCronProvider>>,
     ) -> usize {
         let now = Utc::now();
@@ -447,6 +431,15 @@ impl CronScheduler {
 
         for due_run in due_jobs {
             let job_id = due_run.job.id.clone();
+            let schedule_time = due_run.job.next_run.unwrap_or(now);
+            let dispatch_time = Utc::now();
+            let run_context = RunInvocationContext::cron_scheduled(
+                &job_id,
+                CronScheduleSource::Local,
+                schedule_time.timestamp_millis(),
+                dispatch_time.timestamp_millis(),
+            )
+            .map_err(|error| CronError::InvalidJob(error.to_string()));
             tracing::info!(
                 "Dispatching cron job '{}' ({})",
                 due_run.job.name.as_deref().unwrap_or(&due_run.job.id),
@@ -458,7 +451,6 @@ impl CronScheduler {
             let persistence = persistence.clone();
             let completion_tx = completion_tx.clone();
             let running_job_ids = running_job_ids.clone();
-            let sequential_run_lock = sequential_run_lock.clone();
             let managed_provider = managed_provider.clone();
 
             tokio::spawn(async move {
@@ -471,14 +463,12 @@ impl CronScheduler {
                     runner: runner.clone(),
                     managed_provider,
                 };
-                let run_result = Self::execute_with_optional_sequential_guard(
-                    runner.clone(),
-                    sequential_run_lock,
-                    runnable_job,
-                )
-                .await;
+                let run_result = match run_context {
+                    Ok(context) => runner.run_job(&runnable_job, context).await,
+                    Err(error) => Err(error),
+                };
 
-                Self::finish_scheduled_job(finish_ctx, job, now, run_result).await;
+                Self::finish_scheduled_job(finish_ctx, job, dispatch_time, run_result).await;
                 Self::clear_running(&running_job_ids, &job_id).await;
             });
         }
@@ -532,7 +522,6 @@ impl CronScheduler {
         let stop_notify = self.stop_notify.clone();
         let running_flag = self.running.clone();
         let running_job_ids = self.running_job_ids.clone();
-        let sequential_run_lock = self.sequential_run_lock.clone();
 
         if let Some(provider) = self.managed_provider_if_available() {
             if let Err(err) = provider.reconcile(self.list_jobs().await).await {
@@ -574,7 +563,6 @@ impl CronScheduler {
                     persistence.clone(),
                     completion_tx.clone(),
                     running_job_ids.clone(),
-                    sequential_run_lock.clone(),
                     None,
                 )
                 .await;
@@ -596,7 +584,6 @@ impl CronScheduler {
             self.persistence.clone(),
             self.completion_tx.clone(),
             self.running_job_ids.clone(),
-            self.sequential_run_lock.clone(),
             None,
         )
         .await
@@ -810,6 +797,9 @@ impl CronScheduler {
             (job, runnable_job)
         };
 
+        let run_context = RunInvocationContext::cron_manual(&job.id, Utc::now().timestamp_millis())
+            .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+
         if job.status == JobStatus::Completed {
             return Err(CronError::JobCompleted(id.to_string()));
         }
@@ -819,12 +809,7 @@ impl CronScheduler {
 
         tracing::info!("Manually triggering cron job '{}'", id);
         let outcome: Result<AgentResult, CronError> = async {
-            let run_result = Self::execute_with_optional_sequential_guard(
-                self.runner.clone(),
-                self.sequential_run_lock.clone(),
-                runnable_job,
-            )
-            .await;
+            let run_result = self.runner.run_job(&runnable_job, run_context).await;
             match &run_result {
                 Ok(result) => {
                     Self::emit_completion(&self.completion_tx, &job, "manual", Ok(result))
@@ -912,6 +897,15 @@ impl CronScheduler {
             (job, runnable_job, scheduled_at)
         };
 
+        let dispatch_time = Utc::now();
+        let run_context = RunInvocationContext::cron_scheduled(
+            &job.id,
+            CronScheduleSource::Managed,
+            scheduled_at.timestamp_millis(),
+            dispatch_time.timestamp_millis(),
+        )
+        .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+
         if !Self::mark_running_if_idle(&self.running_job_ids, id).await {
             tracing::info!(
                 job_id = id,
@@ -925,7 +919,6 @@ impl CronScheduler {
         let completion_tx = self.completion_tx.clone();
         let runner = self.runner.clone();
         let running_job_ids = self.running_job_ids.clone();
-        let sequential_run_lock = self.sequential_run_lock.clone();
         let managed_provider = self.managed_provider.clone();
         let job_id = id.to_string();
 
@@ -937,14 +930,9 @@ impl CronScheduler {
                 runner: runner.clone(),
                 managed_provider,
             };
-            let run_result = Self::execute_with_optional_sequential_guard(
-                runner.clone(),
-                sequential_run_lock,
-                runnable_job,
-            )
-            .await;
+            let run_result = runner.run_job(&runnable_job, run_context).await;
 
-            Self::finish_scheduled_job(finish_ctx, job, scheduled_at, run_result).await;
+            Self::finish_scheduled_job(finish_ctx, job, dispatch_time, run_result).await;
             Self::clear_running(&running_job_ids, &job_id).await;
         });
 
@@ -971,8 +959,25 @@ mod tests {
     use crate::persistence::FileJobPersistence;
 
     fn make_test_scheduler() -> CronScheduler {
-        let dir = tempdir().expect("tempdir");
-        cron_scheduler_for_data_dir(dir.path().to_path_buf())
+        let root = tempdir().expect("tempdir").keep();
+        let run_runtime = Arc::new(
+            crate::RunRuntime::open_for_ephemeral_testing(&root).expect("ephemeral run runtime"),
+        );
+        let execution_mode = hermes_core::ResolvedExecutionMode::default();
+        let execution_containment = Arc::new(
+            hermes_environments::ExecutionContainmentContext::manual(execution_mode)
+                .expect("default mode must admit manual containment"),
+        );
+        let tool_registry = Arc::new(hermes_agent::agent_loop::ToolRegistry::new());
+        tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+        cron_scheduler_for_data_dir(
+            root.join("cron"),
+            tool_registry,
+            run_runtime,
+            execution_mode,
+            execution_containment,
+        )
+        .expect("test cron scheduler")
     }
 
     struct BlockingTestExecutor {
@@ -1048,7 +1053,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CronJobExecutor for BlockingTestExecutor {
-        async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
+        async fn run_job(
+            &self,
+            job: &CronJob,
+            _context: RunInvocationContext,
+        ) -> Result<AgentResult, CronError> {
             self.started.fetch_add(1, Ordering::SeqCst);
             self.record_prompt(&job.prompt);
             let permit = self
@@ -1216,7 +1225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tick_due_jobs_serializes_workdir_jobs_without_blocking_dispatch() {
+    async fn tick_due_jobs_runs_workdir_jobs_concurrently() {
         let executor = Arc::new(BlockingTestExecutor::default());
         let (sched, _dir) = make_executor_scheduler(executor.clone());
         let workdir = tempdir().expect("workdir");
@@ -1226,19 +1235,9 @@ mod tests {
             sched.create_job(job).await.expect("create due workdir job");
         }
 
-        let dispatched = sched.tick_due_jobs().await;
-        assert_eq!(dispatched, 2);
-        wait_for_count(&executor.started, 1).await;
-        sleep(StdDuration::from_millis(50)).await;
-        assert_eq!(
-            executor.started.load(Ordering::SeqCst),
-            1,
-            "second workdir job must wait for the sequential run lock"
-        );
-
-        executor.release.add_permits(1);
+        assert_eq!(sched.tick_due_jobs().await, 2);
         wait_for_count(&executor.started, 2).await;
-        executor.release.add_permits(1);
+        executor.release.add_permits(2);
         wait_for_count(&executor.completed, 2).await;
     }
 

@@ -75,6 +75,20 @@ fn apply_route_autotune_env_overrides(cli: &Cli) -> Vec<String> {
 fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
     pid_path.with_file_name("gateway.lock")
 }
+// Discord ingress may take up to 30 seconds to durably drain accepted work.
+// Keep a small margin for the remaining gateway teardown before reporting a
+// truthful timeout to the operator.
+const GATEWAY_STOP_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(35);
+const GATEWAY_STOP_WAIT_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatewayPidState {
+    Dead,
+    Gateway,
+    LiveUnowned,
+    Unverifiable,
+}
 
 fn read_gateway_pid(path: &Path) -> Option<u32> {
     let raw = std::fs::read_to_string(path).ok()?;
@@ -90,9 +104,41 @@ fn read_gateway_pid(path: &Path) -> Option<u32> {
     u32::try_from(pid).ok()
 }
 
-fn cleanup_stale_gateway_metadata(pid_path: &Path) {
-    let _ = std::fs::remove_file(pid_path);
-    let _ = std::fs::remove_file(gateway_lock_path_for_pid_path(pid_path));
+fn read_gateway_pid_or_lock(pid_path: &Path) -> Option<u32> {
+    read_gateway_pid(pid_path)
+        .or_else(|| read_gateway_pid(&gateway_lock_path_for_pid_path(pid_path)))
+}
+
+fn read_gateway_metadata_pids(pid_path: &Path) -> Result<Vec<u32>, AgentError> {
+    let lock_path = gateway_lock_path_for_pid_path(pid_path);
+    let mut pids = Vec::with_capacity(2);
+    for metadata_path in [pid_path, lock_path.as_path()] {
+        if !metadata_path.exists() {
+            continue;
+        }
+        let pid = read_gateway_pid(metadata_path).ok_or_else(|| {
+            AgentError::Gateway(format!(
+                "cannot parse gateway PID metadata at {}; refusing lifecycle action until it is inspected",
+                metadata_path.display()
+            ))
+        })?;
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
+}
+
+
+fn cleanup_gateway_metadata_for_pid(pid_path: &Path, pid: u32) {
+    if read_gateway_pid(pid_path) == Some(pid) {
+        let _ = std::fs::remove_file(pid_path);
+    }
+
+    let lock_path = gateway_lock_path_for_pid_path(pid_path);
+    if read_gateway_pid(&lock_path) == Some(pid) {
+        let _ = std::fs::remove_file(lock_path);
+    }
 }
 
 fn looks_like_gateway_process(cmdline: &str) -> bool {
@@ -126,19 +172,47 @@ fn gateway_pid_commandline(pid: u32) -> Option<String> {
 }
 
 #[cfg(unix)]
-fn gateway_pid_is_alive(pid: u32) -> bool {
-    if unsafe { libc::kill(pid as libc::pid_t, 0) != 0 } {
-        return false;
+fn gateway_pid_is_zombie(pid: u32) -> bool {
+    let output = match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "stat="])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return false,
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .trim_start()
+        .starts_with('Z')
+}
+#[cfg(unix)]
+fn gateway_pid_state(pid: u32) -> GatewayPidState {
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            GatewayPidState::Dead
+        } else {
+            GatewayPidState::Unverifiable
+        };
     }
+    if gateway_pid_is_zombie(pid) {
+        return GatewayPidState::Dead;
+    }
+
+
     match gateway_pid_commandline(pid) {
-        Some(cmdline) => looks_like_gateway_process(&cmdline),
-        None => true,
+        Some(cmdline) if looks_like_gateway_process(&cmdline) => GatewayPidState::Gateway,
+        Some(_) => GatewayPidState::LiveUnowned,
+        None => GatewayPidState::Unverifiable,
     }
 }
 
 #[cfg(not(unix))]
-fn gateway_pid_is_alive(_pid: u32) -> bool {
-    false
+fn gateway_pid_state(_pid: u32) -> GatewayPidState {
+    GatewayPidState::Unverifiable
+}
+
+fn gateway_pid_is_alive(pid: u32) -> bool {
+    !matches!(gateway_pid_state(pid), GatewayPidState::Dead)
 }
 
 #[cfg(unix)]
@@ -157,6 +231,117 @@ fn gateway_pid_terminate(_pid: u32) -> std::io::Result<()> {
         std::io::ErrorKind::Unsupported,
         "gateway stop is not supported on this platform",
     ))
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatewayStopOutcome {
+    AlreadyExited,
+    Stopped,
+}
+
+fn validate_gateway_pid_for_stop(pid: u32) -> Result<GatewayStopOutcome, AgentError> {
+    match gateway_pid_state(pid) {
+        GatewayPidState::Dead => Ok(GatewayStopOutcome::AlreadyExited),
+        GatewayPidState::Gateway => Ok(GatewayStopOutcome::Stopped),
+        GatewayPidState::LiveUnowned => Err(AgentError::Gateway(format!(
+            "refusing to signal PID {pid}: it is alive but does not identify as a Hermes gateway; PID/lock metadata was preserved"
+        ))),
+        GatewayPidState::Unverifiable => Err(AgentError::Gateway(format!(
+            "refusing to signal PID {pid}: its gateway identity could not be verified; PID/lock metadata was preserved"
+        ))),
+    }
+}
+fn ensure_gateway_start_slot_available(pid_path: &Path) -> Result<(), AgentError> {
+    let lock_path = gateway_lock_path_for_pid_path(pid_path);
+    for metadata_path in [pid_path, lock_path.as_path()] {
+        if !metadata_path.exists() {
+            continue;
+        }
+        let pid = read_gateway_pid(metadata_path).ok_or_else(|| {
+            AgentError::Gateway(format!(
+                "cannot parse gateway PID metadata at {}; refusing to start another gateway until it is inspected",
+                metadata_path.display()
+            ))
+        })?;
+
+        match gateway_pid_state(pid) {
+            GatewayPidState::Dead => {
+                let _ = std::fs::remove_file(metadata_path);
+            }
+            GatewayPidState::Gateway => {
+                return Err(AgentError::Gateway(format!(
+                    "gateway PID {pid} is still running or draining; refusing to start another gateway. Wait for `hermes gateway stop` to finish or inspect {}",
+                    metadata_path.display()
+                )));
+            }
+            GatewayPidState::LiveUnowned => {
+                return Err(AgentError::Gateway(format!(
+                    "gateway PID metadata at {} points to live non-gateway PID {pid}; refusing to overwrite it. Verify the process before removing the PID/lock metadata.",
+                    metadata_path.display()
+                )));
+            }
+            GatewayPidState::Unverifiable => {
+                return Err(AgentError::Gateway(format!(
+                    "cannot verify gateway PID {pid} from {}; refusing to start another gateway while PID/lock metadata is retained",
+                    metadata_path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+
+async fn wait_for_gateway_pid_exit(
+    pid: u32,
+    timeout: std::time::Duration,
+) -> Result<(), AgentError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if !gateway_pid_is_alive(pid) {
+            return Ok(());
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(AgentError::Timeout(format!(
+                "gateway PID {pid} is still alive after {} ms following SIGTERM; it may still be draining. PID/lock metadata was preserved. Check `hermes gateway status` and retry `hermes gateway stop` after the drain completes.",
+                timeout.as_millis()
+            )));
+        }
+
+        tokio::time::sleep(std::cmp::min(
+            GATEWAY_STOP_WAIT_POLL_INTERVAL,
+            deadline - now,
+        ))
+        .await;
+    }
+}
+
+async fn stop_gateway_pid_with_timeout(
+    pid_path: &Path,
+    pid: u32,
+    timeout: std::time::Duration,
+) -> Result<GatewayStopOutcome, AgentError> {
+    match validate_gateway_pid_for_stop(pid)? {
+        GatewayStopOutcome::AlreadyExited => {
+            cleanup_gateway_metadata_for_pid(pid_path, pid);
+            return Ok(GatewayStopOutcome::AlreadyExited);
+        }
+        GatewayStopOutcome::Stopped => {}
+    }
+
+    gateway_pid_terminate(pid)
+        .map_err(|error| AgentError::Io(format!("failed to signal gateway PID {pid}: {error}")))?;
+    wait_for_gateway_pid_exit(pid, timeout).await?;
+    cleanup_gateway_metadata_for_pid(pid_path, pid);
+    Ok(GatewayStopOutcome::Stopped)
+}
+
+async fn stop_gateway_pid_gracefully(
+    pid_path: &Path,
+    pid: u32,
+) -> Result<GatewayStopOutcome, AgentError> {
+    stop_gateway_pid_with_timeout(pid_path, pid, GATEWAY_STOP_WAIT_TIMEOUT).await
 }
 
 #[cfg(target_os = "macos")]

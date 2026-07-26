@@ -87,8 +87,7 @@ fn objective_lifecycle_and_behavior_updates_are_persisted() {
         );
         assert!(!strict.behavior_directives.is_empty());
 
-        let mission =
-            set_objective_contract_behavior_mode("sigma").expect("behavior sigma->mission");
+        let mission = set_objective_contract_behavior_mode("mission").expect("behavior mission");
         assert_eq!(
             canonical_objective_behavior_mode(&mission.behavior_mode),
             "mission"

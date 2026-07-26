@@ -134,21 +134,18 @@ fn handle_bundles_command(app: &mut App) -> Result<CommandResult, AgentError> {
 }
 
 fn handle_plugins_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let rows = discover_plugin_surface(true);
+    let rows = discover_plugin_surface();
     if rows.is_empty() {
-        let plugins_dir = hermes_config::hermes_home().join("plugins");
         emit_command_output(
             app,
-            format!(
-                "No plugin bundles discovered.\nUser plugin dir: {}\nInstall with `hermes plugins install <owner/repo>`.",
-                plugins_dir.display()
-            ),
+            "No plugin bundles discovered. Third-party plugin execution is unavailable until Hermes has a loader bound to verified package identity and the policy sandbox."
+                .to_string(),
         );
     } else {
         emit_command_output(
             app,
             format!(
-                "Plugin surface ({} entries):\n{}",
+                "Plugin diagnostic surface ({} entries):\n{}",
                 rows.len(),
                 render_plugin_surface_table(&rows)
             ),

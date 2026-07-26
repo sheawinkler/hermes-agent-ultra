@@ -12,10 +12,11 @@ use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
 use hermes_agent::provider_profiles;
 use hermes_agent::session_persistence::SessionPersistence;
-use hermes_agent::{leading_system_prompt_for_persist, AgentCallbacks, AgentLoop};
-use hermes_auth::{
-    exchange_refresh_token, AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential,
+use hermes_agent::{
+    leading_system_prompt_for_persist, AgentCallbacks, AgentLoop, MemoryExportReport,
+    MemoryForgetReport, MemoryManagerError, RunRuntime,
 };
+use hermes_auth::{AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential};
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
     provider_oauth_token_from_auth_state, select_startup_model_with_fallback_and_auth_resolver,
@@ -68,17 +69,25 @@ use hermes_cron::{
     DeliverTarget, FileJobPersistence,
 };
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
+use hermes_gateway::gateway::{
+    GatewayMemoryExportArtifact, GatewayMemoryExportRemediation, GatewayMemoryExportResponse,
+    GatewayMemoryForgetProviderState, GatewayMemoryForgetProviderStatus,
+    GatewayMemoryForgetRemediation, GatewayMemoryForgetResponse, GroupAccessMode,
+    PlatformAccessPolicy,
+};
 #[cfg(any(
     feature = "gateway-api-server",
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
     feature = "gateway-telegram",
+    feature = "gateway-slack",
     feature = "gateway-webhook",
     feature = "gateway-wecom-callback",
     feature = "gateway-weixin"
 ))]
-use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
-use hermes_gateway::gateway::{GroupAccessMode, PlatformAccessPolicy};
+use hermes_gateway::gateway::{
+    IncomingMessage as GatewayIncomingMessage, IncomingSender as GatewayIncomingSender,
+};
 use hermes_gateway::hooks::HookRegistry;
 #[cfg(feature = "gateway-api-server")]
 use hermes_gateway::platforms::api_server::{ApiInboundRequest, ApiServerAdapter, ApiServerConfig};
@@ -138,15 +147,18 @@ use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters,
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast;
 #[cfg(any(
     feature = "gateway-api-server",
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
+    feature = "gateway-slack",
     feature = "gateway-webhook",
     feature = "gateway-wecom-callback",
     feature = "gateway-weixin"
@@ -163,6 +175,7 @@ include!("main/tools_config.rs");
 include!("main/gateway_service.rs");
 include!("main/gateway_command.rs");
 include!("main/gateway_access.rs");
+include!("main/discord_ingress.rs");
 include!("main/gateway_adapters.rs");
 include!("main/auth_providers.rs");
 include!("main/auth_commands.rs");

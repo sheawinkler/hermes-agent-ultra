@@ -86,19 +86,18 @@ const RUNBOOKS: &[RuntimeRunbook] = &[
     RuntimeRunbook {
         name: "replay-trace",
         title: "Deterministic replay trace investigation",
-        summary: "Inspect, verify, export, and diff replay traces for runtime reproducibility evidence.",
+        summary: "Inspect diagnostic raw traces and verify authoritative complete run exports via shipped CLI surfaces.",
         steps: &[
-            "`/raw trace status` or `replay_trace_control {\"action\":\"status\"}`",
-            "`/raw trace verify` or `replay_trace_control {\"action\":\"verify\"}`",
-            "export a bounded trace window with `/raw trace export` or `replay_trace_control {\"action\":\"export\"}`",
-            "compare exports with `/studio replay diff` or `replay_trace_control {\"action\":\"diff\"}`",
+            "inspect diagnostic raw trace status with `/raw trace status` (diagnostic-only; not production proof)",
+            "publish a complete run export with `/raw trace export` (authoritative RunRuntime export)",
+            "verify the export with `/raw trace verify PATH` (single JCS verifier; green proof only from complete run export)",
+            "compare verified exports with `/studio replay diff` after verify_run_export succeeds",
         ],
         related_commands: &[
             "/raw trace status",
-            "/raw trace verify",
             "/raw trace export",
+            "/raw trace verify",
             "/studio replay diff",
-            "replay_trace_control",
         ],
         tags: &["replay", "trace", "debugging"],
     },
@@ -320,5 +319,22 @@ mod tests {
         let rendered = render_runbook(runbook);
         assert!(rendered.contains("contextlattice_search"));
         assert!(rendered.contains("contextlattice_write"));
+    }
+
+    #[test]
+    fn replay_trace_runbook_points_at_cli_export_surfaces_only() {
+        let runbook = find_runbook("replay-trace").expect("runbook");
+        let rendered = render_runbook(runbook);
+        assert!(rendered.contains("/raw trace export"));
+        assert!(rendered.contains("/raw trace verify"));
+        assert!(!rendered.contains("replay_trace_control"));
+        assert!(runbook
+            .related_commands
+            .iter()
+            .all(|cmd| *cmd != "replay_trace_control"));
+        assert!(runbook
+            .steps
+            .iter()
+            .all(|step| !step.contains("replay_trace_control")));
     }
 }

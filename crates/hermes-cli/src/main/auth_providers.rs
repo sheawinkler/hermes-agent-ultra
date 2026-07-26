@@ -373,12 +373,13 @@ fn secret_vault_path_for_cli(cli: &Cli) -> PathBuf {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AuthPoolEntry {
     id: String,
     label: String,
     auth_type: String,
     source: String,
-    access_token: String,
+    credential_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -388,32 +389,245 @@ struct AuthPoolEntry {
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AuthPoolStore {
     #[serde(default)]
     providers: std::collections::BTreeMap<String, Vec<AuthPoolEntry>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyAuthPoolEntry {
+    id: String,
+    label: String,
+    auth_type: String,
+    source: String,
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    token_type: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    last_status: Option<String>,
+    #[serde(default)]
+    last_status_at: Option<f64>,
+    #[serde(default)]
+    last_error_code: Option<u16>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyAuthPoolStore {
+    #[serde(default)]
+    providers: std::collections::BTreeMap<String, Vec<LegacyAuthPoolEntry>>,
 }
 
 fn auth_pool_path_for_cli(cli: &Cli) -> PathBuf {
     hermes_state_root(cli).join("auth").join("pool.json")
 }
 
-fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentError> {
-    if !path.exists() {
-        return Ok(AuthPoolStore::default());
+fn auth_pool_credential_ref(provider: &str, entry_id: &str) -> String {
+    format!("pool:{provider}:{entry_id}")
+}
+
+fn validate_auth_pool_metadata(store: &AuthPoolStore) -> Result<(), AgentError> {
+    for (provider, entries) in &store.providers {
+        if provider.trim().is_empty() {
+            return Err(AgentError::Config("auth pool metadata is malformed".to_string()));
+        }
+        for entry in entries {
+            if entry.id.trim().is_empty()
+                || entry.label.trim().is_empty()
+                || entry.auth_type.trim().is_empty()
+                || entry.source.trim().is_empty()
+                || entry.credential_ref != auth_pool_credential_ref(provider, &entry.id)
+            {
+                return Err(AgentError::Config("auth pool metadata is malformed".to_string()));
+            }
+        }
     }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
-    serde_json::from_str(&raw).map_err(|e| AgentError::Config(format!("parse pool: {}", e)))
+    Ok(())
+}
+
+fn auth_pool_contains_legacy_credential(value: &serde_json::Value) -> bool {
+    value
+        .get("providers")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|providers| providers.values())
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .any(|entry| {
+            entry.contains_key("access_token") || entry.contains_key("refresh_token")
+        })
+}
+
+async fn load_auth_pool_store(
+    path: &Path,
+    manager: &AuthManager,
+    token_store: &FileTokenStore,
+) -> Result<AuthPoolStore, AgentError> {
+    let raw = match std::fs::read(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AuthPoolStore::default())
+        }
+        Err(_) => return Err(AgentError::Io("auth pool metadata could not be read".to_string())),
+    };
+    let parsed = serde_json::from_slice::<serde_json::Value>(&raw)
+        .map_err(|_| AgentError::Config("auth pool metadata is malformed".to_string()))?;
+
+    if !auth_pool_contains_legacy_credential(&parsed) {
+        let metadata = serde_json::from_value::<AuthPoolStore>(parsed)
+            .map_err(|_| AgentError::Config("auth pool metadata is malformed".to_string()))?;
+        validate_auth_pool_metadata(&metadata)?;
+        return Ok(metadata);
+    }
+
+    let legacy = serde_json::from_value::<LegacyAuthPoolStore>(parsed)
+        .map_err(|_| AgentError::Config("auth pool legacy credential format is malformed".to_string()))?;
+    let mut metadata = AuthPoolStore::default();
+    for (provider, entries) in legacy.providers {
+        if provider.trim().is_empty() {
+            return Err(AgentError::Config(
+                "auth pool legacy credential format is malformed".to_string(),
+            ));
+        }
+        let mut primary_present = token_store.get(&provider).await.is_some();
+        let migrated = metadata.providers.entry(provider.clone()).or_default();
+        for entry in entries {
+            if entry.id.trim().is_empty()
+                || entry.label.trim().is_empty()
+                || entry.auth_type.trim().is_empty()
+                || entry.source.trim().is_empty()
+                || entry.access_token.trim().is_empty()
+                || entry
+                    .token_type
+                    .as_deref()
+                    .is_some_and(|token_type| token_type.trim().is_empty())
+            {
+                return Err(AgentError::Config(
+                    "auth pool legacy credential format is malformed".to_string(),
+                ));
+            }
+            let credential_ref = auth_pool_credential_ref(&provider, &entry.id);
+            let credential = OAuthCredential {
+                provider: credential_ref.clone(),
+                access_token: entry.access_token,
+                refresh_token: entry.refresh_token,
+                token_type: entry.token_type.unwrap_or_else(|| "bearer".to_string()),
+                scope: entry.scope,
+                expires_at: entry.expires_at,
+            };
+            manager.save_credential(credential.clone()).await?;
+            if !primary_present {
+                let mut primary = credential;
+                primary.provider = provider.clone();
+                manager.save_credential(primary).await?;
+                primary_present = true;
+            }
+            migrated.push(AuthPoolEntry {
+                id: entry.id,
+                label: entry.label,
+                auth_type: entry.auth_type,
+                source: entry.source,
+                credential_ref,
+                last_status: entry.last_status,
+                last_status_at: entry.last_status_at,
+                last_error_code: entry.last_error_code,
+            });
+        }
+    }
+    validate_auth_pool_metadata(&metadata)?;
+    save_auth_pool_store(path, &metadata)?;
+    Ok(metadata)
+}
+
+async fn save_auth_pool_credential(
+    manager: &AuthManager,
+    provider: &str,
+    entry_id: &str,
+    mut credential: OAuthCredential,
+) -> Result<String, AgentError> {
+    let credential_ref = auth_pool_credential_ref(provider, entry_id);
+    credential.provider = credential_ref.clone();
+    manager.save_credential(credential).await?;
+    Ok(credential_ref)
+}
+
+async fn create_auth_pool_entry(
+    manager: &AuthManager,
+    provider: &str,
+    label: String,
+    auth_type: String,
+    source: String,
+    credential: OAuthCredential,
+) -> Result<AuthPoolEntry, AgentError> {
+    let id = uuid::Uuid::new_v4().simple().to_string()[..6].to_string();
+    let credential_ref = save_auth_pool_credential(manager, provider, &id, credential).await?;
+    Ok(AuthPoolEntry {
+        id,
+        label,
+        auth_type,
+        source,
+        credential_ref,
+        last_status: None,
+        last_status_at: None,
+        last_error_code: None,
+    })
 }
 
 fn save_auth_pool_store(path: &Path, store: &AuthPoolStore) -> Result<(), AgentError> {
+    validate_auth_pool_metadata(store)?;
+    let raw = serde_json::to_vec_pretty(store)
+        .map_err(|_| AgentError::Config("auth pool metadata could not be encoded".to_string()))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+            .map_err(|_| AgentError::Io("auth pool metadata directory could not be created".to_string()))?;
     }
-    let raw = serde_json::to_string_pretty(store).map_err(|e| AgentError::Config(e.to_string()))?;
-    std::fs::write(path, raw)
-        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+    let tmp_path = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        use std::io::Write as _;
+        let mut file = options.open(&tmp_path).map_err(|_| {
+            AgentError::Io("auth pool metadata temporary file could not be created".to_string())
+        })?;
+        file.write_all(&raw).map_err(|_| {
+            AgentError::Io("auth pool metadata could not be written".to_string())
+        })?;
+        file.sync_all().map_err(|_| {
+            AgentError::Io("auth pool metadata could not be synced".to_string())
+        })?;
+        drop(file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|_| {
+                    AgentError::Io(
+                        "auth pool metadata permissions could not be set".to_string(),
+                    )
+                })?;
+        }
+        std::fs::rename(&tmp_path, path).map_err(|_| {
+            AgentError::Io("auth pool metadata could not be atomically replaced".to_string())
+        })
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
 }
 
 fn resolve_pool_target(entries: &[AuthPoolEntry], target: &str) -> Option<usize> {
@@ -442,75 +656,17 @@ async fn lookup_secret_from_vault(
     None
 }
 
+/// Hydrate process-local provider aliases from the encrypted credential store.
+///
+/// Startup is intentionally read-only: OAuth migration, token exchange, and
+/// credential writes are explicit `hermes auth …` effects, never a side effect
+/// of preparing a model invocation.
 async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
-    hydrate_provider_env_from_vault_for_cli_with_options(cli, true).await
-}
-
-fn scrub_unusable_nous_api_key_for_oauth_state() -> Result<(), AgentError> {
-    if read_nous_auth_state()?.is_some() && read_valid_nous_auth_state()?.is_none() {
-        std::env::remove_var("NOUS_API_KEY");
-    }
-    Ok(())
-}
-
-async fn hydrate_provider_env_from_vault_for_cli_with_options(
-    cli: &Cli,
-    prefer_nous_runtime_credentials: bool,
-) -> Result<(), AgentError> {
     let path = secret_vault_path_for_cli(cli);
-    let nous_oauth_state_present =
-        prefer_nous_runtime_credentials && read_nous_auth_state()?.is_some();
     if !path.exists() {
-        if nous_oauth_state_present {
-            std::env::remove_var("NOUS_API_KEY");
-        }
         return Ok(());
     }
-    let store = FileTokenStore::new(path).await?;
-    let manager = AuthManager::new(store.clone());
-
-    if !prefer_nous_runtime_credentials {
-        if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
-            std::env::set_var("NOUS_API_KEY", token);
-        }
-    } else {
-        match resolve_nous_runtime_credentials(
-            false,
-            true,
-            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-        )
-        .await
-        {
-            Ok(creds) => {
-                std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
-                if !creds.base_url.trim().is_empty() {
-                    std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
-                }
-                let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
-                let _ = manager
-                    .save_credential(OAuthCredential {
-                        provider: "nous".to_string(),
-                        access_token: creds.api_key,
-                        refresh_token: creds.refresh_token,
-                        token_type: creds.token_type,
-                        scope: creds.scope,
-                        expires_at,
-                    })
-                    .await;
-            }
-            Err(err) => {
-                tracing::debug!("Nous runtime credential refresh skipped: {}", err);
-                if nous_oauth_state_present {
-                    std::env::remove_var("NOUS_API_KEY");
-                } else if let Some((_provider, token)) =
-                    lookup_secret_from_vault(&store, "nous").await
-                {
-                    std::env::set_var("NOUS_API_KEY", token);
-                }
-            }
-        }
-    }
+    let store = FileTokenStore::open_read_only(path)?;
 
     let env_bindings = [
         ("HERMES_OPENAI_API_KEY", "openai"),
@@ -568,9 +724,6 @@ async fn hydrate_provider_env_from_vault_for_cli_with_options(
     ];
 
     for (env_var, provider) in env_bindings {
-        if prefer_nous_runtime_credentials && provider == "nous" && nous_oauth_state_present {
-            continue;
-        }
         let env_present = std::env::var(env_var).ok().filter(|v| !v.trim().is_empty());
         if let Some(current) = env_present {
             if provider_supports_oauth(provider) {
@@ -586,6 +739,43 @@ async fn hydrate_provider_env_from_vault_for_cli_with_options(
         if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await {
             std::env::set_var(env_var, secret);
         }
+    }
+    Ok(())
+}
+
+/// Prevent a stale `NOUS_API_KEY` from bypassing an unusable canonical OAuth
+/// credential. The encrypted vault is authoritative for this decision; this
+/// helper never reads or restores legacy OAuth state, keyrings, or secrets.
+fn scrub_unusable_nous_api_key_for_vault_credential(cli: &Cli) -> Result<(), AgentError> {
+    let path = secret_vault_path_for_cli(cli);
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let store = match FileTokenStore::open_read_only(path) {
+        Ok(store) => store,
+        Err(error) => {
+            // A malformed, legacy, or unavailable canonical vault must not
+            // silently fall through to a potentially stale environment key.
+            std::env::remove_var("NOUS_API_KEY");
+            return Err(error.into());
+        }
+    };
+    let Some(credential) = store.get_sync("nous") else {
+        return Ok(());
+    };
+    let status_is_unusable = matches!(
+        store.credential_status("nous", 0),
+        hermes_auth::CredentialStatus::Expired { .. } | hermes_auth::CredentialStatus::Unusable
+    );
+    let scope_is_not_inference = credential.scope.as_deref().is_some_and(|scope| {
+        !scope
+            .split_whitespace()
+            .any(|grant| grant.eq_ignore_ascii_case("inference:invoke"))
+    });
+
+    if status_is_unusable || scope_is_not_inference {
+        std::env::remove_var("NOUS_API_KEY");
     }
     Ok(())
 }

@@ -14,7 +14,7 @@ Week 0  │ 基础设施搭建（parity 测试框架、fixture 生成、CI）
 Week 1  │ P0-A: 文件系统快照 + process_registry + channel_directory
 Week 2  │ P0-B: send_message 完整链路 + 安全策略引擎
 Week 3  │ P0-C: 训练/评测环境（SWE + benchmarks + parsers）
-Week 4  │ P0-D: voice_mode + mixture_of_agents + TTS/transcription 完整
+Week 4  │ P0-D: voice_mode fail-closed divergence + mixture_of_agents + TTS/transcription
 Week 5  │ P1-A: 浏览器矩阵 + auxiliary_client + context_compressor
 Week 6  │ P1-B: copilot_acp_client + models_dev + context_references
 Week 7  │ P2:   CLI 命令补全 + 根目录脚本 (batch_runner 等)
@@ -291,24 +291,11 @@ crates/hermes-environments/src/
 
 ### Week 4 — P0-D：多媒体工具
 
-#### Day 1-2：`voice_mode`（Python 1016 行）
+#### Day 1-2：`voice_mode`（intentional fail-closed divergence）
 
-**Prompt 模板**：
+The Rust runtime does not ship an interactive microphone or live Discord voice-channel engine. The unconsumed `voice_mode` flag and test-only gateway voice manager were removed rather than presented as a feature. `/voice` is status-only.
 
-```
-当前 voice_mode.rs 只有 31 行占位。
-
-读取 @research/hermes-agent/tools/voice_mode.py 完整理解。
-
-实现要点：
-1. 音频录制（cpal crate）
-2. VAD（Voice Activity Detection）简单阈值实现
-3. 流式转写（接现有 transcription.rs）
-4. 语音命令触发（wake word 可选，先跳过）
-5. TTS 回放（接 Week 4 的 TTS）
-
-前端 WebSocket 端点：/ws/voice
-```
+Reintroduction requires a production capture/platform consumer and end-to-end proof for capture → transcription → agent → synthesis → playback, including cancellation, device/platform failures, and lifecycle cleanup. Handler registration or unit-only state tests do not satisfy this gate.
 
 #### Day 3：`mixture_of_agents_tool`（Python 562 行）
 
@@ -358,7 +345,7 @@ NeuTTS 用 ort crate 加载 ONNX 模型。模型文件从 ~/.hermes/models/neutt
 ```
 
 **Week 4 交付**：
-- [ ] voice_mode 能完整走 录制 → 转写 → TTS 回放
+- [x] voice_mode intentionally fails closed and is not advertised as a shipped engine
 - [ ] mixture_of_agents 真实并行调用 3 个 provider
 - [ ] TTS 三后端可用
 

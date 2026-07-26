@@ -325,6 +325,13 @@ impl StreamManager {
     pub async fn active_stream_count(&self) -> usize {
         self.streams.read().await.len()
     }
+    /// Remove every active stream after all runtime workers have stopped.
+    pub async fn clear_active_streams(&self) -> usize {
+        let mut streams = self.streams.write().await;
+        let cleared = streams.len();
+        streams.clear();
+        cleared
+    }
 
     /// Get the config reference.
     pub fn config(&self) -> &StreamConfig {

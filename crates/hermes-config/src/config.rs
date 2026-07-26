@@ -1,15 +1,136 @@
 //! Gateway configuration: the top-level config struct and its sub-types.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt;
 
 use serde::de::{Error as DeError, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use hermes_core::BudgetConfig;
 
 use crate::platform::PlatformConfig;
 use crate::session::SessionConfig;
 use crate::streaming::StreamingConfig;
+
+/// Preserves the difference between an omitted execution-mode key and a key
+/// explicitly set to `null`.
+///
+/// `Absent` is emitted by the containing config field's `default` only when
+/// the key was omitted. `ExplicitNull` is retained for YAML/JSON `null` (and
+/// YAML's bare `execution_mode:` form), so resolution can reject it at the
+/// config-file layer rather than silently applying a default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionModeConfigValue {
+    Absent,
+    ExplicitNull,
+    Value(String),
+}
+
+impl ExecutionModeConfigValue {
+    pub const fn absent() -> Self {
+        Self::Absent
+    }
+
+    pub const fn explicit_null() -> Self {
+        Self::ExplicitNull
+    }
+
+    pub fn value(value: impl Into<String>) -> Self {
+        Self::Value(value.into())
+    }
+
+    pub const fn is_absent(&self) -> bool {
+        matches!(self, Self::Absent)
+    }
+
+    pub const fn is_explicit_null(&self) -> bool {
+        matches!(self, Self::ExplicitNull)
+    }
+}
+
+impl Default for ExecutionModeConfigValue {
+    fn default() -> Self {
+        Self::Absent
+    }
+}
+
+impl From<String> for ExecutionModeConfigValue {
+    fn from(value: String) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<&str> for ExecutionModeConfigValue {
+    fn from(value: &str) -> Self {
+        Self::Value(value.to_string())
+    }
+}
+
+impl Serialize for ExecutionModeConfigValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Absent | Self::ExplicitNull => serializer.serialize_none(),
+            Self::Value(value) => serializer.serialize_str(value),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ExecutionModeConfigValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ExecutionModeConfigValueVisitor;
+
+        impl<'de> Visitor<'de> for ExecutionModeConfigValueVisitor {
+            type Value = ExecutionModeConfigValue;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a config_file execution mode string or null")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(ExecutionModeConfigValue::ExplicitNull)
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(ExecutionModeConfigValue::ExplicitNull)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(ExecutionModeConfigValue::Value(value.to_string()))
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(ExecutionModeConfigValue::Value(value.to_string()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(ExecutionModeConfigValue::Value(value))
+            }
+        }
+
+        deserializer.deserialize_any(ExecutionModeConfigValueVisitor)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // GatewayConfig
@@ -34,6 +155,13 @@ pub struct GatewayConfig {
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
 
+    /// Raw execution posture configured for this installation.
+    ///
+    /// It remains raw until the startup boundary validates every precedence
+    /// layer with `hermes_core::resolve_execution_mode`.
+    #[serde(default, skip_serializing_if = "ExecutionModeConfigValue::is_absent")]
+    pub execution_mode: ExecutionModeConfigValue,
+
     /// Custom system prompt override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
@@ -52,6 +180,11 @@ pub struct GatewayConfig {
     /// Budget limits for tool output.
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// Opt in to defensive gateway/session admission and retention limits.
+    ///
+    /// Defaults to false to preserve existing runtime capacity.
+    #[serde(default)]
+    pub resource_limits_enabled: bool,
 
     /// Configurable raw tool-output truncation limits.
     #[serde(default)]
@@ -178,10 +311,12 @@ impl Default for GatewayConfig {
             model_switch: ModelSwitchConfig::default(),
             personality: None,
             max_turns: default_max_turns(),
+            execution_mode: ExecutionModeConfigValue::Absent,
             system_prompt: None,
             prefill_messages_file: None,
             tools: default_tools(),
             budget: BudgetConfig::default(),
+            resource_limits_enabled: false,
             tool_output: ToolOutputConfig::default(),
             platforms: HashMap::new(),
             platform_toolsets: default_platform_toolsets(),

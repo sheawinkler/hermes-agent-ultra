@@ -12,16 +12,19 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::{SinkExt, StreamExt};
 use regex::{Regex, RegexBuilder};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify, RwLock};
+use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 use crate::channel_directory::{ChannelDirectoryProvider, ChannelEntry};
@@ -69,6 +72,7 @@ include!("slack/config_media.rs");
 include!("slack/socket_blocks.rs");
 include!("slack/adapter_impl.rs");
 include!("slack/trait_impls.rs");
+include!("slack/runtime.rs");
 include!("slack/helpers.rs");
 #[cfg(test)]
 mod tests;

@@ -29,6 +29,9 @@ pub use chronos::{
 };
 pub use cli_support::{cron_scheduler_for_data_dir, MinimalCronLlm};
 pub use completion::CronCompletionEvent;
+pub use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
+pub use hermes_agent::{EphemeralRunRuntimeFactory, RunRuntime};
+pub use hermes_environments::ExecutionContainmentContext;
 pub use job::{CronJob, DeliverConfig, DeliverTarget, JobStatus, ModelConfig};
 pub use persistence::{FileJobPersistence, JobPersistence, SqliteJobPersistence};
 pub use runner::CronRunner;

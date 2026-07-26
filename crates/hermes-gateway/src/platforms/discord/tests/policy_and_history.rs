@@ -8,13 +8,45 @@ fn test_config() -> DiscordConfig {
         application_id: None,
         proxy: AdapterProxyConfig::default(),
         api_base_url: None,
+        gateway_url: Some("ws://127.0.0.1:0".into()),
         liveness_interval_seconds: default_liveness_interval_seconds(),
         liveness_failure_threshold: default_liveness_failure_threshold(),
         require_mention: false,
         intents: default_intents(),
+        bot_policy: DiscordBotMessagePolicy::None,
         reply_to_mode: default_reply_to_mode(),
         channel_controls: DiscordChannelControls::default(),
         channel_skill_bindings: Vec::new(),
+    }
+}
+
+#[test]
+fn discord_adapter_accepts_one_configured_proxy_for_rest_and_gateway_transport() {
+    let mut config = test_config();
+    config.proxy.http_proxy = Some("http://proxy.example:8080".to_string());
+    assert!(DiscordAdapter::new(config).is_ok());
+}
+
+fn test_incoming_message() -> IncomingDiscordMessage {
+    IncomingDiscordMessage {
+        channel_id: "channel".into(),
+        channel_type: Some(0),
+        guild_id: Some("guild".into()),
+        parent_channel_id: None,
+        thread_id: None,
+        is_dm: false,
+        message_id: "message".into(),
+        user_id: Some("human".into()),
+        username: Some("Jezza".into()),
+        content: "hello".into(),
+        is_bot: false,
+        member_role_ids: Vec::new(),
+        message_type: 0,
+        mention_user_ids: Vec::new(),
+        reply_to_message_id: None,
+        reply_to_text: None,
+        reply_to_attachments: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -315,19 +347,7 @@ fn bot_message_policy_defaults_to_none_and_parses_case_insensitively() {
 
 #[test]
 fn bot_message_filter_matches_upstream_contract() {
-    let human = IncomingDiscordMessage {
-        channel_id: "channel".into(),
-        message_id: "message".into(),
-        user_id: Some("human".into()),
-        username: Some("Jezza".into()),
-        content: "hello".into(),
-        is_bot: false,
-        message_type: 0,
-        mention_user_ids: Vec::new(),
-        reply_to_message_id: None,
-        reply_to_text: None,
-        attachments: Vec::new(),
-    };
+    let human = test_incoming_message();
     assert!(DiscordAdapter::should_accept_message(
         &human,
         Some("self"),
@@ -381,19 +401,7 @@ fn bot_message_filter_matches_upstream_contract() {
 
 #[test]
 fn system_message_filter_only_accepts_default_and_reply() {
-    let mut msg = IncomingDiscordMessage {
-        channel_id: "channel".into(),
-        message_id: "message".into(),
-        user_id: Some("human".into()),
-        username: Some("Jezza".into()),
-        content: "hello".into(),
-        is_bot: false,
-        message_type: 0,
-        mention_user_ids: Vec::new(),
-        reply_to_message_id: None,
-        reply_to_text: None,
-        attachments: Vec::new(),
-    };
+    let mut msg = test_incoming_message();
     assert!(DiscordAdapter::should_accept_message(
         &msg,
         Some("self"),
@@ -753,6 +761,25 @@ fn discord_mention_policy_covers_free_response_and_participated_threads() {
         true,
         &strict_threads,
         &DiscordChannelContext::thread("444", "111"),
+        true,
+        false,
+    ));
+    let strict_free_parent = DiscordChannelControls {
+        free_response_channels: ["222"].into_iter().map(String::from).collect(),
+        thread_require_mention: true,
+        ..DiscordChannelControls::default()
+    };
+    assert!(!discord_allows_message_without_mention(
+        true,
+        &strict_free_parent,
+        &DiscordChannelContext::thread("333", "222"),
+        true,
+        false,
+    ));
+    assert!(!discord_allows_message_without_mention(
+        false,
+        &strict_free_parent,
+        &DiscordChannelContext::thread("333", "222"),
         true,
         false,
     ));

@@ -3,7 +3,7 @@ impl AgentLoop {
 
     fn invoke_hook(&self, hook: HookType, ctx_val: &Value) -> Vec<HookResult> {
         if let Some(ref pm) = self.plugin_manager {
-            if let Ok(pm) = pm.lock() {
+            if let Ok(mut pm) = pm.lock() {
                 return pm.invoke_hook(hook, ctx_val);
             }
         }
@@ -50,7 +50,7 @@ impl AgentLoop {
         let Some(ref pm) = self.plugin_manager else {
             return;
         };
-        let Ok(pm) = pm.lock() else {
+        let Ok(mut pm) = pm.lock() else {
             tracing::warn!("Plugin manager lock poisoned while applying tool request middleware");
             return;
         };
@@ -115,27 +115,30 @@ impl AgentLoop {
 
     // -- Memory helpers ----------------------------------------------------
 
-    fn memory_prefetch(&self, query: &str, session_id: &str) -> String {
+    fn memory_prefetch(&self, query: &str) -> String {
         if self.config.skip_memory {
             return String::new();
         }
-        if let Some(ref mm) = self.memory_manager {
+        if let Some(mm) = &self.memory_manager {
             if let Ok(mm) = mm.lock() {
-                return mm.prefetch_all(query, session_id);
+                return mm.prefetch_all(query);
             }
         }
         String::new()
     }
 
-    fn memory_sync(&self, user: &str, assistant: &str, session_id: &str, messages: &[Message]) {
+    fn memory_sync(&self, messages: &[Message]) {
         if self.config.skip_memory {
             return;
         }
-        if let Some(ref mm) = self.memory_manager {
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let (user, assistant) = extract_last_user_assistant(&persisted_messages);
+        if let Some(mm) = &self.memory_manager {
             if let Ok(mm) = mm.lock() {
-                mm.sync_all_with_messages(user, assistant, session_id, messages);
+                mm.sync_all_with_messages(&user, &assistant, &persisted_messages);
                 if !user.trim().is_empty() {
-                    mm.queue_prefetch_all(user, session_id);
+                    mm.queue_prefetch_all(&user);
                 }
             }
         }
@@ -193,7 +196,7 @@ impl AgentLoop {
         if self.config.skip_memory {
             return;
         }
-        let Some(ref mm) = self.memory_manager else {
+        let Some(mm) = &self.memory_manager else {
             return;
         };
         let Ok(mut mm) = mm.lock() else {
@@ -250,7 +253,7 @@ impl AgentLoop {
         if self.config.skip_memory {
             return;
         }
-        let Some(ref mm) = self.memory_manager else {
+        let Some(mm) = &self.memory_manager else {
             return;
         };
         let Ok(mm) = mm.lock() else {
@@ -269,7 +272,7 @@ impl AgentLoop {
     }
 
     fn memory_on_turn_start(&self, turn: u32, message: &str) {
-        if let Some(ref mm) = self.memory_manager {
+        if let Some(mm) = &self.memory_manager {
             if let Ok(mut mm) = mm.lock() {
                 mm.on_turn_start(turn, message);
             }
@@ -280,7 +283,7 @@ impl AgentLoop {
         if self.config.skip_memory {
             return String::new();
         }
-        if let Some(ref mm) = self.memory_manager {
+        if let Some(mm) = &self.memory_manager {
             if let Ok(mm) = mm.lock() {
                 return mm.build_system_prompt();
             }
@@ -292,13 +295,15 @@ impl AgentLoop {
         if self.config.skip_memory {
             return None;
         }
-        let Some(ref mm) = self.memory_manager else {
+        let Some(mm) = &self.memory_manager else {
             return None;
         };
         let Ok(mm) = mm.lock() else {
             return None;
         };
-        let as_values: Vec<Value> = messages
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let as_values: Vec<Value> = persisted_messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
@@ -314,13 +319,15 @@ impl AgentLoop {
         if self.config.skip_memory {
             return;
         }
-        let Some(ref mm) = self.memory_manager else {
+        let Some(mm) = &self.memory_manager else {
             return;
         };
         let Ok(mm) = mm.lock() else {
             return;
         };
-        let as_values: Vec<Value> = messages
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let as_values: Vec<Value> = persisted_messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
@@ -371,6 +378,10 @@ impl AgentLoop {
             .unwrap_or_default();
         match platform_key.as_str() {
             "cli" => Some("You are a CLI AI Agent. Prefer concise plain text output suitable for terminals."),
+            "desktop" => Some(
+                "You are interacting through a graphical Hermes desktop client, not a terminal. \
+                 Use clear Markdown when helpful, and do not assume terminal-only interaction controls.",
+            ),
             "telegram" | "discord" | "slack" => {
                 Some("You are responding on a chat platform. Keep responses concise and avoid heavy formatting.")
             }
@@ -407,16 +418,6 @@ impl AgentLoop {
         }
     }
 
-    fn runtime_skills_tier_bypass_enabled() -> bool {
-        std::env::var("HERMES_SKILLS_TIER_BYPASS")
-            .ok()
-            .is_some_and(|v| {
-                matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-    }
 
     fn skill_trust_score(cmd: &str, name: &str, description: &str) -> i32 {
         let corpus = format!(
@@ -480,26 +481,23 @@ impl AgentLoop {
         if !has_skills_tools {
             return None;
         }
-        let skills_dir = self
+        let Some(skills_dir) = self
             .config
             .hermes_home
             .as_deref()
+            .map(str::trim)
+            .filter(|home| !home.is_empty())
             .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var("HERMES_HOME")
-                    .ok()
-                    .map(std::path::PathBuf::from)
-            })
             .map(|home| home.join("skills"))
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join(".hermes")
-                    .join("skills")
-            });
+        else {
+            return Some(
+                "## Skills (mandatory)\nSkills tools are enabled, but no resolved skill root is bound to this run. Use `skills_list` to inspect the configured verified store."
+                    .to_string(),
+            );
+        };
         let mut orch = SkillOrchestrator::new(skills_dir.clone());
         orch.set_enabled_disabled(&self.config.enabled_skills, &self.config.disabled_skills);
-        let commands = orch.scan_skill_commands();
+        let commands = orch.scan_skill_commands().clone();
         if commands.is_empty() {
             return Some(
                 "## Skills (mandatory)\nSkills tools are enabled. Use `skills_list` to discover available skills and `skill_view` before applying one."
@@ -507,17 +505,10 @@ impl AgentLoop {
             );
         }
         let tier = Self::runtime_skills_tier();
-        let bypass = Self::runtime_skills_tier_bypass_enabled();
         let mut rows: Vec<_> = commands
             .iter()
             .filter(|(cmd, info)| {
-                if let Some(category) = info
-                    .skill_dir
-                    .strip_prefix(&skills_dir)
-                    .ok()
-                    .and_then(|relative| relative.components().next())
-                    .and_then(|component| component.as_os_str().to_str())
-                {
+                if let Some(category) = orch.skill_category(info) {
                     if hidden_categories
                         .iter()
                         .any(|hidden| category.eq_ignore_ascii_case(hidden))
@@ -525,7 +516,7 @@ impl AgentLoop {
                         return false;
                     }
                 }
-                if bypass || tier == "open" {
+                if tier == "open" {
                     return true;
                 }
                 let score = Self::skill_trust_score(cmd, &info.name, &info.description);
@@ -544,9 +535,8 @@ impl AgentLoop {
             "## Skills (mandatory)\nBefore replying, check whether an existing skill applies. If yes, inspect it with `skill_view` and follow it.\n<available_skills>\n",
         );
         body.push_str(&format!(
-            "<skills_tier mode=\"{}\" bypass=\"{}\" filtered=\"{}\" />\n",
+            "<skills_tier mode=\"{}\" verified_store_only=\"true\" filtered=\"{}\" />\n",
             tier,
-            if bypass { "on" } else { "off" },
             filtered
         ));
         if !hidden_categories.is_empty() {
@@ -557,38 +547,17 @@ impl AgentLoop {
         }
         for (cmd, info) in rows.into_iter().take(80) {
             body.push_str(&format!(
-                "- {}: {} ({})\n",
+                "- {}: {} ({})\n{}\n",
                 cmd,
                 info.name,
-                info.description.trim()
+                info.description.trim(),
+                hermes_tools::skill_utils::render_skill_provenance_tag(&info.provenance),
             ));
         }
         body.push_str("</available_skills>");
         Some(body)
     }
 
-    fn google_workspace_paths(&self) -> (PathBuf, PathBuf, PathBuf) {
-        let hermes_home = self
-            .config
-            .hermes_home
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-            .or_else(|| {
-                std::env::var("HERMES_AGENT_ULTRA_HOME")
-                    .ok()
-                    .map(PathBuf::from)
-            })
-            .or_else(|| dirs::home_dir().map(|home| home.join(".hermes-agent-ultra")))
-            .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"));
-        let skill_dir = hermes_home
-            .join("skills")
-            .join("productivity")
-            .join("google-workspace");
-        let setup = skill_dir.join("scripts").join("setup.py");
-        let api = skill_dir.join("scripts").join("google_api.py");
-        (hermes_home, setup, api)
-    }
 
     fn google_workspace_system_hint(
         &self,
@@ -601,50 +570,32 @@ impl AgentLoop {
         let has_skills = tool_schemas
             .iter()
             .any(|tool| matches!(tool.name.as_str(), "skills_list" | "skill_view"));
-        let has_terminal = tool_schemas.iter().any(|tool| tool.name == "terminal");
-        let (home, setup, api) = self.google_workspace_paths();
         Some(format!(
-            "[SYSTEM] Google Workspace/Gmail execution contract active. \
-             If Gmail or Google Workspace is requested, first use `skills_list`, then `skill_view` for `google-workspace` when available. \
-             Do not invent credential paths such as `~/.config/hermes/credentials.toml`; Hermes Google Workspace stores OAuth state under `{home}` (`google_token.json`, `google_client_secret.json`). \
-             If terminal is available, use direct commands, not `bash -lc`/`sh -c`/`zsh -c`: \
-             `env HERMES_HOME={home} python3.12 {setup} --check` (fallback `env HERMES_HOME={home} python3 {setup} --check` if python3.12 is unavailable), then `env HERMES_HOME={home} python3.12 {api} gmail search \"newer_than:30d\" --max 10` only if setup is authenticated. \
-             If access is blocked, final answer must include `GOOGLE_WORKSPACE_USED: no`, the exact setup/API command attempted, and the exact tool error. \
-             Tool availability: skills_tools={has_skills}, terminal={has_terminal}.",
-            home = home.display(),
-            setup = setup.display(),
-            api = api.display(),
+            "[SYSTEM] Google Workspace/Gmail requests require verified skill admission. \
+             First use `skills_list`, then `skill_view` for `google-workspace` when available. \
+             Never execute a package file, bootstrap, setup script, or API helper directly by path; \
+             package content is prompt-only until an independently registered tool is authorized by policy and sandboxing. \
+             If no authorized tool is available, report that blocker rather than probing credential paths. \
+             Tool availability: skills_tools={has_skills}.",
             has_skills = has_skills,
-            has_terminal = has_terminal
         ))
     }
 
     fn google_workspace_retry_prompt(&self) -> String {
-        let (home, setup, api) = self.google_workspace_paths();
-        format!(
-            "[SYSTEM] Google Workspace evidence contract failed. \
-             Re-run the task using the real Hermes Google Workspace skill paths. \
-             Required now: \
-             1) call `skill_view` for `google-workspace` if not already done; \
-             2) call terminal with a direct command, not `bash -lc`: `env HERMES_HOME={home} python3.12 {setup} --check`; \
-             3) if python3.12 is unavailable, call `env HERMES_HOME={home} python3 {setup} --check`; \
-             4) if setup reports authenticated, call `env HERMES_HOME={home} python3.12 {api} gmail search \"newer_than:30d\" --max 10` and then read relevant messages with `gmail get`; \
-             5) if setup reports NOT_AUTHENTICATED/no token, stop and final-answer that blocker; do not search broad filesystem locations and do not invent email results; \
-             6) if blocked, final answer must include `GOOGLE_WORKSPACE_USED: no`, `cmd=<exact command>`, and the exact error. \
-             Use `{home}` for Hermes credential/token paths; do not use `~/.config/hermes/credentials.toml`.",
-            home = home.display(),
-            setup = setup.display(),
-            api = api.display()
-        )
+        "[SYSTEM] Google Workspace evidence contract failed. \
+         Re-check the verified `google-workspace` package through `skills_list` and `skill_view`. \
+         Do not execute package bootstrap/setup/API files by path and do not probe or create credential files. \
+         Continue only through an independently registered tool after policy and sandbox authorization; \
+         otherwise final-answer the exact unavailable-authorized-tool blocker."
+            .to_string()
     }
 
     fn context_files_prompt(&self) -> Option<String> {
         if self.config.skip_context_files {
             return None;
         }
-        let cwd = std::env::var("TERMINAL_CWD")
-            .ok()
-            .map(std::path::PathBuf::from)
+        let cwd = crate::runtime_cwd::workspace_cwd()
+            .or_else(|| std::env::var("TERMINAL_CWD").ok().map(std::path::PathBuf::from))
             .unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });

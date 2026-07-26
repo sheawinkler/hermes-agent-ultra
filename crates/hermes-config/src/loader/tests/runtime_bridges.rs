@@ -2,7 +2,7 @@
 fn set_user_config_value_routes_secret_keys_to_env() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     let dir = tempdir().unwrap();
     let result = set_user_config_value(dir.path(), "openai_api_key", "sk-test").unwrap();
 
@@ -22,7 +22,7 @@ fn set_user_config_value_routes_secret_keys_to_env() {
 fn set_user_config_value_bridges_terminal_env_keys_and_config() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_terminal_env_bridge_vars();
     let dir = tempdir().unwrap();
     let result =
@@ -74,7 +74,7 @@ fn terminal_config_bridge_map_covers_critical_writable_keys() {
 fn set_user_config_value_bridges_all_terminal_runtime_keys() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_terminal_env_bridge_vars();
     let dir = tempdir().unwrap();
     for (key, value, env_key) in [
@@ -138,7 +138,7 @@ fn web_config_bridge_map_covers_runtime_backend_keys() {
 fn set_user_config_value_bridges_web_backend_keys() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_web_env_bridge_vars();
     let dir = tempdir().unwrap();
     for (key, value, env_key) in [
@@ -189,7 +189,7 @@ fn display_config_bridge_map_covers_busy_runtime_keys() {
 fn set_user_config_value_bridges_display_runtime_keys() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_display_env_bridge_vars();
     let dir = tempdir().unwrap();
     for (key, value, env_key) in [
@@ -231,7 +231,7 @@ fn set_user_config_value_bridges_display_runtime_keys() {
 fn load_config_bridges_display_yaml_to_env_without_overriding_existing_env() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_display_env_bridge_vars();
     let dir = tempdir().unwrap();
     std::fs::write(
@@ -277,7 +277,7 @@ display:
 fn load_config_bridges_web_yaml_to_env_without_overriding_existing_env() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_web_env_bridge_vars();
     let dir = tempdir().unwrap();
     std::fs::write(
@@ -314,7 +314,7 @@ web:
 fn load_config_bridges_terminal_yaml_to_env_without_overriding_existing_env() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     clear_terminal_env_bridge_vars();
     let dir = tempdir().unwrap();
     std::fs::write(

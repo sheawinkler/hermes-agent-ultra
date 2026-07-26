@@ -1,5 +1,5 @@
 use super::*;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 #[test]
 fn cli_parse_default() {
@@ -13,6 +13,37 @@ fn cli_parse_default() {
     assert!(!cli.allow_tools);
     assert!(!cli.ignore_user_config);
     assert!(!cli.ignore_rules);
+}
+
+#[test]
+fn cli_plugin_surface_has_no_raw_git_bypass_arguments() {
+    assert!(Cli::try_parse_from(["hermes", "plugins", "list"]).is_ok());
+    assert!(Cli::try_parse_from(["hermes", "plugins", "install", "--ref", "main"]).is_err());
+    assert!(
+        Cli::try_parse_from(["hermes", "plugins", "install", "--allow-untrusted-git-host"])
+            .is_err()
+    );
+}
+
+#[test]
+fn cli_parse_chat_query_stdin_without_argv_query() {
+    let cli = Cli::try_parse_from(vec!["hermes", "chat", "--query-stdin"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(CliCommand::Chat {
+            query: None,
+            query_stdin: true,
+            ..
+        })
+    ));
+    assert!(Cli::try_parse_from(vec![
+        "hermes",
+        "chat",
+        "--query",
+        "must not be accepted with stdin",
+        "--query-stdin",
+    ])
+    .is_err());
 }
 
 #[test]
@@ -494,6 +525,18 @@ fn cli_parse_resume_specific_session() {
 }
 
 #[test]
+fn cli_parse_resume_can_keep_current_directory() {
+    let cli = Cli::try_parse_from(vec!["hermes", "--no-restore-cwd", "resume", "abc123"]).unwrap();
+    assert!(cli.no_restore_cwd);
+    match cli.command {
+        Some(CliCommand::Resume { session_id }) => {
+            assert_eq!(session_id.as_deref(), Some("abc123"));
+        }
+        _ => panic!("Expected Resume command"),
+    }
+}
+
+#[test]
 fn cli_parse_elite_check() {
     let cli = Cli::try_parse_from(vec!["hermes", "elite-check", "--json", "--strict"]).unwrap();
     match cli.command {
@@ -506,12 +549,12 @@ fn cli_parse_elite_check() {
 }
 
 #[test]
-fn cli_parse_systems_mcp_conformance() {
+fn cli_parse_systems_mcp_diagnostic() {
     let cli = Cli::try_parse_from(vec![
         "hermes",
         "systems",
         "mcp",
-        "conformance",
+        "diagnostic",
         "--json",
         "--output",
         "/tmp/mcp.json",
@@ -528,7 +571,7 @@ fn cli_parse_systems_mcp_conformance() {
             once,
         }) => {
             assert_eq!(action.as_deref(), Some("mcp"));
-            assert_eq!(topic.as_deref(), Some("conformance"));
+            assert_eq!(topic.as_deref(), Some("diagnostic"));
             assert!(json);
             assert_eq!(output.as_deref(), Some("/tmp/mcp.json"));
             assert_eq!(host, "127.0.0.1");
@@ -745,4 +788,188 @@ fn cli_parse_skills_blank_slate_flags() {
         }
         _ => panic!("Expected Skills opt-in command"),
     }
+}
+
+#[test]
+fn cli_parse_skills_trust_provision_flags() {
+    let cli = Cli::try_parse_from(vec![
+        "hermes",
+        "skills",
+        "trust",
+        "provision-remote-root",
+        "--authority-dir",
+        "/private/authority",
+        "--file",
+        "/private/admin/root.json",
+        "--expected-sha256",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    ])
+    .expect("parse trust provision command");
+    match cli.command {
+        Some(CliCommand::Skills {
+            action,
+            name,
+            authority_dir,
+            file,
+            expected_sha256,
+            ..
+        }) => {
+            assert_eq!(action.as_deref(), Some("trust"));
+            assert_eq!(name.as_deref(), Some("provision-remote-root"));
+            assert_eq!(
+                authority_dir.as_deref(),
+                Some(std::path::Path::new("/private/authority"))
+            );
+            assert_eq!(
+                file.as_deref(),
+                Some(std::path::Path::new("/private/admin/root.json"))
+            );
+            assert_eq!(
+                expected_sha256.as_deref(),
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            );
+        }
+        _ => panic!("Expected Skills trust command"),
+    }
+}
+
+#[test]
+fn cli_parse_sessions_limit_flag() {
+    let cli = Cli::try_parse_from(vec!["hermes", "sessions", "list", "--limit", "3"]).unwrap();
+    match cli.command {
+        Some(CliCommand::Sessions { action, limit, .. }) => {
+            assert_eq!(action.as_deref(), Some("list"));
+            assert_eq!(limit, 3);
+        }
+        _ => panic!("Expected Sessions command"),
+    }
+}
+
+#[test]
+fn cli_parse_sessions_limit_default_is_twenty() {
+    let cli = Cli::try_parse_from(vec!["hermes", "sessions", "list"]).unwrap();
+    match cli.command {
+        Some(CliCommand::Sessions { limit, .. }) => {
+            assert_eq!(limit, 20);
+        }
+        _ => panic!("Expected Sessions command"),
+    }
+}
+
+#[test]
+fn cli_parse_sessions_workspace_flag() {
+    let cli = Cli::try_parse_from(vec![
+        "hermes",
+        "sessions",
+        "list",
+        "--workspace",
+        "hermes-agent",
+    ])
+    .unwrap();
+    match cli.command {
+        Some(CliCommand::Sessions { workspace, .. }) => {
+            assert_eq!(workspace.as_deref(), Some("hermes-agent"));
+        }
+        _ => panic!("Expected Sessions command"),
+    }
+}
+
+#[test]
+fn cli_preserves_execution_mode_values_and_explicit_empty_override() {
+    for value in [
+        "manual",
+        "reviewed",
+        "autonomous_local",
+        "ci",
+        "remote_worker",
+        "",
+    ] {
+        let cli = Cli::try_parse_from(["hermes", "--execution-mode", value])
+            .expect("execution mode option should remain raw for startup resolution");
+        assert_eq!(cli.execution_mode.as_deref(), Some(value));
+    }
+}
+
+#[test]
+fn cli_execution_mode_help_lists_closed_modes_and_precedence() {
+    let mut command = Cli::command();
+    let mut rendered = Vec::new();
+    command
+        .write_long_help(&mut rendered)
+        .expect("render CLI long help");
+    let rendered = String::from_utf8(rendered).expect("CLI help is UTF-8");
+
+    assert!(rendered.contains("--execution-mode"));
+    for mode in [
+        "manual",
+        "reviewed",
+        "autonomous_local",
+        "ci",
+        "remote_worker",
+    ] {
+        assert!(
+            rendered.contains(mode),
+            "CLI help must enumerate closed execution mode {mode}: {rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("HERMES_EXECUTION_MODE"),
+        "CLI help must name environment precedence"
+    );
+    assert!(
+        rendered.contains("profile, config file"),
+        "CLI help must name file-layer precedence"
+    );
+    assert!(
+        rendered.contains("built-in"),
+        "CLI help must name the built-in default"
+    );
+}
+
+#[test]
+fn cli_parse_memory_governance_subject_and_retention_flags() {
+    let cli = Cli::try_parse_from([
+        "hermes",
+        "memory",
+        "retention",
+        "--session-id",
+        "runtime-session-1",
+        "--retention-days",
+        "30",
+        "--retention-max-records",
+        "100",
+        "--yes",
+    ])
+    .expect("memory governance arguments parse");
+    match cli.command {
+        Some(CliCommand::Memory {
+            action,
+            session_id,
+            retention_days,
+            retention_max_records,
+            yes,
+            ..
+        }) => {
+            assert_eq!(action.as_deref(), Some("retention"));
+            assert_eq!(session_id.as_deref(), Some("runtime-session-1"));
+            assert_eq!(retention_days, Some(30));
+            assert_eq!(retention_max_records, Some(100));
+            assert!(yes);
+        }
+        _ => panic!("expected memory governance command"),
+    }
+}
+
+#[test]
+fn memory_export_help_has_no_unredacted_escape_hatch() {
+    let mut command = Cli::command();
+    let mut rendered = Vec::new();
+    command
+        .write_long_help(&mut rendered)
+        .expect("render CLI long help");
+    let rendered = String::from_utf8(rendered).expect("CLI help is UTF-8");
+
+    assert!(rendered.contains("--session-id"));
+    assert!(!rendered.contains("--unredacted"));
+    assert!(!rendered.contains("--no-redact"));
 }

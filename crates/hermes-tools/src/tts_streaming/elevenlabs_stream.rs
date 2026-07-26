@@ -19,6 +19,7 @@ use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde_json::json;
 
+use crate::tts_audio::read_bounded_error;
 use hermes_core::ToolError;
 
 /// ElevenLabs defaults.
@@ -101,18 +102,18 @@ pub struct ElevenLabsStreamingClient {
     api_key: Option<String>,
 }
 
+fn elevenlabs_streaming_http_client() -> Client {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("valid ElevenLabs streaming HTTP client")
+}
+
 impl ElevenLabsStreamingClient {
     pub fn from_env() -> Self {
         Self {
-            client: Client::new(),
+            client: elevenlabs_streaming_http_client(),
             api_key: std::env::var("ELEVENLABS_API_KEY").ok(),
-        }
-    }
-
-    pub fn with_client(client: Client, api_key: impl Into<String>) -> Self {
-        Self {
-            client,
-            api_key: Some(api_key.into()),
         }
     }
 }
@@ -164,7 +165,7 @@ impl StreamingTtsBackend for ElevenLabsStreamingClient {
 
         let status = resp.status();
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = read_bounded_error(resp).await;
             return Err(ToolError::ExecutionFailed(format!(
                 "ElevenLabs stream HTTP {status}: {body}"
             )));
@@ -186,6 +187,8 @@ impl StreamingTtsBackend for ElevenLabsStreamingClient {
 pub(crate) mod tests {
     use super::*;
     use futures::stream;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn pcm_format_round_trip() {
@@ -265,7 +268,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn streaming_client_without_api_key_errors() {
         let client = ElevenLabsStreamingClient {
-            client: Client::new(),
+            client: elevenlabs_streaming_http_client(),
             api_key: None,
         };
         let res = client
@@ -275,5 +278,44 @@ pub(crate) mod tests {
             Err(e) => assert!(e.to_string().contains("ELEVENLABS_API_KEY")),
             Ok(_) => panic!("expected ELEVENLABS_API_KEY error"),
         }
+    }
+
+    #[tokio::test]
+    async fn streaming_client_rejects_cross_origin_redirect_without_leaking_request() {
+        let source = MockServer::start().await;
+        let destination = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/text-to-speech/redirect-voice/stream"))
+            .respond_with(
+                ResponseTemplate::new(307)
+                    .insert_header("Location", format!("{}/capture", destination.uri()))
+                    .set_body_string("redirect blocked"),
+            )
+            .expect(1)
+            .mount(&source)
+            .await;
+        let client = ElevenLabsStreamingClient {
+            client: elevenlabs_streaming_http_client(),
+            api_key: Some("streaming-secret".to_string()),
+        };
+        let config = ElevenLabsStreamConfig {
+            voice_id: "redirect-voice".to_string(),
+            base_url: format!("{}/v1", source.uri()),
+            ..ElevenLabsStreamConfig::default()
+        };
+
+        let error = match client
+            .stream_sentence("private streaming text", &config)
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("redirect responses must fail closed"),
+        };
+        assert!(error.to_string().contains("HTTP 307"));
+        assert!(error.to_string().contains("redirect blocked"));
+        assert!(
+            destination.received_requests().await.unwrap().is_empty(),
+            "Policy::none must prevent the destination from receiving the API key or body"
+        );
     }
 }

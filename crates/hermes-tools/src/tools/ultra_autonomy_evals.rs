@@ -498,10 +498,10 @@ mod tests {
     #[test]
     fn recall_quality_requires_outcome_linkage_not_just_items() {
         let report = evaluate_recall_quality(RecallQualityInput {
-            query: "provider auth smoke".to_string(),
+            query: "provider auth resolver diagnostic".to_string(),
             recall_items: vec![RecallQualityItem {
                 source: "contextlattice_synthesis_pack".to_string(),
-                summary: "Provider auth smoke matrix exists".to_string(),
+                summary: "Provider auth resolver diagnostic matrix exists".to_string(),
                 relevance: 0.95,
                 provenance: "runbooks/codex-integration".to_string(),
                 ..RecallQualityItem::default()

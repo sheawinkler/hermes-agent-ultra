@@ -61,7 +61,7 @@ pub fn merge_configs(yaml_config: &GatewayConfig, json_config: &GatewayConfig) -
     }
 
     // Deserialize back; fall back to yaml_config on error
-    let merged: GatewayConfig = match serde_json::from_value(base) {
+    let mut merged: GatewayConfig = match serde_json::from_value(base) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("Failed to deserialize merged config: {e}; falling back to yaml");
@@ -69,8 +69,15 @@ pub fn merge_configs(yaml_config: &GatewayConfig, json_config: &GatewayConfig) -
         }
     };
 
+    // `deep_merge` treats JSON null as a deletion for ordinary optional
+    // settings. `execution_mode` is intentionally different: its typed
+    // explicit-null state is a fail-closed configuration value and must
+    // survive the higher-priority file merge.
+    if !yaml_config.execution_mode.is_absent() {
+        merged.execution_mode = yaml_config.execution_mode.clone();
+    }
+
     // Validate session reset policies
-    let mut merged = merged;
     merged.session.reset_policy = merged.session.reset_policy.validate();
     for (_platform, policy) in merged.session.platform_overrides.iter_mut() {
         *policy = policy.validate();
@@ -149,5 +156,24 @@ mod tests {
         assert_eq!(merged.model.as_deref(), Some("gpt-4o"));
         // yaml's default max_turns (250) overrides json's 10 since yaml is primary
         assert_eq!(merged.max_turns, 250);
+    }
+
+    #[test]
+    fn merge_configs_preserves_explicit_null_execution_mode() {
+        let lower = GatewayConfig {
+            execution_mode: crate::config::ExecutionModeConfigValue::value("manual"),
+            ..GatewayConfig::default()
+        };
+        let overlay = GatewayConfig {
+            execution_mode: crate::config::ExecutionModeConfigValue::ExplicitNull,
+            ..GatewayConfig::default()
+        };
+
+        let merged = merge_configs(&overlay, &lower);
+
+        assert_eq!(
+            merged.execution_mode,
+            crate::config::ExecutionModeConfigValue::ExplicitNull
+        );
     }
 }

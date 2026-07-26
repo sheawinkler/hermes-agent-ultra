@@ -226,6 +226,7 @@ pub struct IncomingSlackMessage {
     pub text: String,
     pub ts: String,
     pub thread_ts: Option<String>,
+    pub is_dm: bool,
     pub is_bot: bool,
     pub media_files: Vec<SlackMediaFile>,
 }

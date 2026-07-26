@@ -92,10 +92,13 @@
             session_id.clone(),
             controller.clone(),
         )])));
+        let (run_runtime, _runtime_state) = test_run_runtime();
         let executor = CliAcpPromptExecutor {
             config: Arc::new(GatewayConfig::default()),
             tool_registry: Arc::new(hermes_tools::ToolRegistry::new()),
+            run_runtime,
             interrupts,
+            execution_mode: hermes_core::ResolvedExecutionMode::default(),
         };
         let session = hermes_acp::SessionState::new(session_id, ".".to_string());
 
@@ -181,10 +184,13 @@
             .platform_toolsets
             .insert("cli".to_string(), vec!["file".to_string()]);
         let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let (run_runtime, _runtime_state) = test_run_runtime();
         let executor = CliAcpPromptExecutor {
             config: Arc::new(config),
             tool_registry: Arc::clone(&tool_registry),
+            run_runtime,
             interrupts: Arc::new(Mutex::new(HashMap::new())),
+            execution_mode: hermes_core::ResolvedExecutionMode::default(),
         };
         let file_schema = hermes_core::tool_schema(
             "read_file",
@@ -245,10 +251,13 @@
             .platform_toolsets
             .insert("cli".to_string(), vec!["srv".to_string()]);
         let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let (run_runtime, _runtime_state) = test_run_runtime();
         let executor = CliAcpPromptExecutor {
             config: Arc::new(config),
             tool_registry: Arc::clone(&tool_registry),
+            run_runtime,
             interrupts: Arc::new(Mutex::new(HashMap::new())),
+            execution_mode: hermes_core::ResolvedExecutionMode::default(),
         };
         let schema = hermes_core::tool_schema(
             "mcp_srv_ping",
@@ -663,26 +672,18 @@
         assert_eq!(entries[1].status, "in_progress");
     }
 
-    #[test]
-    fn test_acp_stream_callbacks_route_reasoning_and_message_deltas() {
+    #[tokio::test]
+    async fn test_acp_stream_callbacks_expose_bounded_observer_sink() {
         let events = Arc::new(Mutex::new(Vec::new()));
-        let callbacks = acp_stream_callbacks("session-1", events.clone());
+        let (callbacks, observer_sink) = acp_stream_callbacks("session-1", events.clone());
 
-        callbacks.on_thinking.as_ref().unwrap()("actual reasoning");
-        callbacks.on_stream_delta.as_ref().unwrap()("streamed answer");
-        callbacks.on_thinking.as_ref().unwrap()("   ");
-        callbacks.on_stream_delta.as_ref().unwrap()("");
-
-        let events = events.lock().unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].kind, hermes_acp::AcpEventKind::AgentThoughtChunk);
-        assert_eq!(
-            events[0].session_update.as_deref(),
-            Some("agent_thought_chunk")
-        );
-        assert_eq!(events[0].text.as_deref(), Some("actual reasoning"));
-        assert_eq!(events[1].kind, hermes_acp::AcpEventKind::MessageDelta);
-        assert_eq!(events[1].text.as_deref(), Some("streamed answer"));
+        let callback_sink = callbacks
+            .observer_sink
+            .as_ref()
+            .expect("callbacks carry observer sink");
+        assert!(callback_sink.flush().await);
+        assert!(observer_sink.flush().await);
+        assert!(events.lock().expect("callback events lock").is_empty());
     }
 
     #[test]

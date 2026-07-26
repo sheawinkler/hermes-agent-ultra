@@ -11,6 +11,7 @@
 
 pub mod approval;
 pub mod backends;
+mod bounded_subprocess;
 pub mod dispatch;
 pub mod register_builtins;
 pub mod registry;
@@ -22,13 +23,17 @@ pub mod tool_policy;
 pub mod tools;
 pub mod toolset;
 pub mod toolset_distributions;
+mod tts_audio;
 pub mod tts_streaming;
 pub mod v4a_patch;
 pub mod verification_evidence;
 pub mod website_policy;
 
 // Re-export registry types
-pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};
+pub use registry::{
+    RuntimeDispatchOutcome, RuntimeToolDefinition, ToolEntry, ToolEntryInfo, ToolRegistry,
+    VettedToolEffect,
+};
 pub use rtk_filter::RawModeState;
 pub use tool_policy::{
     default_tool_policy_counters_path, load_tool_policy_counters, persist_tool_policy_counters,
@@ -87,7 +92,6 @@ pub use tools::osv_check::OsvCheckHandler;
 pub use tools::process_registry::ProcessRegistryHandler;
 pub use tools::project_workspace::{ProjectFactsHandler, ProjectTreeHandler};
 pub use tools::raw_trace_control::RawTraceControlHandler;
-pub use tools::replay_trace_control::ReplayTraceControlHandler;
 pub use tools::rl_training::{
     RlCheckStatusHandler, RlEditConfigHandler, RlGetCurrentConfigHandler, RlGetResultsHandler,
     RlListEnvironmentsHandler, RlListRunsHandler, RlSelectEnvironmentHandler,
@@ -119,7 +123,6 @@ pub use tools::video::{
     VideoGenerateRequest,
 };
 pub use tools::vision::{VisionAnalyzeHandler, VisionBackend};
-pub use tools::voice_mode::VoiceModeHandler;
 pub use tools::web::{
     WebCrawlBackend, WebCrawlHandler, WebExtractBackend, WebExtractHandler, WebSearchBackend,
     WebSearchHandler,
@@ -170,12 +173,15 @@ pub use teams_pipeline::{
     MicrosoftGraphTeamsBackend, MicrosoftGraphTokenProvider, SummaryParts, TeamsGraphBackend,
     TeamsMeetingPipeline, TeamsMeetingPipelineJob, TeamsMeetingRef, TeamsMeetingSummaryPayload,
     TeamsPipelineConfig, TeamsPipelineError, TeamsPipelineResult, TeamsPipelineStore,
-    TeamsSinkKind, TeamsSinkWriter, TeamsSummarizer, TeamsTranscriber,
-    TranscriptionToolTeamsTranscriber, DEFAULT_TEAMS_PIPELINE_STORE_FILENAME,
+    TeamsSummarizer, TeamsTranscriber, TranscriptionToolTeamsTranscriber,
+    DEFAULT_TEAMS_PIPELINE_STORE_FILENAME,
 };
 
-// Re-export builtin registration helper
-pub use register_builtins::register_builtin_tools;
+// Re-export builtin registration helpers.
+pub use register_builtins::{
+    register_builtin_tools, register_builtin_tools_with_execution_context,
+    register_builtin_tools_with_execution_context_and_home, register_builtin_tools_with_home,
+};
 
 // Re-export core types needed by consumers
 pub use hermes_core::{BudgetConfig, ToolCall, ToolError, ToolHandler, ToolResult, ToolSchema};

@@ -15,6 +15,8 @@ async fn main() {
     let global_model_override = cli.model.clone();
     let global_provider_override = cli.provider.clone();
     let global_allow_tools_override = cli.allow_tools;
+    let global_execution_mode_override = cli.execution_mode.clone();
+    let global_config_dir = cli.config_dir.clone();
     let oneshot_auth_model_hint = global_model_override.clone().or_else(|| {
         load_config(cli.config_dir.as_deref())
             .ok()
@@ -46,8 +48,9 @@ async fn main() {
             "Hydrated environment from route-autotune overrides"
         );
     }
-    if let Err(err) = scrub_unusable_nous_api_key_for_oauth_state() {
-        tracing::warn!("Nous API-key scrub skipped: {}", err);
+    if let Err(err) = scrub_unusable_nous_api_key_for_vault_credential(&cli) {
+        eprintln!("Error: {}", err);
+        std::process::exit(1);
     }
 
     tracing::debug!("Hermes Agent starting");
@@ -76,119 +79,23 @@ async fn main() {
             print_app_oneshot_result(&app);
             return;
         }
-        let mut result = hermes_cli::commands::handle_cli_chat(
-            Some(prompt),
-            None,
-            false,
-            global_model_override.clone(),
-            global_provider_override.clone(),
-            global_allow_tools_override,
-        )
-        .await;
-        if let Err(err) = &result {
-            if let Some(provider) = oneshot_auto_verify_oauth_provider(
-                err,
-                global_provider_override.as_deref(),
-                oneshot_auth_model_hint.as_deref(),
-            ) {
-                eprintln!(
-                    "Detected OAuth auth failure for provider '{}' in one-shot mode; running `hermes-ultra auth verify {}` and retrying once...",
-                    provider, provider
-                );
-                if let Err(verify_err) = run_auth(
-                    cli.clone(),
-                    Some("verify".to_string()),
-                    Some(provider.clone()),
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                )
-                .await
-                {
-                    eprintln!(
-                        "Warning: automatic `auth verify {}` failed: {}",
-                        provider, verify_err
-                    );
-                }
-                if let Err(hydrate_err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
-                    eprintln!(
-                        "Warning: automatic credential hydration after `auth verify {}` failed: {}",
-                        provider, hydrate_err
-                    );
-                }
-                result = hermes_cli::commands::handle_cli_chat(
-                    Some(cli.oneshot.clone().unwrap_or_default()),
+        let result = run_oneshot_once_with_oauth_guidance(
+            || {
+                hermes_cli::commands::handle_cli_chat(
+                    global_config_dir.clone(),
+                    Some(prompt),
                     None,
                     false,
                     global_model_override.clone(),
                     global_provider_override.clone(),
                     global_allow_tools_override,
+                    global_execution_mode_override.clone(),
                 )
-                .await;
-                if let Err(retry_err) = &result {
-                    if let Some(login_provider) = oneshot_auto_verify_oauth_provider(
-                        retry_err,
-                        Some(provider.as_str()),
-                        oneshot_auth_model_hint.as_deref(),
-                    ) {
-                        if !oneshot_oauth_provider_supports_login(&login_provider) {
-                            eprintln!(
-                                "OAuth still invalid for provider '{}'. Run `hermes-ultra auth login {}` in a real terminal, then retry.",
-                                login_provider, login_provider
-                            );
-                        } else if !oneshot_login_prompt_available() {
-                            eprintln!(
-                                "OAuth still invalid for provider '{}', but this process is not attached to an interactive terminal. Run `hermes-ultra auth login {}` in a real terminal, then retry.",
-                                login_provider, login_provider
-                            );
-                        } else {
-                            let force_fresh = oneshot_auth_requires_fresh_login(retry_err);
-                            let freshness = if force_fresh { "fresh " } else { "" };
-                            eprintln!(
-                                "OAuth still invalid for provider '{}'; launching `hermes-ultra auth login {}` for a {}login and retrying once...",
-                                login_provider, login_provider, freshness
-                            );
-                            if let Err(login_err) = run_oneshot_oauth_login_repair(
-                                cli.clone(),
-                                &login_provider,
-                                force_fresh,
-                            )
-                            .await
-                            {
-                                eprintln!(
-                                    "Warning: automatic `auth login {}` failed: {}",
-                                    login_provider, login_err
-                                );
-                                eprintln!(
-                                    "Action required: run `hermes-ultra auth login {}` in a real terminal, then retry this command.",
-                                    login_provider
-                                );
-                            } else {
-                                if let Err(hydrate_err) =
-                                    hydrate_provider_env_from_vault_for_cli(&cli).await
-                                {
-                                    eprintln!(
-                                        "Warning: automatic credential hydration after `auth login {}` failed: {}",
-                                        login_provider, hydrate_err
-                                    );
-                                }
-                                result = hermes_cli::commands::handle_cli_chat(
-                                    Some(cli.oneshot.clone().unwrap_or_default()),
-                                    None,
-                                    false,
-                                    global_model_override.clone(),
-                                    global_provider_override.clone(),
-                                    global_allow_tools_override,
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+            },
+            global_provider_override.as_deref(),
+            oneshot_auth_model_hint.as_deref(),
+        )
+        .await;
         if let Err(e) = result {
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -200,35 +107,50 @@ async fn main() {
         CliCommand::Hermes => run_interactive(cli).await,
         CliCommand::Chat {
             query,
+            query_stdin,
             preload_skill,
             yolo,
         } => {
-            if let Some(prompt) = query.clone() {
-                match handle_local_slash_query(cli.clone(), &prompt).await {
-                    Ok(true) => Ok(()),
-                    Ok(false) => {
+            let query = if query_stdin {
+                read_query_from_stdin().await.map(Some)
+            } else {
+                Ok(query)
+            };
+            match query {
+                Ok(query) => {
+                    if let Some(prompt) = query.clone() {
+                        match handle_local_slash_query(cli.clone(), &prompt).await {
+                            Ok(true) => Ok(()),
+                            Ok(false) => {
+                                hermes_cli::commands::handle_cli_chat(
+                                    global_config_dir.clone(),
+                                    query,
+                                    preload_skill,
+                                    yolo,
+                                    global_model_override.clone(),
+                                    global_provider_override.clone(),
+                                    global_allow_tools_override,
+                                    global_execution_mode_override.clone(),
+                                )
+                                .await
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
                         hermes_cli::commands::handle_cli_chat(
+                            global_config_dir.clone(),
                             query,
                             preload_skill,
                             yolo,
                             global_model_override.clone(),
                             global_provider_override.clone(),
                             global_allow_tools_override,
+                            global_execution_mode_override.clone(),
                         )
                         .await
                     }
-                    Err(err) => Err(err),
                 }
-            } else {
-                hermes_cli::commands::handle_cli_chat(
-                    query,
-                    preload_skill,
-                    yolo,
-                    global_model_override.clone(),
-                    global_provider_override.clone(),
-                    global_allow_tools_override,
-                )
-                .await
+                Err(error) => Err(error),
             }
         }
         CliCommand::Model {
@@ -416,23 +338,26 @@ async fn main() {
             action,
             name,
             extra,
+            authority_dir,
+            file,
+            expected_sha256,
             remove,
             yes,
             sync,
-        } => hermes_cli::commands::handle_cli_skills(action, name, extra, remove, yes, sync).await,
-        CliCommand::Plugins {
+        } => hermes_cli::commands::handle_cli_skills_with_trust_args(
             action,
             name,
-            git_ref,
-            allow_untrusted_git_host,
-        } => {
-            hermes_cli::commands::handle_cli_plugins(
-                action,
-                name,
-                git_ref,
-                allow_untrusted_git_host,
-            )
-            .await
+            extra,
+            authority_dir,
+            file,
+            expected_sha256,
+            remove,
+            yes,
+            sync,
+        )
+        .await,
+        CliCommand::Plugins { action, name } => {
+            hermes_cli::commands::handle_cli_plugins(action, name).await
         }
         CliCommand::Memory {
             action,
@@ -441,17 +366,25 @@ async fn main() {
             mode,
             host,
             api_key,
+            session_id,
+            retention_days,
+            retention_max_records,
             dry_run,
         } => {
             hermes_cli::commands::handle_cli_memory(
                 action,
                 target,
-                hermes_cli::commands::MemorySetupCliOptions {
-                    yes,
-                    mode,
-                    host,
-                    api_key,
-                    dry_run,
+                hermes_cli::commands::MemoryCliOptions {
+                    setup: hermes_cli::commands::MemorySetupCliOptions {
+                        yes,
+                        mode,
+                        host,
+                        api_key,
+                        dry_run,
+                    },
+                    session_id,
+                    retention_days,
+                    retention_max_records,
                 },
             )
             .await
@@ -479,7 +412,9 @@ async fn main() {
             redact,
             yes,
             source,
+            workspace,
             older_than,
+            limit,
         } => {
             hermes_cli::commands::handle_cli_sessions(hermes_cli::commands::CliSessionsOptions {
                 action,
@@ -494,6 +429,8 @@ async fn main() {
                 yes,
                 source,
                 older_than,
+                workspace,
+                limit,
             })
             .await
         }
@@ -546,8 +483,10 @@ async fn main() {
                 if result.is_ok() {
                     if yes {
                         result = hermes_cli::commands::handle_cli_acp(
+                            global_config_dir.clone(),
                             Some("setup-browser".to_string()),
                             true,
+                            global_execution_mode_override.clone(),
                         )
                         .await;
                     } else if std::io::stdin().is_terminal() {
@@ -558,8 +497,10 @@ async fn main() {
                             && acp_setup_browser_answer_is_yes(&answer)
                         {
                             result = hermes_cli::commands::handle_cli_acp(
+                                global_config_dir.clone(),
                                 Some("setup-browser".to_string()),
                                 false,
+                                global_execution_mode_override.clone(),
                             )
                             .await;
                         }
@@ -567,7 +508,13 @@ async fn main() {
                 }
                 result
             } else {
-                hermes_cli::commands::handle_cli_acp(action, yes).await
+                hermes_cli::commands::handle_cli_acp(
+                    global_config_dir.clone(),
+                    action,
+                    yes,
+                    global_execution_mode_override.clone(),
+                )
+                .await
             }
         }
         CliCommand::Backup { output } => hermes_cli::commands::handle_cli_backup(output).await,
@@ -663,6 +610,7 @@ async fn main() {
             status,
             store_path,
             meeting_id,
+            organizer_user_id,
             join_web_url,
             tenant_id,
             call_record_id,
@@ -687,6 +635,7 @@ async fn main() {
                     status,
                     store_path,
                     meeting_id,
+                    organizer_user_id,
                     join_web_url,
                     tenant_id,
                     call_record_id,
@@ -718,6 +667,23 @@ async fn main() {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+}
+
+async fn read_query_from_stdin() -> Result<String, AgentError> {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut bytes = Vec::new();
+    tokio::io::stdin()
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|error| AgentError::Io(format!("Failed to read query from standard input: {error}")))?;
+    if bytes.is_empty() {
+        return Err(AgentError::Config(
+            "Query standard input cannot be empty.".to_string(),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| AgentError::Config("Query standard input must be valid UTF-8.".to_string()))
 }
 
 /// Initialize the tracing subscriber with env filter.

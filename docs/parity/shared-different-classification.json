@@ -2952,7 +2952,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_voice_mode_platform_isolation.py",
-      "rationale": "Upstream voice-mode platform-isolation intent is covered by Rust VoiceManager platform-keyed joined-channel state and voice command contracts; platform/channel identifiers are normalized separately so same chat/channel IDs on different platforms do not collide.",
+      "rationale": "Intentional fail-closed divergence: the Rust runtime does not ship an interactive microphone or live voice-channel engine. The former unconsumed VoiceManager facade was removed; /voice reports capability status only. Platform-isolated text and media routing remain covered separately.",
       "ticket": 25
     },
     {
@@ -4317,14 +4317,14 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_voice_cli_integration.py",
-      "rationale": "Upstream CLI voice integration is covered by Rust voice_mode toggle, TTS streaming pipeline, markdown/think scrubbing, CLI /voice status, and tool-preview contracts; Python microphone-loop tests remain reference-only.",
+      "rationale": "Intentional fail-closed divergence: the Rust CLI does not claim an interactive microphone loop. /voice reports capability status only; the separately registered text_to_speech and transcription tools have their own shipped-path contracts.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_voice_mode.py",
-      "rationale": "Upstream voice-mode behavior is covered by Rust voice_mode state contracts plus gateway voice manager STT/TTS join/leave/VAD contracts; local Python audio-stack detection is intentionally not part of the Rust runtime.",
+      "rationale": "Intentional fail-closed divergence: the unconsumed voice_mode flag and test-only gateway voice manager were removed. Reintroduction requires a production microphone or platform voice consumer with end-to-end capture, transcription, synthesis, playback, lifecycle, and failure coverage.",
       "ticket": 25
     },
     {

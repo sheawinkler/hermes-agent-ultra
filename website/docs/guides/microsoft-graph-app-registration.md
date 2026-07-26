@@ -1,27 +1,39 @@
 ---
 title: "Register a Microsoft Graph Application"
-description: "Azure portal walkthrough for creating the app registration that powers the Teams meeting pipeline"
+description: "Azure portal walkthrough for app-only Graph credentials used by the Rust Teams meeting CLI"
 ---
 
 # Register a Microsoft Graph Application
 
-The Teams meeting pipeline reads meeting transcripts, recordings, and related artifacts from Microsoft Graph using **app-only** (daemon) authentication — no user sign-in, no interactive consent per meeting. That requires an Azure AD application registration with admin-consented application permissions.
+The **Rust** Teams meeting CLI reads meeting transcripts, recordings, and related artifacts from Microsoft Graph using **app-only** (daemon) authentication — no user sign-in, no interactive consent per meeting. That requires an Azure AD application registration with admin-consented application permissions.
 
 This guide walks through:
 
 1. Creating the app registration
 2. Creating a client secret
-3. Granting the Graph API permissions the pipeline needs
+3. Granting the Graph API permissions the **CLI fetch/run** path needs
 4. Admin-consenting those permissions
 5. (Optional) Scoping the app to specific users with an Application Access Policy
 
 You need **tenant admin rights** (or an admin to grant consent on your behalf) to finish this. Bookmark the values you collect — they go into `~/.hermes/.env` at the end.
 
+## Rust vs optional source
+
+| Need | Rust release | Optional Python/source plugin |
+|------|--------------|-------------------------------|
+| `MSGRAPH_TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` | **Required** for CLI Graph calls | Same if that plugin calls Graph |
+| Transcript / recording application permissions | **Required** for `fetch` / `run` | Same |
+| Public HTTPS webhook endpoint | **Not required** | Only if you run a separate notification listener |
+| `ChannelMessage.Send` / `Chat.ReadWrite.All` | **Not required** (no sink writers) | Only if that plugin posts summaries via Graph |
+| `hermes gateway restart` after secret rotate | **Not required** for CLI-only use | May apply to a long-running Python gateway you run yourself |
+
+Shipped Rust contract: [Teams Meetings](/docs/user-guide/messaging/teams-meetings). Webhook listener docs are [reference only](/docs/user-guide/messaging/msgraph-webhook).
+
 ## Prerequisites
 
 - A Microsoft 365 tenant with Teams Premium or Teams licenses that produce meeting transcripts and recordings
 - Admin access to the Azure portal at [entra.microsoft.com](https://entra.microsoft.com)
-- A publicly reachable HTTPS endpoint for Graph change notifications (set up later, in the webhook listener step)
+- **Not required for Rust:** a publicly reachable HTTPS endpoint for Graph change notifications (that is only for an optional non-Rust listener you supply)
 
 ## Step 1: Create the App Registration
 
@@ -51,14 +63,14 @@ You'll land on the app's overview page. Copy two values:
 
 ## Step 3: Grant Graph API Permissions
 
-The pipeline uses a minimum-viable set of application permissions. Add only what you need; each one widens what the app can read tenant-wide.
+The Rust CLI uses a minimum-viable set of **read** application permissions. Add only what you need; each one widens what the app can read tenant-wide.
 
 1. In the left nav, open **API permissions**.
 2. Click **Add a permission** → **Microsoft Graph** → **Application permissions**.
-3. Add the permissions from the table below that match what you want the pipeline to do.
+3. Add the permissions from the table below that match what you want the CLI to do.
 4. After adding, click **Grant admin consent for `<your tenant>`**. The Status column should flip to a green checkmark for every permission.
 
-### Required for transcript-first summaries
+### Required for transcript-first summaries (Rust CLI)
 
 | Permission | What it lets the app do |
 |------------|--------------------------|
@@ -72,19 +84,19 @@ The pipeline uses a minimum-viable set of application permissions. Add only what
 | `OnlineMeetingRecording.Read.All` | Download Teams meeting recordings for offline STT processing. |
 | `CallRecords.Read.All` | Resolve meetings from call records when only the join URL is known. |
 
-### Required for outbound summary delivery (Graph mode only)
+### Optional Python/source only — outbound summary delivery
 
-If `platforms.teams.extra.delivery_mode` is `graph`, the pipeline posts summaries into a Teams channel or chat via the Graph API. Skip these if you use `incoming_webhook` delivery mode instead.
+**Skip for Rust.** The Rust CLI has **no** Teams/Notion/Linear sink writers and does not post channel/chat summaries. The permissions below matter only if you separately run an upstream/source plugin that delivers via Graph:
 
-| Permission | What it lets the app do |
+| Permission | What a source plugin might use it for |
 |------------|--------------------------|
-| `ChannelMessage.Send` | Post messages into Teams channels on behalf of the app. |
-| `Chat.ReadWrite.All` | Post messages into 1:1 and group chats (only if you set `chat_id` as the delivery target). |
+| `ChannelMessage.Send` | Post messages into Teams channels. |
+| `Chat.ReadWrite.All` | Post messages into 1:1 and group chats. |
 
 ### Not recommended
 
 - `OnlineMeetings.ReadWrite.All` / `Chat.ReadWrite` without `.All` — broader than the pipeline needs.
-- Delegated permissions — the pipeline uses app-only (client-credentials) flow; delegated permissions won't work without user sign-in.
+- Delegated permissions — the CLI uses app-only (client-credentials) flow; delegated permissions won't work without user sign-in.
 
 ## Step 4: (Recommended) Scope the App with an Application Access Policy
 
@@ -135,9 +147,21 @@ Set file permissions so only you can read the secret:
 chmod 600 ~/.hermes/.env
 ```
 
-## Step 6: Verify the Token Flow
+## Step 6: Verify the Token Flow (Rust)
 
-Hermes ships a Graph auth smoke-test. From your Hermes install:
+Prefer the shipped CLI:
+
+```bash
+hermes teams-pipeline token-health
+hermes teams-pipeline token-health --force-refresh
+hermes teams-pipeline validate
+```
+
+`validate` checks Graph env presence, `meeting_pipeline` parse, and store stats. It does **not** start a webhook listener or inspect delivery sinks.
+
+### Optional Python/source smoke (not the Rust artifact)
+
+Only if you maintain a source tree that still exposes `tools.microsoft_graph_auth`:
 
 ```python
 python -c "
@@ -150,7 +174,7 @@ print(provider.inspect_token_health())
 "
 ```
 
-A successful run prints a long token string and a health dict showing `cached: True` and an `expires_in_seconds` value near 3600. Failures produce a `MicrosoftGraphTokenError` with the Azure error code — the most common are:
+That import path is **not** the Rust release packaging. Failures on either path commonly map to:
 
 | Azure error | Meaning | Fix |
 |-------------|---------|-----|
@@ -165,16 +189,15 @@ Azure client secrets have a hard expiry. Before yours expires:
 
 1. Create a second client secret in step 2 without deleting the first one.
 2. Update `MSGRAPH_CLIENT_SECRET` in `~/.hermes/.env` with the new value.
-3. Restart the gateway so the new secret is picked up: `hermes gateway restart`.
-4. Verify with the smoke test above.
+3. Confirm with `hermes teams-pipeline token-health --force-refresh` (Rust CLI reads env on invoke — **no** `hermes gateway restart` required for CLI-only use).
+4. If you separately run a long-lived **non-Rust** gateway process that cached the old secret, restart **that** process yourself.
 5. Delete the old secret from the Azure portal.
 
 ## Next Steps
 
-Once credentials verify cleanly, continue with:
+Once credentials verify cleanly:
 
-- **Webhook listener setup** — stand up the `msgraph_webhook` gateway platform that receives Graph change notifications.
-- **Pipeline configuration** — configure the Teams meeting pipeline runtime and operator CLI.
-- **Outbound delivery** — wire summaries back into a Teams channel or chat.
+- **Rust (shipped):** [Teams Meetings](/docs/user-guide/messaging/teams-meetings) and [Operate the Teams Meeting Pipeline](/docs/guides/operate-teams-meeting-pipeline) — manual `fetch` / `run` / `replay`, subscription **admin** only, no sinks.
+- **Optional source only:** [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook) — reference if you build a non-Rust notification consumer; **not** installed by the Rust package.
 
-Those pages land alongside the PRs that add the corresponding runtime. This credentials setup is a standalone prerequisite and is safe to complete in advance.
+Do **not** treat this credentials setup as implying automatic webhook ingestion or summary delivery inside the Rust binary.

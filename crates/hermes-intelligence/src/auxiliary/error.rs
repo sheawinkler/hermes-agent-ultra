@@ -63,6 +63,18 @@ impl AuxiliaryError {
             .join("; ");
         AuxiliaryError::AllProvidersFailed { errors, summary }
     }
+    pub fn is_unknown_outcome(&self) -> bool {
+        matches!(self, AuxiliaryError::Timeout(_))
+            || matches!(
+                self,
+                AuxiliaryError::Llm {
+                    source: AgentError::Io(_)
+                        | AgentError::Timeout(_)
+                        | AgentError::Interrupted { .. },
+                    ..
+                }
+            )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +155,12 @@ pub fn is_unsupported_temperature_error(err: &AgentError) -> bool {
 
 /// Convenience: returns `true` iff [`is_payment_error`] OR [`is_connection_error`].
 pub fn should_fallback(err: &AgentError) -> bool {
+    if matches!(
+        err,
+        AgentError::Io(_) | AgentError::Timeout(_) | AgentError::Interrupted { .. }
+    ) {
+        return false;
+    }
     is_payment_error(err) || is_connection_error(err)
 }
 

@@ -266,7 +266,6 @@ fn command_nested_candidates(cmd: &str, subcommand: &str, arg_position: usize) -
             "autonomous",
             "mission",
             "minimal",
-            "sigma",
         ]
         .iter()
         .map(|v| (*v).to_string())

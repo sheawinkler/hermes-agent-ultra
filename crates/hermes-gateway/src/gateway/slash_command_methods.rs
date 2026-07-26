@@ -45,7 +45,11 @@ impl Gateway {
             .map(str::trim)
             .filter(|value| !value.is_empty())?;
         let adapter = self.get_adapter(&incoming.platform).await?;
-        match adapter.rename_thread(thread_id, title).await {
+        match Self::await_adapter_call("thread rename", SESSION_COMMIT_TIMEOUT, || {
+            adapter.rename_thread(thread_id, title)
+        })
+        .await
+        {
             Ok(_) => None,
             Err(err) => {
                 warn!(
@@ -69,7 +73,7 @@ impl Gateway {
         for s in sessions {
             let key = self
                 .session_manager
-                .compose_session_key(&s.platform, &s.chat_id, &s.user_id);
+                .compose_session_key_for_scope(s.conversation_scope());
             let title = s.title.as_deref().unwrap_or("(untitled)");
             out.push_str(&format!(
                 "• `{}` — {} messages, title `{}`, platform `{}` (id `{}`)\n",
@@ -88,6 +92,8 @@ impl Gateway {
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<String, GatewayError> {
         if !self.config.display.tool_progress_command_enabled() {
             return Ok(
@@ -102,22 +108,20 @@ impl Gateway {
             .to_ascii_lowercase()
             .replace('-', "_");
         let default_mode = self.default_tool_progress_for_platform(&platform);
-        let next = {
-            let mut modes = self.tool_progress_modes.write().await;
-            let current = modes
-                .get(&platform)
-                .cloned()
-                .unwrap_or_else(|| default_mode.clone());
-            let next = Self::next_tool_progress_mode(&current).to_string();
-            modes.insert(platform.clone(), next.clone());
-            next
-        };
-
+        let mut modes = self.tool_progress_modes.write().await;
+        let current = modes
+            .get(&platform)
+            .cloned()
+            .unwrap_or_else(|| default_mode.clone());
+        let next = Self::next_tool_progress_mode(&current).to_string();
         let mut states = self.runtime_state.write().await;
+        modes.insert(platform.clone(), next.clone());
         let state = states.entry(session_key.to_string()).or_default();
         state.tool_progress = Some(next.clone());
         state.verbose = next == "verbose";
         drop(states);
+        drop(modes);
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
 
         Ok(format!(
             "📝 Tool progress for {platform}: {}",
@@ -128,15 +132,23 @@ impl Gateway {
     async fn execute_slash_command(
         &self,
         incoming: &IncomingMessage,
+        sender: &IncomingSender,
         session_key: &str,
+        dedup_key: Option<String>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<SlashCommandOutcome, GatewayError> {
         let command_text = Self::normalize_slash_command_text(&incoming.text);
-        if let Some(reply) = self.resolve_quick_command(&command_text).await? {
-            self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
-                .await?;
-            return Ok(SlashCommandOutcome::Handled);
+        let memory_governance_command = matches!(
+            crate::commands::canonical_command_name(&command_text).as_deref(),
+            Some("memory") | Some("forget_memory") | Some("memory_forget")
+        );
+        if !memory_governance_command {
+            if let Some(reply) = self.resolve_quick_command(&command_text).await? {
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                return Ok(SlashCommandOutcome::Handled);
+            }
         }
-
         let result = handle_command(&command_text);
         if matches!(result, GatewayCommandResult::Unknown(_)) {
             match self.resolve_skill_slash_command(&command_text) {
@@ -188,8 +200,30 @@ impl Gateway {
         if let GatewayCommandResult::ForwardPrompt { prompt } = result {
             return Ok(SlashCommandOutcome::ForwardToAgent { message: prompt });
         }
+        let _mutation_guard = if Self::command_requires_session_mutation_barrier(&result) {
+            let Some(guard) = self.try_lock_session_mutation(session_key).await else {
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    "Session is busy. Retry this command after the active turn or reset finishes.",
+                    None,
+                )
+                .await?;
+                return Ok(SlashCommandOutcome::Handled);
+            };
+            Some(guard)
+        } else {
+            None
+        };
         let handled = self
-            .apply_command_result(incoming, session_key, result)
+            .apply_command_result(
+                incoming,
+                sender,
+                session_key,
+                result,
+                dedup_key,
+                dedup_claim,
+            )
             .await?;
         Ok(if handled {
             SlashCommandOutcome::Handled
@@ -198,6 +232,51 @@ impl Gateway {
                 message: command_text,
             }
         })
+    }
+
+    fn command_requires_session_mutation_barrier(result: &GatewayCommandResult) -> bool {
+        matches!(
+            result,
+            GatewayCommandResult::SwitchModel { .. }
+                | GatewayCommandResult::SwitchPersonality { .. }
+                | GatewayCommandResult::ForgetMemory
+                | GatewayCommandResult::CompressContext(_)
+                | GatewayCommandResult::EnableTool { .. }
+                | GatewayCommandResult::DisableTool { .. }
+                | GatewayCommandResult::SwitchSession { .. }
+                | GatewayCommandResult::ShowBudget {
+                    new_budget: Some(_)
+                }
+                | GatewayCommandResult::ToggleVerbose(_)
+                | GatewayCommandResult::ToggleYolo(_)
+                | GatewayCommandResult::SetHome { .. }
+                | GatewayCommandResult::SetTitle { .. }
+                | GatewayCommandResult::ToggleReasoning(_)
+                | GatewayCommandResult::SwitchFast { .. }
+                | GatewayCommandResult::Undo
+                | GatewayCommandResult::SwitchProvider { .. }
+                | GatewayCommandResult::SwitchProfile { .. }
+                | GatewayCommandResult::SwitchBranch { branch: Some(_) }
+                | GatewayCommandResult::Rollback { .. }
+        )
+    }
+
+    async fn commit_command_dedup(
+        &self,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
+    ) {
+        if dedup_claim.is_none() {
+            return;
+        }
+        self.complete_dedup_key(dedup_key).await;
+        Self::transfer_command_dedup(dedup_claim);
+    }
+
+    fn transfer_command_dedup(dedup_claim: &mut Option<DedupClaimGuard>) {
+        if let Some(mut claim) = dedup_claim.take() {
+            claim.disarm();
+        }
     }
 
     fn resolve_skill_slash_command(&self, input: &str) -> Result<Option<String>, String> {
@@ -211,6 +290,8 @@ impl Gateway {
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<(), GatewayError> {
         let config = SkillCommandResolverConfig::default();
         let snapshot = installed_skill_slash_command_snapshot(&config);
@@ -222,6 +303,7 @@ impl Gateway {
                 .pending_system_notes
                 .push(build_skill_reload_system_note(&snapshot));
         }
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
         self.send_message(
             &incoming.platform,
             &incoming.chat_id,
@@ -295,6 +377,8 @@ impl Gateway {
         incoming: &IncomingMessage,
         session_key: &str,
         request: ModelSwitchRequest,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<(), GatewayError> {
         let warning = self
             .build_model_switch_preflight_warning(session_key, &request.model)
@@ -339,6 +423,7 @@ impl Gateway {
         } else {
             lines.push("Session only. Use `/model <name> --global` to persist.".to_string());
         }
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
 
         if request.force_refresh {
             lines.push(
@@ -360,11 +445,607 @@ impl Gateway {
         Ok(())
     }
 
+    async fn run_reset_session_command(
+        &self,
+        incoming: IncomingMessage,
+        session_key: String,
+        reply: String,
+        mut dedup_claim: Option<DedupClaimGuard>,
+    ) -> Result<(), GatewayError> {
+        let reset_committed = Arc::new(AtomicBool::new(false));
+        if let Some(claim) = dedup_claim.as_mut() {
+            claim.complete_on_drop_when(reset_committed.clone());
+        }
+        let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let gateway = self.clone();
+        let workers = self.turn_workers.clone();
+        let handle = tokio::spawn(async move {
+            if start_rx.await.is_ok() {
+                let result = match AssertUnwindSafe(gateway.perform_reset_session_command(
+                    incoming,
+                    session_key,
+                    reply,
+                    reset_committed.clone(),
+                ))
+                .catch_unwind()
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(GatewayError::Platform(
+                        "gateway reset worker panicked before cleanup".to_string(),
+                    )),
+                };
+                if reset_committed.load(Ordering::Acquire) || result.is_ok() {
+                    if let Some(claim) = dedup_claim.as_mut() {
+                        let key = claim.key.clone();
+                        gateway.complete_dedup_key(key.as_deref()).await;
+                        claim.disarm();
+                    }
+                }
+                let _ = completion_tx.send(result);
+            }
+            workers.lock().unwrap().remove(&worker_id);
+        });
+        let mut handle = Some(handle);
+        let rejected = {
+            let mut registered_workers = self.turn_workers.lock().unwrap();
+            if self.shutting_down.load(Ordering::Acquire) {
+                true
+            } else {
+                registered_workers.insert(
+                    worker_id,
+                    handle.take().expect("reset worker handle missing"),
+                );
+                false
+            }
+        };
+        if rejected {
+            handle
+                .take()
+                .expect("rejected reset worker handle missing")
+                .abort();
+            return Err(GatewayError::Platform(
+                "gateway is shutting down".to_string(),
+            ));
+        }
+        if start_tx.send(()).is_err() {
+            if let Some(handle) = self.turn_workers.lock().unwrap().remove(&worker_id) {
+                handle.abort();
+            }
+        }
+        completion_rx.await.map_err(|_| {
+            GatewayError::Platform(
+                "gateway reset worker ended before reporting completion".to_string(),
+            )
+        })?
+    }
+
+    async fn perform_reset_session_command(
+        &self,
+        incoming: IncomingMessage,
+        session_key: String,
+        reply: String,
+        reset_committed: Arc<AtomicBool>,
+    ) -> Result<(), GatewayError> {
+        let admission = {
+            let mut busy = self.busy_sessions.write().await;
+            busy.begin_reset_session(&session_key)
+        };
+        let (reset_lease, revoked_lease, released_dedup_keys) = match admission {
+            ResetAdmission::Started {
+                lease,
+                revoked_lease,
+                released_dedup_keys,
+            } => (lease, revoked_lease, released_dedup_keys),
+            ResetAdmission::AlreadyInProgress {
+                draining_after_failure,
+            } => {
+                let message = if draining_after_failure {
+                    "A previous reset is draining a turn that did not stop safely; retry /reset after queued messages resume."
+                } else {
+                    "Session reset is already in progress; retry after it completes."
+                };
+                tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        message,
+                        None,
+                    ),
+                )
+                .await
+                .map_err(|_| {
+                    GatewayError::Platform("gateway reset status delivery timed out".to_string())
+                })??;
+                return if draining_after_failure {
+                    Err(GatewayError::Platform(message.to_string()))
+                } else {
+                    Ok(())
+                };
+            }
+            ResetAdmission::TransitionInProgress => {
+                let message =
+                    "A session lifecycle transition is in progress; retry /reset after it completes.";
+                tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        message,
+                        None,
+                    ),
+                )
+                .await
+                .map_err(|_| {
+                    GatewayError::Platform("gateway reset status delivery timed out".to_string())
+                })??;
+                return Err(GatewayError::Platform(message.to_string()));
+            }
+            ResetAdmission::AtCapacity => {
+                let message = "Gateway session capacity reached; retry reset later.";
+                tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        message,
+                        None,
+                    ),
+                )
+                .await
+                .map_err(|_| {
+                    GatewayError::Platform("gateway reset status delivery timed out".to_string())
+                })??;
+                return Err(GatewayError::Platform(message.to_string()));
+            }
+        };
+        self.complete_dedup_keys(&released_dedup_keys).await;
+        if let Some(revoked_lease) = revoked_lease {
+            if tokio::time::timeout(
+                SESSION_COMMIT_TIMEOUT,
+                revoked_lease.wait_finished(),
+            )
+            .await
+            .is_err()
+            {
+                let marked_draining = self
+                    .busy_sessions
+                    .write()
+                    .await
+                    .mark_reset_draining_after_failure(&reset_lease);
+                if !marked_draining {
+                    return Err(GatewayError::SessionExpired(
+                        "gateway reset barrier changed before timeout recovery".to_string(),
+                    ));
+                }
+                self.spawn_reset_barrier_recovery(
+                    revoked_lease,
+                    reset_lease,
+                    incoming.clone(),
+                );
+                let message = "Session reset was not applied because the active turn did not stop safely. Queued messages remain paused until that turn exits; retry /reset after they resume.";
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        message,
+                        None,
+                    ),
+                )
+                .await;
+                return Err(GatewayError::Platform(message.to_string()));
+            }
+        }
+
+        self.run_reset_barrier_work(&reset_lease, async {
+
+        {
+            let turn_lock = self.session_turn_lock(&session_key).await;
+            let _reset_guard = turn_lock.lock().await;
+            let current_session = self.session_manager.get_session(&session_key).await;
+            let _ = tokio::time::timeout(
+                SESSION_COMMIT_TIMEOUT,
+                self.emit_hook_event(
+                    "session:end",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "logical_session_id": current_session.as_ref().map(|s| s.id.clone())
+                    }),
+                ),
+            )
+            .await;
+            if let Some(old_session) = current_session.as_ref() {
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.emit_session_finalize(&session_key, old_session, "reset"),
+                )
+                .await;
+            }
+
+            let reset_snapshot = self
+                .session_manager
+                .reset_session_with_snapshots(&session_key)
+                .await;
+            reset_committed.store(true, Ordering::Release);
+            self.clear_session_boundary_security_state(&session_key)
+                .await;
+            let reset_session = reset_snapshot
+                .as_ref()
+                .map(|(_, new_session)| new_session)
+                .or(current_session.as_ref());
+            let _ = tokio::time::timeout(
+                SESSION_COMMIT_TIMEOUT,
+                self.emit_hook_event(
+                    "session:reset",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "logical_session_id": reset_session.map(|s| s.id.clone())
+                    }),
+                ),
+            )
+            .await;
+            if let Some(new_session) = reset_session {
+                let _ = tokio::time::timeout(
+                    SESSION_COMMIT_TIMEOUT,
+                    self.emit_session_reset_lifecycle(&session_key, new_session, "reset"),
+                )
+                .await;
+            }
+        }
+            let reply_result = match tokio::time::timeout(
+                SESSION_COMMIT_TIMEOUT,
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(GatewayError::Platform(
+                    "gateway reset reply delivery timed out".to_string(),
+                )),
+            };
+            reply_result
+        })
+        .await
+    }
+
+    async fn run_reset_barrier_work<F>(
+        &self,
+        reset_lease: &TurnLease,
+        work: F,
+    ) -> Result<(), GatewayError>
+    where
+        F: Future<Output = Result<(), GatewayError>>,
+    {
+        let work_result = match AssertUnwindSafe(work).catch_unwind().await {
+            Ok(result) => result,
+            Err(_) => Err(GatewayError::Platform(
+                "gateway reset worker panicked".to_string(),
+            )),
+        };
+        let completion = {
+            let mut busy = self.busy_sessions.write().await;
+            busy.complete_turn(reset_lease, ProcessingOutcome::Success)
+        };
+        let barrier_result = match completion {
+            TurnCompletion::Completed {
+                next: Some((lease, entry)),
+            } => {
+                self.spawn_turn_chain_detached(lease, entry);
+                Ok(())
+            }
+            TurnCompletion::Completed { next: None } => Ok(()),
+            TurnCompletion::Stale => Err(GatewayError::SessionExpired(
+                "gateway reset barrier was invalidated before completion".to_string(),
+            )),
+        };
+        work_result?;
+        barrier_result
+    }
+
+    fn spawn_reset_barrier_recovery(
+        &self,
+        revoked_lease: TurnLease,
+        reset_lease: TurnLease,
+        incoming: IncomingMessage,
+    ) {
+        let gateway = self.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = revoked_lease.wait_finished() => {
+                    match gateway.release_reset_barrier(&reset_lease).await {
+                        Ok(()) => {
+                            let _ = tokio::time::timeout(
+                                SESSION_COMMIT_TIMEOUT,
+                                gateway.send_message_threaded(
+                                    &incoming.platform,
+                                    &incoming.chat_id,
+                                    "Queued messages resumed; the previous reset was not applied. Retry /reset if it is still needed.",
+                                    None,
+                                    Gateway::reply_thread_id(&incoming),
+                                ),
+                            )
+                            .await;
+                        }
+                        Err(error) => {
+                            warn!(%error, "Failed to recover a timed-out reset barrier");
+                        }
+                    }
+                }
+                _ = gateway.wait_for_shutdown() => {}
+            }
+        });
+    }
+
+    async fn release_reset_barrier(
+        &self,
+        reset_lease: &TurnLease,
+    ) -> Result<(), GatewayError> {
+        let completion = {
+            let mut busy = self.busy_sessions.write().await;
+            busy.complete_turn(reset_lease, ProcessingOutcome::Cancelled)
+        };
+        match completion {
+            TurnCompletion::Completed {
+                next: Some((lease, entry)),
+            } => {
+                self.spawn_turn_chain_detached(lease, entry);
+                Ok(())
+            }
+            TurnCompletion::Completed { next: None } => Ok(()),
+            TurnCompletion::Stale => Err(GatewayError::SessionExpired(
+                "gateway reset barrier was invalidated before recovery".to_string(),
+            )),
+        }
+    }
+
+    fn memory_forget_completed(response: &GatewayMemoryForgetResponse) -> bool {
+        response.erased
+            && response.remediation.is_none()
+            && !response.providers.is_empty()
+            && response.providers.iter().all(|provider| {
+                matches!(
+                    provider.state,
+                    GatewayMemoryForgetProviderState::VerifiedAbsent
+                )
+            })
+    }
+
+    fn render_memory_forget_response(response: &GatewayMemoryForgetResponse) -> String {
+        let completed = Self::memory_forget_completed(response);
+        let mut text = if completed {
+            "Persistent memory was removed for the current authenticated conversation."
+                .to_string()
+        } else {
+            "Persistent-memory removal was not confirmed for the current authenticated conversation."
+                .to_string()
+        };
+        if !response.providers.is_empty() {
+            text.push_str("\n\nProvider status:");
+            for provider in &response.providers {
+                let state = match &provider.state {
+                    GatewayMemoryForgetProviderState::VerifiedAbsent => "verified absent".to_string(),
+                    GatewayMemoryForgetProviderState::Incomplete {
+                        error: Some(hermes_core::MemoryProviderGovernanceError::Unsupported {
+                            operation,
+                            ..
+                        }),
+                        ..
+                    } => format!("unsupported ({})", operation.as_str()),
+                    GatewayMemoryForgetProviderState::Incomplete {
+                        error: Some(hermes_core::MemoryProviderGovernanceError::Failed {
+                            operation,
+                            ..
+                        }),
+                        ..
+                    } => format!("failed ({})", operation.as_str()),
+                    GatewayMemoryForgetProviderState::Incomplete {
+                        error: Some(hermes_core::MemoryProviderGovernanceError::Incomplete {
+                            operation,
+                            ..
+                        }),
+                        ..
+                    } => format!("incomplete ({})", operation.as_str()),
+                    GatewayMemoryForgetProviderState::Incomplete {
+                        error: None,
+                        readback_absent: false,
+                    } => "readback residue detected".to_string(),
+                    GatewayMemoryForgetProviderState::Incomplete {
+                        error: None,
+                        readback_absent: true,
+                    } => "incomplete".to_string(),
+                };
+                text.push_str(&format!("\n• {}: {state}", provider.provider));
+            }
+        }
+        if !completed {
+            let remediation = match response.remediation {
+                Some(GatewayMemoryForgetRemediation::Reconfigure) => {
+                    "Restore the configured memory provider, then retry this command."
+                }
+                Some(GatewayMemoryForgetRemediation::Retry) | None => {
+                    "Retry this command after the provider is available."
+                }
+            };
+            text.push_str("\n\n");
+            text.push_str(remediation);
+        }
+        text
+    }
+
+    async fn apply_memory_forget_command(
+        &self,
+        incoming: &IncomingMessage,
+        sender: &IncomingSender,
+        session_key: &str,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
+    ) -> Result<(), GatewayError> {
+        if !matches!(sender.kind, IncomingSenderKind::Human) {
+            self.send_message(
+                &incoming.platform,
+                &incoming.chat_id,
+                "Memory governance requires an authenticated human gateway identity. No memory operation was started.",
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let context = self.build_runtime_context(incoming, session_key, None).await;
+        if context.memory_subject().is_err() {
+            self.send_message(
+                &incoming.platform,
+                &incoming.chat_id,
+                "Memory governance could not verify the current gateway identity. No memory operation was started.",
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let handler = self.memory_forget_handler.read().await.clone();
+        let response = match handler {
+            Some(handler) => match handler(context).await {
+                Ok(response) => response,
+                Err(_) => GatewayMemoryForgetResponse {
+                    erased: false,
+                    providers: Vec::new(),
+                    remediation: Some(GatewayMemoryForgetRemediation::Retry),
+                },
+            },
+            None => GatewayMemoryForgetResponse {
+                erased: false,
+                providers: Vec::new(),
+                remediation: Some(GatewayMemoryForgetRemediation::Reconfigure),
+            },
+        };
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
+        let text = Self::render_memory_forget_response(&response);
+        self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+            .await
+    }
+
+    fn memory_export_completed(response: &GatewayMemoryExportResponse) -> bool {
+        response.remediation.is_none() && response.artifact.is_some()
+    }
+
+    fn render_memory_export_response(
+        metadata: Option<&GatewayMemoryExportDownloadMetadata>,
+        remediation: Option<GatewayMemoryExportRemediation>,
+    ) -> String {
+        if let Some(metadata) = metadata {
+            return format!(
+                "Persistent-memory export is ready for the current authenticated conversation.\n\n\
+                 One-time download reference: `{}`\n\
+                 Manifest digest: `{}`\n\
+                 Records: {}\n\
+                 Pages: {}\n\
+                 Providers: {}",
+                metadata.download_ref,
+                metadata.manifest_digest.as_str(),
+                metadata.record_count,
+                metadata.page_count,
+                metadata.provider_count,
+            );
+        }
+
+        let remediation = match remediation {
+            Some(GatewayMemoryExportRemediation::Reconfigure) => {
+                "Restore the configured memory provider, then retry this command."
+            }
+            Some(GatewayMemoryExportRemediation::Retry) | None => {
+                "Retry this command after the provider is available."
+            }
+        };
+        format!(
+            "Persistent-memory export was not completed for the current authenticated conversation.\n\n{remediation}"
+        )
+    }
+
+    async fn apply_memory_export_command(
+        &self,
+        incoming: &IncomingMessage,
+        sender: &IncomingSender,
+        session_key: &str,
+        dedup_key: Option<&str>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
+    ) -> Result<(), GatewayError> {
+        if !matches!(sender.kind, IncomingSenderKind::Human) {
+            self.send_message(
+                &incoming.platform,
+                &incoming.chat_id,
+                "Memory governance requires an authenticated human gateway identity. No memory operation was started.",
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let context = self.build_runtime_context(incoming, session_key, None).await;
+        if context.memory_subject().is_err() {
+            self.send_message(
+                &incoming.platform,
+                &incoming.chat_id,
+                "Memory governance could not verify the current gateway identity. No memory operation was started.",
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let handler = self.memory_export_handler.read().await.clone();
+        let response = match handler {
+            Some(handler) => match handler(context.clone()).await {
+                Ok(response) => response,
+                Err(_) => GatewayMemoryExportResponse {
+                    artifact: None,
+                    remediation: Some(GatewayMemoryExportRemediation::Retry),
+                },
+            },
+            None => GatewayMemoryExportResponse {
+                artifact: None,
+                remediation: Some(GatewayMemoryExportRemediation::Reconfigure),
+            },
+        };
+        let metadata = if Self::memory_export_completed(&response) {
+            match response.artifact.as_ref() {
+                Some(artifact) => self.issue_memory_export_download(&context, artifact).await.ok(),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let remediation = if metadata.is_some() {
+            None
+        } else {
+            response
+                .remediation
+                .or(Some(GatewayMemoryExportRemediation::Retry))
+        };
+        self.commit_command_dedup(dedup_key, dedup_claim).await;
+        let text = Self::render_memory_export_response(metadata.as_ref(), remediation);
+        self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+            .await
+    }
+
     async fn apply_command_result(
         &self,
         incoming: &IncomingMessage,
+        sender: &IncomingSender,
         session_key: &str,
         result: GatewayCommandResult,
+        dedup_key: Option<String>,
+        dedup_claim: &mut Option<DedupClaimGuard>,
     ) -> Result<bool, GatewayError> {
         match result {
             GatewayCommandResult::Reply(text)
@@ -375,53 +1056,45 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::ResetSession(reply) => {
-                let current_session = self.session_manager.get_session(session_key).await;
-                self.emit_hook_event(
-                    "session:end",
-                    serde_json::json!({
-                        "platform": incoming.platform,
-                        "chat_id": incoming.chat_id,
-                        "user_id": incoming.user_id,
-                        "session_id": session_key,
-                        "logical_session_id": current_session.as_ref().map(|s| s.id.clone())
-                    }),
+                self.run_reset_session_command(
+                    incoming.clone(),
+                    session_key.to_string(),
+                    reply,
+                    dedup_claim.take(),
                 )
-                .await;
-                if let Some(old_session) = current_session.as_ref() {
-                    self.emit_session_finalize(session_key, old_session, "reset")
-                        .await;
-                }
-                let reset_snapshot = self
-                    .session_manager
-                    .reset_session_with_snapshots(session_key)
-                    .await;
-                self.clear_session_boundary_security_state(session_key)
-                    .await;
-                let reset_session = reset_snapshot
-                    .as_ref()
-                    .map(|(_, new_session)| new_session)
-                    .or(current_session.as_ref());
-                self.emit_hook_event(
-                    "session:reset",
-                    serde_json::json!({
-                        "platform": incoming.platform,
-                        "chat_id": incoming.chat_id,
-                        "user_id": incoming.user_id,
-                        "session_id": session_key,
-                        "logical_session_id": reset_session.map(|s| s.id.clone())
-                    }),
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ForgetMemory => {
+                self.apply_memory_forget_command(
+                    incoming,
+                    sender,
+                    session_key,
+                    dedup_key.as_deref(),
+                    dedup_claim,
                 )
-                .await;
-                if let Some(new_session) = reset_session {
-                    self.emit_session_reset_lifecycle(session_key, new_session, "reset")
-                        .await;
-                }
-                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
-                    .await?;
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ExportMemory => {
+                self.apply_memory_export_command(
+                    incoming,
+                    sender,
+                    session_key,
+                    dedup_key.as_deref(),
+                    dedup_claim,
+                )
+                .await?;
                 Ok(true)
             }
             GatewayCommandResult::SwitchModel { request } => {
-                self.apply_model_switch_command(incoming, session_key, request)
+                self.apply_model_switch_command(
+                    incoming,
+                    session_key,
+                    request,
+                    dedup_key.as_deref(),
+                    dedup_claim,
+                )
                     .await?;
                 Ok(true)
             }
@@ -432,128 +1105,225 @@ impl Gateway {
                     .or_default()
                     .personality = Some(name);
                 drop(states);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
             }
-            GatewayCommandResult::ApproveUser { user_id } => {
-                let mut dm = self.dm_manager.write().await;
-                if !dm.is_admin(&incoming.user_id) {
-                    drop(dm);
-                    self.send_message(
+            GatewayCommandResult::ApproveUser { pairing_code } => {
+                let approval = {
+                    let mut dm = self.dm_manager.write().await;
+                    dm.approve_pairing_code(
                         &incoming.platform,
+                        &incoming.user_id,
                         &incoming.chat_id,
-                        "🚫 /approve requires admin privileges.",
-                        None,
+                        incoming.is_dm,
+                        &pairing_code,
                     )
-                    .await?;
-                    return Ok(true);
-                }
-                dm.authorize_user(user_id.clone());
-                drop(dm);
-                self.send_message(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &format!("✅ User '{}' has been approved for DM access.", user_id),
-                    None,
-                )
-                .await?;
-                Ok(true)
-            }
-            GatewayCommandResult::DenyUser { user_id } => {
-                let mut dm = self.dm_manager.write().await;
-                if !dm.is_admin(&incoming.user_id) {
-                    drop(dm);
-                    self.send_message(
-                        &incoming.platform,
-                        &incoming.chat_id,
-                        "🚫 /deny requires admin privileges.",
-                        None,
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-                dm.deauthorize_user(&user_id);
-                drop(dm);
-                self.send_message(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &format!("⛔ User '{}' has been removed from DM allowlist.", user_id),
-                    None,
-                )
-                .await?;
-                Ok(true)
-            }
-            GatewayCommandResult::StopAgent(reply) => {
-                for (task_id, status, _) in self.background_tasks.list_tasks() {
-                    if status == TaskStatus::Running {
-                        let _ = self.background_tasks.cancel(&task_id);
+                };
+                match approval {
+                    Ok(grant) => {
+                        self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                            .await;
+                        self.send_message(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            &format!(
+                                "✅ User '{}' has been approved for DM access in chat '{}'.",
+                                grant.user_id, grant.chat_id
+                            ),
+                            None,
+                        )
+                        .await?;
+                        Ok(true)
+                    }
+                    Err(error) if error.is_persistence_error() => Err(GatewayError::Platform(
+                        format!("durable DM grant approval failed: {error}"),
+                    )),
+                    Err(error) => {
+                        self.send_message(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            &format!("🚫 /approve denied: {error}."),
+                            None,
+                        )
+                        .await?;
+                        Ok(true)
                     }
                 }
-                {
+            }
+            GatewayCommandResult::DenyUser { pairing_code } => {
+                let revocation = {
+                    let mut dm = self.dm_manager.write().await;
+                    dm.revoke_pairing_code(
+                        &incoming.platform,
+                        &incoming.user_id,
+                        &incoming.chat_id,
+                        incoming.is_dm,
+                        &pairing_code,
+                    )
+                };
+                match revocation {
+                    Ok(target) => {
+                        self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                            .await;
+                        self.send_message(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            &format!(
+                                "⛔ User '{}' has been removed from DM access in chat '{}'.",
+                                target.user_id, target.chat_id
+                            ),
+                            None,
+                        )
+                        .await?;
+                        Ok(true)
+                    }
+                    Err(error) if error.is_persistence_error() => Err(GatewayError::Platform(
+                        format!("durable DM grant revocation failed: {error}"),
+                    )),
+                    Err(error) => {
+                        self.send_message(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            &format!("🚫 /deny denied: {error}."),
+                            None,
+                        )
+                        .await?;
+                        Ok(true)
+                    }
+                }
+            }
+            GatewayCommandResult::StopAgent(reply) => {
+                let mut cancelled_task = false;
+                for (task_id, status, _) in self.background_tasks.list_tasks() {
+                    if status == TaskStatus::Running {
+                        cancelled_task |= self.background_tasks.cancel(&task_id);
+                    }
+                }
+                let interrupted = {
                     let mut busy = self.busy_sessions.write().await;
-                    let _ = busy.interrupt_active(
+                    busy.interrupt_active(
                         session_key,
                         "User requested /stop for the active gateway task.",
-                    );
+                    )
+                };
+                if cancelled_task || interrupted {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
                 }
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
             }
             GatewayCommandResult::QueuePrompt { prompt } => {
-                let active = {
-                    let mut busy = self.busy_sessions.write().await;
-                    let active = busy.is_active(session_key);
-                    if active {
-                        busy.queue_message(
-                            session_key,
-                            Self::incoming_to_busy_event(incoming, prompt.clone()),
-                        );
+                let mut queued_incoming = incoming.clone();
+                queued_incoming.text = prompt.clone();
+                let admission = self
+                    .enqueue_session_if_active(
+                        session_key,
+                        QueuedIncoming::from_validated_ingress(queued_incoming, sender.clone())
+                            .with_dedup_key(dedup_key.clone()),
+                    )
+                    .await;
+                let owned = admission == QueueAdmission::Queued;
+                if owned {
+                    Self::transfer_command_dedup(dedup_claim);
+                }
+                let reply = match admission {
+                    QueueAdmission::Queued => {
+                        format!("🧵 Queued follow-up for the active session: {prompt}")
                     }
-                    active
+                    QueueAdmission::Full => {
+                        "The active session queue is full. Retry the prompt later.".to_string()
+                    }
+                    QueueAdmission::Inactive => {
+                        "No active gateway turn is running. Send the prompt normally to start it."
+                            .to_string()
+                    }
                 };
-                let reply = if active {
-                    format!("🧵 Queued follow-up for the active session: {prompt}")
-                } else {
-                    "No active gateway turn is running. Send the prompt normally to start it."
-                        .to_string()
-                };
-                self.send_message_threaded(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &reply,
-                    None,
-                    Self::reply_thread_id(incoming),
-                )
-                .await?;
+                if let Err(error) = self
+                    .send_message_threaded(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        &reply,
+                        None,
+                        Self::reply_thread_id(incoming),
+                    )
+                    .await
+                {
+                    if owned {
+                        warn!(
+                            platform = %incoming.platform,
+                            chat_id = %incoming.chat_id,
+                            error = %error,
+                            "failed to acknowledge /queue; queued work remains owned"
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
                 Ok(true)
             }
             GatewayCommandResult::SteerPrompt { prompt } => {
-                let decision = {
-                    let mut busy = self.busy_sessions.write().await;
-                    busy.handle_busy_message(
+                let mut queued_incoming = incoming.clone();
+                queued_incoming.text = prompt.clone();
+                let decision = self
+                    .steer_session_if_active(
                         session_key,
-                        Self::incoming_to_busy_event(incoming, prompt.clone()),
-                        BusyInputMode::Steer,
+                        QueuedIncoming::from_validated_ingress(queued_incoming, sender.clone())
+                            .with_dedup_key(dedup_key.clone()),
                     )
+                    .await;
+                let owned = decision
+                    .as_ref()
+                    .is_some_and(|decision| decision.steered || decision.queued);
+                let complete_immediately = decision
+                    .as_ref()
+                    .is_some_and(|decision| decision.steered && !decision.queued);
+                if complete_immediately {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
+                } else if owned {
+                    Self::transfer_command_dedup(dedup_claim);
+                }
+                let reply = match decision {
+                    Some(decision) if decision.steered => {
+                        format!("🧭 Steered the running task: {prompt}")
+                    }
+                    Some(decision) if decision.queued => {
+                        format!("🧵 No live steering hook was ready; queued follow-up: {prompt}")
+                    }
+                    Some(decision) => decision.ack.unwrap_or_else(|| {
+                        "The running task could not accept this steering message.".to_string()
+                    }),
+                    None => {
+                        "No active gateway turn is running. Use /steer while a task is in flight."
+                            .to_string()
+                    }
                 };
-                let reply = if decision.steered {
-                    format!("🧭 Steered the running task: {prompt}")
-                } else if decision.queued {
-                    format!("🧵 No live steering hook was ready; queued follow-up: {prompt}")
-                } else {
-                    "No active gateway turn is running. Use /steer while a task is in flight."
-                        .to_string()
-                };
-                self.send_message_threaded(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &reply,
-                    None,
-                    Self::reply_thread_id(incoming),
-                )
-                .await?;
+                if let Err(error) = self
+                    .send_message_threaded(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        &reply,
+                        None,
+                        Self::reply_thread_id(incoming),
+                    )
+                    .await
+                {
+                    if owned {
+                        warn!(
+                            platform = %incoming.platform,
+                            chat_id = %incoming.chat_id,
+                            error = %error,
+                            "failed to acknowledge /steer; steered or queued work remains owned"
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
                 Ok(true)
             }
             GatewayCommandResult::ForwardPrompt { .. } => Ok(false),
@@ -564,7 +1334,14 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::CompressContext(_) => {
-                let outcome = self.compress_context(session_key, 24).await;
+                let outcome = self
+                    .compress_context(
+                        session_key,
+                        24,
+                        dedup_key.as_deref(),
+                        dedup_claim,
+                    )
+                    .await;
                 let mut reply = format!(
                     "📦 Context compressed. Removed {} old messages.",
                     outcome.removed_messages
@@ -583,7 +1360,14 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::ToggleVerbose(_) => {
-                let reply = self.apply_verbose_command(incoming, session_key).await?;
+                let reply = self
+                    .apply_verbose_command(
+                        incoming,
+                        session_key,
+                        dedup_key.as_deref(),
+                        dedup_claim,
+                    )
+                    .await?;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -599,6 +1383,8 @@ impl Gateway {
                 }
                 let reply = format!("🤠 YOLO mode: {}", if state.yolo { "ON" } else { "OFF" });
                 drop(states);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -612,6 +1398,10 @@ impl Gateway {
                     choice,
                     resolve_all,
                 );
+                if count > 0 {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
+                }
                 let reply = if count == 0 {
                     "No pending command approval for this session.".to_string()
                 } else if choice == hermes_tools::approval::ApprovalChoice::Deny {
@@ -641,6 +1431,9 @@ impl Gateway {
                 let response = if target.exists() && target.is_dir() {
                     let mut states = self.runtime_state.write().await;
                     states.entry(session_key.to_string()).or_default().home = Some(path);
+                    drop(states);
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
                     reply
                 } else {
                     format!("❌ Path not found or not a directory: {}", path)
@@ -660,6 +1453,8 @@ impl Gateway {
             }
             GatewayCommandResult::SetTitle { title, reply } => {
                 let stored = self.session_manager.set_title(session_key, &title).await;
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 let mut response = match &stored {
                     Some(stored_title) if stored_title.as_str() == title => reply,
                     Some(stored_title) => format!("🏷 Session title set to: {}", stored_title),
@@ -705,6 +1500,8 @@ impl Gateway {
                 *generation += 1;
                 let current = *generation;
                 drop(generation);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(
                     &incoming.platform,
                     &incoming.chat_id,
@@ -715,7 +1512,12 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::ReloadSkills => {
-                self.apply_reload_skills_command(incoming, session_key)
+                self.apply_reload_skills_command(
+                    incoming,
+                    session_key,
+                    dedup_key.as_deref(),
+                    dedup_claim,
+                )
                     .await?;
                 Ok(true)
             }
@@ -723,6 +1525,8 @@ impl Gateway {
                 let mut states = self.runtime_state.write().await;
                 states.entry(session_key.to_string()).or_default().provider = Some(provider);
                 drop(states);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -735,12 +1539,19 @@ impl Gateway {
                         apply_gateway_profile_overlay(state, &overlay);
                         render_profile_overlay_reply(&profile, &overlay)
                     }
+                    Err(err) if rejects_profile_switch(&err) => {
+                        render_profile_switch_rejected_reply(&profile, &err)
+                    }
                     Err(err) => {
                         let mut states = self.runtime_state.write().await;
-                        states.entry(session_key.to_string()).or_default().profile = Some(profile);
-                        format!("{reply}\n⚠️ Profile file not applied: {err}")
+                        states.entry(session_key.to_string()).or_default().profile =
+                            Some(profile.clone());
+                        drop(states);
+                        format!("{reply}\n[WARN] Profile file not applied: {err}")
                     }
                 };
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
                     .await?;
                 Ok(true)
@@ -751,6 +1562,9 @@ impl Gateway {
                         let mut states = self.runtime_state.write().await;
                         states.entry(session_key.to_string()).or_default().branch =
                             Some(name.clone());
+                        drop(states);
+                        self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                            .await;
                         format!("🌿 Branch context switched to: {}", name)
                     }
                     None => {
@@ -769,18 +1583,13 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::Rollback { steps } => {
-                let mut removed = 0usize;
-                for _ in 0..steps {
-                    if self
-                        .session_manager
-                        .pop_last_message(session_key)
-                        .await
-                        .is_some()
-                    {
-                        removed += 1;
-                    } else {
-                        break;
-                    }
+                let removed = self
+                    .session_manager
+                    .remove_last_messages(session_key, steps)
+                    .await;
+                if removed > 0 {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
                 }
                 self.send_message(
                     &incoming.platform,
@@ -800,13 +1609,27 @@ impl Gateway {
             }
             GatewayCommandResult::BackgroundTask { prompt } => {
                 let handled = self
-                    .handle_background_command(incoming, session_key, &prompt, false)
+                    .handle_background_command(
+                        incoming,
+                        session_key,
+                        &prompt,
+                        false,
+                        dedup_key.as_deref(),
+                        dedup_claim,
+                    )
                     .await?;
                 Ok(handled)
             }
             GatewayCommandResult::BtwTask { prompt } => {
                 let handled = self
-                    .handle_background_command(incoming, session_key, &prompt, true)
+                    .handle_background_command(
+                        incoming,
+                        session_key,
+                        &prompt,
+                        true,
+                        dedup_key.as_deref(),
+                        dedup_claim,
+                    )
                     .await?;
                 Ok(handled)
             }
@@ -819,6 +1642,8 @@ impl Gateway {
                     if state.reasoning { "ON" } else { "OFF" }
                 );
                 drop(states);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -833,47 +1658,92 @@ impl Gateway {
                     .or_default()
                     .service_tier = service_tier.clone();
                 drop(states);
+                self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                    .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
             }
             GatewayCommandResult::Retry => {
-                let mut messages = self.session_manager.get_messages(session_key).await;
-                if matches!(
-                    messages.last().map(|m| m.role),
-                    Some(MessageRole::Assistant)
-                ) {
-                    messages.pop();
-                }
-                if messages.is_empty() {
-                    self.send_message(
-                        &incoming.platform,
-                        &incoming.chat_id,
-                        "No previous message to retry.",
-                        None,
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-                self.session_manager
-                    .replace_messages(session_key, messages.clone())
+                let (turn_completion_tx, turn_completion_rx) = tokio::sync::oneshot::channel();
+                let entry =
+                    QueuedIncoming::from_validated_ingress(incoming.clone(), sender.clone())
+                        .with_turn_kind(QueuedTurnKind::Retry)
+                        .with_dedup_key(dedup_key.clone())
+                        .with_completion_sender(turn_completion_tx);
+                let admission = self
+                    .claim_session_lane(session_key, entry, BusyInputMode::Queue)
                     .await;
-                self.route_non_streaming(incoming, messages, session_key)
-                    .await?;
+                match admission {
+                    BusyAdmission::Claimed {
+                        lease,
+                        mut entry,
+                    } => {
+                        if let Some(mut claim) = dedup_claim.take() {
+                            claim.disarm();
+                        }
+                        entry.clear_completion_sender();
+                        drop(turn_completion_rx);
+                        self.start_turn_chain(lease, entry).await?.into_result()?;
+                    }
+                    BusyAdmission::Queued(decision) => {
+                        if decision.queued {
+                            if let Some(mut claim) = dedup_claim.take() {
+                                claim.disarm();
+                            }
+                        }
+                        if self.config.display.busy_ack_enabled() {
+                            if let Some(ack) = decision.ack {
+                                if let Err(error) = self
+                                    .send_message(
+                                        &incoming.platform,
+                                        &incoming.chat_id,
+                                        &ack,
+                                        None,
+                                    )
+                                    .await
+                                {
+                                    warn!(
+                                        platform = %incoming.platform,
+                                        chat_id = %incoming.chat_id,
+                                        error = %error,
+                                        "failed to send retry queue acknowledgement; queued retry remains owned"
+                                    );
+                                }
+                            }
+                        }
+                        if decision.queued {
+                            let completion = turn_completion_rx
+                                .await
+                                .map_err(|_| {
+                                    GatewayError::Platform(
+                                        "queued retry ended before reporting completion".into(),
+                                    )
+                                })??;
+                            completion.into_result()?;
+                        }
+                    }
+                    BusyAdmission::AtCapacity => {
+                        self.send_message_threaded(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            "Gateway session capacity reached; retry later.",
+                            None,
+                            Self::reply_thread_id(incoming),
+                        )
+                        .await?;
+                    }
+                }
                 Ok(true)
             }
             GatewayCommandResult::Undo => {
-                let mut removed = 0usize;
-                if let Some(last) = self.session_manager.pop_last_message(session_key).await {
-                    removed += 1;
-                    if last.role == MessageRole::Assistant {
-                        if let Some(prev) = self.session_manager.pop_last_message(session_key).await
-                        {
-                            if prev.role == MessageRole::User {
-                                removed += 1;
-                            }
-                        }
-                    }
+                let removed = self
+                    .session_manager
+                    .undo_last_exchange(session_key)
+                    .await;
+                if removed > 0 {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
                 }
                 let reply = if removed == 0 {
                     "Nothing to undo.".to_string()
@@ -950,11 +1820,9 @@ impl Gateway {
                     .get_user_sessions(&incoming.user_id)
                     .await;
                 let matched = sessions.iter().find(|s| {
-                    let key = self.session_manager.compose_session_key(
-                        &s.platform,
-                        &s.chat_id,
-                        &s.user_id,
-                    );
+                    let key = self
+                        .session_manager
+                        .compose_session_key_for_scope(s.conversation_scope());
                     key == session_id || s.id == session_id
                 });
                 let msg = if let Some(target) = matched {
@@ -968,6 +1836,8 @@ impl Gateway {
                         .await;
                     if copied {
                         self.clear_session_boundary_security_state(session_key)
+                            .await;
+                        self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
                             .await;
                         format!(
                             "🔁 Switched to session `{}`.\nLoaded {} message(s) into this chat context.",
@@ -991,6 +1861,7 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::ShowBudget { new_budget } => {
+                let budget_changed = new_budget.is_some();
                 let mut states = self.runtime_state.write().await;
                 let state = states.entry(session_key.to_string()).or_default();
                 let msg = match new_budget {
@@ -1006,6 +1877,10 @@ impl Gateway {
                     },
                 };
                 drop(states);
+                if budget_changed {
+                    self.commit_command_dedup(dedup_key.as_deref(), dedup_claim)
+                        .await;
+                }
                 self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
                     .await?;
                 Ok(true)

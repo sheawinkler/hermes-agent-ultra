@@ -40,6 +40,10 @@ pub mod adapter;
 pub mod agent_rollout;
 pub mod configured;
 pub mod error;
+pub mod eval_ledger;
+pub mod promotion_gate;
+pub mod release_candidate;
+pub mod release_operations;
 pub mod reporter;
 pub mod result;
 pub mod runner;
@@ -51,6 +55,43 @@ pub use adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
 pub use agent_rollout::AgentLoopRollout;
 pub use configured::{ConfiguredBenchmarkAdapter, ConfiguredTask, ConfiguredVerifier};
 pub use error::{EvalError, EvalResult};
+#[cfg(feature = "agent-loop")]
+pub use eval_ledger::ExactEvaluationReceiptEvidence;
+pub use eval_ledger::{
+    BaselineEvidence, EvaluationEvidence, EvaluationLedger, EvaluationReceipt,
+    EvaluationReceiptError, EvaluationReceiptInputs, EvaluationReceiptResult, EvaluatorVersion,
+    EvidenceCount, EvidenceDigest, FixedHoldoutEvidence, LegacyEvaluationDiagnostic,
+    MetricEvidence, PromotionAuthority, ReplayFidelity, ReplayOperationCounts,
+    ReproductionArtifactEvidence, RunExportAuthenticationStatus, RunExportIntegrityStatus,
+    SignatureVerificationEvidence, TerminalValidity, EVALUATION_RECEIPT_DIGEST_ALGORITHM,
+    EVALUATION_RECEIPT_SCHEMA, EVALUATION_RECEIPT_SCHEMA_VERSION,
+};
+pub use promotion_gate::{
+    evaluate_promotion, ExactReplayEvidenceItem, PromotionDecision, PromotionGate,
+    PromotionGateFailure, PromotionGateOutcome, PromotionGateResult, PromotionMetric,
+    PromotionPolicyRequirement, PromotionSupplementaryEvidence, PromotionVerdict, ReleaseBinding,
+    MAXIMUM_ROLLBACK_DRILL_MILLIS_EXCLUSIVE, MINIMUM_SOAK_MILLIS,
+};
+#[cfg(feature = "agent-loop")]
+pub use release_candidate::{
+    exact_replay_evidence_from_verified_p3, verify_release_candidate_receipt,
+};
+pub use release_candidate::{
+    release_candidate_ledger_schema_fingerprint, sign_release_candidate_receipt,
+    AuthenticatedSubject, ExactReplayEvidence, ReleaseCandidateReceipt,
+    ReleaseCandidateReceiptAppendResult, ReleaseCandidateReceiptEnvelope,
+    ReleaseCandidateReceiptError, ReleaseCandidateReceiptInputs, ReleaseCandidateReceiptLedger,
+    ReleaseCandidateReceiptResult, ReleaseCandidateReceiptTrustPolicy, ReleaseDigest,
+    ReleaseHoldoutEvidence, ReleaseMetrics, ReleaseOperationLineage, ReleasePolicyId,
+    ReleasePromotionPolicy, ReleaseReceiptId, ReleaseReceiptScope, ReleaseReproductionEvidence,
+    ReleaseRevisionAlgorithm, ReleaseSecurityEvidence, ReleaseSigningKeyId, ReleaseSource,
+    ReleaseTenantId, ReleaseTrustDecision, VerifiedReleaseCandidateReceipt,
+    RELEASE_CANDIDATE_DIGEST_ALGORITHM, RELEASE_CANDIDATE_LEDGER_SCHEMA_VERSION,
+    RELEASE_CANDIDATE_RECEIPT_ENVELOPE_SCHEMA, RELEASE_CANDIDATE_RECEIPT_ENVELOPE_SCHEMA_VERSION,
+    RELEASE_CANDIDATE_RECEIPT_SCHEMA, RELEASE_CANDIDATE_RECEIPT_SCHEMA_VERSION,
+    RELEASE_CANDIDATE_SIGNATURE_DOMAIN,
+};
+pub use release_operations::{VerifiedRollbackDrillReceipt, VerifiedSoakReceipt};
 pub use reporter::{JsonReporter, Reporter};
 pub use result::{AggregateMetrics, RunRecord, TaskResult, TaskStatus};
 pub use runner::{Runner, RunnerConfig, TaskRollout};

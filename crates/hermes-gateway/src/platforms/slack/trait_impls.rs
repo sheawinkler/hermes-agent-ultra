@@ -22,6 +22,7 @@ impl PlatformAdapter for SlackAdapter {
         {
             debug!(error = %err, "Slack auth scope check skipped");
         }
+        self.start_socket_mode_runtime().await?;
         self.base.mark_running();
         Ok(())
     }
@@ -29,7 +30,7 @@ impl PlatformAdapter for SlackAdapter {
     async fn stop(&self) -> Result<(), GatewayError> {
         info!("Slack adapter stopping");
         self.base.mark_stopped();
-        self.stop_signal.notify_one();
+        self.stop_socket_mode_runtime().await;
         Ok(())
     }
 
@@ -73,6 +74,22 @@ impl PlatformAdapter for SlackAdapter {
         self.upload_file(chat_id, file_path, caption, None).await
     }
 
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        self.upload_file(
+            chat_id,
+            file_path,
+            caption,
+            options.thread_id.as_deref(),
+        )
+        .await
+    }
+
     async fn send_image_url(
         &self,
         chat_id: &str,
@@ -82,6 +99,24 @@ impl PlatformAdapter for SlackAdapter {
         let (blocks, fallback_text) = slack_image_url_blocks(image_url, caption);
         self.post_blocks(chat_id, &blocks, &fallback_text, None)
             .await?;
+        Ok(())
+    }
+
+    async fn send_image_url_with_options(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let (blocks, fallback_text) = slack_image_url_blocks(image_url, caption);
+        self.post_blocks(
+            chat_id,
+            &blocks,
+            &fallback_text,
+            options.thread_id.as_deref(),
+        )
+        .await?;
         Ok(())
     }
 

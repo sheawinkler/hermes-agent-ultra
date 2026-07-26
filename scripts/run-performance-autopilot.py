@@ -32,11 +32,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--contextlattice-cmd",
-        default=(
-            "python3 /Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py "
-            "preflight hermes-agent-ultra runbooks/alpha/objective "
-            "\"hermes-ultra contextlattice intelligence preflight\""
-        ),
+        default='contextlattice_agent_policy_pack --agent "${CONTEXTLATTICE_AGENT_ID:-hermes_ultra_autopilot}" --project hermes-agent-ultra --query "hermes ultra performance objective preflight"',
         help="ContextLattice preflight/intelligence telemetry command",
     )
     parser.add_argument(
@@ -120,22 +116,41 @@ def contextlattice_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
         "warnings": 0,
         "python_fallbacks": 0,
         "route_owner_class": "",
-        "source_counts": {},
-        "queue_pending_total": 0,
+        "retrieval_mode": "",
+        "source_counts": None,
+        "queue_pending_total": None,
     }
     if not payload:
         return summary
     health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
-    summary["healthy"] = bool(health.get("ok"))
+    summary["retrieval_mode"] = str(payload.get("retrieval_mode") or "")
+    summary["healthy"] = bool(health.get("ok", payload.get("ok", False)))
     warnings = payload.get("warnings")
     if isinstance(warnings, list):
         summary["warnings"] = len(warnings)
     retrieval = payload.get("context_pack", {}).get("retrieval")
+    if not isinstance(retrieval, dict):
+        retrieval = payload.get("retrieval")
     if isinstance(retrieval, dict):
+        if "degraded" in retrieval:
+            summary["healthy"] = summary["healthy"] and not bool(retrieval["degraded"])
+        retrieval_warnings = retrieval.get("warnings")
+        if isinstance(retrieval_warnings, list):
+            summary["warnings"] = len(retrieval_warnings)
         summary["route_owner_class"] = str(retrieval.get("route_owner_class") or "")
         source_counts = retrieval.get("source_counts")
         if isinstance(source_counts, dict):
             summary["source_counts"] = source_counts
+        else:
+            top_results = retrieval.get("top_results")
+            if isinstance(top_results, list):
+                counts: dict[str, int] = {}
+                for result in top_results:
+                    if not isinstance(result, dict):
+                        continue
+                    source = str(result.get("source") or "unknown")
+                    counts[source] = counts.get(source, 0) + 1
+                summary["source_counts"] = counts
         fallbacks = retrieval.get("fallback_counts")
         if isinstance(fallbacks, dict):
             summary["python_fallbacks"] = int(fallbacks.get("python_hot_path_total") or 0)
@@ -203,7 +218,7 @@ def build_recommendations(
                 "id": "CONTEXTLATTICE_PREFLIGHT_FAIL",
                 "severity": "P0",
                 "title": "ContextLattice preflight failed",
-                "recommendation": "Run `python3 /Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py preflight hermes-agent-ultra runbooks/alpha/objective` and resolve retrieval/service health before promotion.",
+                "recommendation": "Run `contextlattice_agent_start --soft --compact` and resolve retrieval/service health before promotion.",
             }
         )
     elif not ctx_summary["healthy"]:
@@ -237,7 +252,7 @@ def build_recommendations(
                 "recommendation": "Use broader same-project context-pack and ensure topic rollups/primary stores return at least one grounded hit.",
             }
         )
-    if int(ctx_summary["queue_pending_total"]) > 8:
+    if isinstance(ctx_summary["queue_pending_total"], int) and ctx_summary["queue_pending_total"] > 8:
         recs.append(
             {
                 "id": "CONTEXTLATTICE_QUEUE_PRESSURE",
@@ -390,7 +405,7 @@ def compute_adaptive_indexes(
         and int(ctx_summary["python_fallbacks"]) == 0
     ):
         base_intelligence -= 10.0
-    if int(ctx_summary["queue_pending_total"]) > 8:
+    if isinstance(ctx_summary["queue_pending_total"], int) and ctx_summary["queue_pending_total"] > 8:
         base_intelligence -= 8.0
     base_intelligence = max(0.0, min(100.0, base_intelligence))
 

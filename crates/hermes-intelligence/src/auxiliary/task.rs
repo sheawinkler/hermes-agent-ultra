@@ -83,7 +83,11 @@ impl AuxiliaryTask {
         match self {
             AuxiliaryTask::Title | AuxiliaryTask::Classify => Some(64),
             AuxiliaryTask::WebExtract => Some(2048),
-            AuxiliaryTask::Compression | AuxiliaryTask::FlushMemories => Some(4096),
+            AuxiliaryTask::FlushMemories => Some(4096),
+            // Compression budgets are prompt guidance, not a transport cap:
+            // reasoning models can consume an output cap before producing a
+            // summary, which causes truncated compactions to re-fire.
+            AuxiliaryTask::Compression => None,
             AuxiliaryTask::SkillsHub | AuxiliaryTask::Mcp | AuxiliaryTask::SessionSearch => {
                 Some(512)
             }
@@ -151,6 +155,15 @@ mod tests {
     fn vision_requires_vision_capability() {
         assert!(AuxiliaryTask::Vision.requires_vision());
         assert!(!AuxiliaryTask::Compression.requires_vision());
+    }
+
+    #[test]
+    fn compression_leaves_output_limit_to_the_provider() {
+        assert_eq!(AuxiliaryTask::Compression.default_max_tokens(), None);
+        assert_eq!(
+            AuxiliaryTask::FlushMemories.default_max_tokens(),
+            Some(4096)
+        );
     }
 
     #[test]

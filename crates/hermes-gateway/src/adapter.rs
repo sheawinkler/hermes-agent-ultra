@@ -162,16 +162,26 @@ impl BasePlatformAdapter {
 
     /// Build a `reqwest::Client` configured with proxy settings if any.
     pub fn build_client(&self) -> Result<Client, GatewayError> {
-        let mut builder = platform_http_client_builder();
+        self.build_client_from(platform_http_client_builder())
+    }
 
-        if let Some(ref http_proxy) = self.proxy.http_proxy {
+    /// Build a client that ignores ambient proxy variables.
+    ///
+    /// Adapters whose other transports cannot honor ambient proxy settings use
+    /// this to prevent split-routing REST and long-lived connections.
+    pub fn build_client_without_system_proxy(&self) -> Result<Client, GatewayError> {
+        self.build_client_from(platform_http_client_builder().no_proxy())
+    }
+
+    fn build_client_from(&self, mut builder: ClientBuilder) -> Result<Client, GatewayError> {
+        if let Some(http_proxy) = &self.proxy.http_proxy {
             let proxy = reqwest::Proxy::all(http_proxy).map_err(|e| {
                 GatewayError::ConnectionFailed(format!("Invalid HTTP proxy: {}", e))
             })?;
             builder = builder.proxy(proxy);
         }
 
-        if let Some(ref socks_proxy) = self.proxy.socks_proxy {
+        if let Some(socks_proxy) = &self.proxy.socks_proxy {
             let proxy = reqwest::Proxy::all(socks_proxy).map_err(|e| {
                 GatewayError::ConnectionFailed(format!("Invalid SOCKS proxy: {}", e))
             })?;

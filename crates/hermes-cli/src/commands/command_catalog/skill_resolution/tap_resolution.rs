@@ -8,12 +8,15 @@ async fn resolve_skill_via_taps(
         let Some(spec) = parse_skill_tap_spec(tap) else {
             continue;
         };
-        let branch = match github_default_branch(client, &spec.repo).await {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let tree = match github_repo_tree(client, &spec.repo, &branch).await {
-            Ok(v) => v,
+        let immutable_revision =
+            match github_resolve_immutable_revision(client, &spec.repo, spec.requested_ref.as_deref())
+                .await
+            {
+                Ok(revision) => revision,
+                Err(_) => continue,
+            };
+        let tree = match github_repo_tree(client, &spec.repo, &immutable_revision).await {
+            Ok(tree) => tree,
             Err(_) => continue,
         };
         let path_prefix = if spec.path.is_empty() {
@@ -37,7 +40,7 @@ async fn resolve_skill_via_taps(
             if skill_name.eq_ignore_ascii_case(requested_skill) {
                 return Ok(ResolvedSkillSource {
                     repo: spec.repo.clone(),
-                    branch,
+                    immutable_revision,
                     skill_dir: skill_dir.to_string(),
                 });
             }
@@ -71,11 +74,11 @@ async fn resolve_skill_in_repo(
     requested_skill: &str,
     preferred_prefix: Option<&str>,
 ) -> Result<ResolvedSkillSource, AgentError> {
-    let branch = github_default_branch(client, repo).await?;
-    let tree = github_repo_tree(client, repo, &branch).await?;
+    let immutable_revision = github_resolve_immutable_revision(client, repo, None).await?;
+    let tree = github_repo_tree(client, repo, &immutable_revision).await?;
 
     let preferred_prefix = preferred_prefix
-        .map(|v| v.trim_matches('/').to_string())
+        .map(|value| value.trim_matches('/').to_string())
         .unwrap_or_default();
     let mut exact_candidates: Vec<String> = Vec::new();
     let mut fuzzy_candidates: std::collections::BTreeSet<String> =
@@ -134,7 +137,7 @@ async fn resolve_skill_in_repo(
 
     Ok(ResolvedSkillSource {
         repo: repo.to_string(),
-        branch,
+        immutable_revision,
         skill_dir,
     })
 }
@@ -153,12 +156,18 @@ async fn search_skills_via_taps(
         let Some(spec) = parse_skill_tap_spec(tap) else {
             continue;
         };
-        let branch = match github_default_branch(client, &spec.repo).await {
-            Ok(v) => v,
+        let immutable_revision = match github_resolve_immutable_revision(
+            client,
+            &spec.repo,
+            spec.requested_ref.as_deref(),
+        )
+        .await
+        {
+            Ok(revision) => revision,
             Err(_) => continue,
         };
-        let tree = match github_repo_tree(client, &spec.repo, &branch).await {
-            Ok(v) => v,
+        let tree = match github_repo_tree(client, &spec.repo, &immutable_revision).await {
+            Ok(tree) => tree,
             Err(_) => continue,
         };
         let path_prefix = if spec.path.is_empty() {
@@ -195,7 +204,13 @@ async fn fetch_skill_files_from_github(
     client: &reqwest::Client,
     source: &ResolvedSkillSource,
 ) -> Result<Vec<(String, Bytes)>, AgentError> {
-    let tree = github_repo_tree(client, &source.repo, &source.branch).await?;
+    if !is_immutable_git_revision(&source.immutable_revision) {
+        return Err(AgentError::Config(format!(
+            "Refusing GitHub file fetch for non-immutable revision '{}'",
+            source.immutable_revision
+        )));
+    }
+    let tree = github_repo_tree(client, &source.repo, &source.immutable_revision).await?;
     let prefix = format!("{}/", source.skill_dir.trim_matches('/'));
     let mut files = Vec::new();
 
@@ -212,8 +227,11 @@ async fn fetch_skill_files_from_github(
             .collect::<Vec<_>>()
             .join("/");
         let raw_url = format!(
-            "https://raw.githubusercontent.com/{}/{}/{}",
-            source.repo, source.branch, raw_path
+            "{}/{}/{}/{}",
+            github_raw_base(),
+            source.repo,
+            source.immutable_revision,
+            raw_path
         );
         let bytes = match client
             .get(&raw_url)
@@ -235,10 +253,10 @@ async fn fetch_skill_files_from_github(
                     .join("/");
                 let api_url = format!(
                     "{}/repos/{}/contents/{}?ref={}",
-                    GITHUB_API_BASE,
+                    github_api_base(),
                     source.repo,
                     encoded_path,
-                    urlencoding::encode(&source.branch)
+                    urlencoding::encode(&source.immutable_revision)
                 );
                 let resp = github_request(client, &api_url, "application/vnd.github.v3.raw")
                     .timeout(std::time::Duration::from_secs(25))
@@ -337,7 +355,17 @@ fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, AgentEr
                 if file.is_dir() {
                     continue;
                 }
+                if file
+                    .unix_mode()
+                    .is_some_and(|mode| mode & 0o170000 != 0o100000)
+                {
+                    return Err(AgentError::Config(format!(
+                        "Refusing non-regular ClawHub zip entry '{}'",
+                        file.name()
+                    )));
+                }
                 let raw_name = file.name().replace('\\', "/");
+                ensure_safe_relative_path(&raw_name)?;
                 let segments: Vec<&str> = raw_name.split('/').filter(|s| !s.is_empty()).collect();
                 let normalized = if segments.is_empty() {
                     file.name().to_string()
@@ -367,15 +395,24 @@ fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, AgentEr
                 let mut entry = entry.map_err(|e| {
                     AgentError::Config(format!("Failed to read ClawHub tar entry: {}", e))
                 })?;
-                if !entry.header().entry_type().is_file() {
+                let entry_type = entry.header().entry_type();
+                if entry_type.is_dir() {
                     continue;
                 }
-                let path = entry
+                if !entry_type.is_file() {
+                    return Err(AgentError::Config(
+                        "Refusing non-regular ClawHub tar entry".to_string(),
+                    ));
+                }
+                let archive_path = entry
                     .path()
-                    .map_err(|e| AgentError::Config(format!("Invalid tar entry path: {}", e)))?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let normalized = path.split('/').skip(1).collect::<Vec<_>>().join("/");
+                    .map_err(|e| AgentError::Config(format!("Invalid tar entry path: {}", e)))?;
+                let path = archive_path.to_str().ok_or_else(|| {
+                    AgentError::Config("ClawHub tar entry path must be UTF-8".to_string())
+                })?;
+                let raw_path = path.replace('\\', "/");
+                ensure_safe_relative_path(&raw_path)?;
+                let normalized = raw_path.split('/').skip(1).collect::<Vec<_>>().join("/");
                 if normalized.is_empty() {
                     continue;
                 }

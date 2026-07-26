@@ -45,6 +45,12 @@ fn build_webhook_config(platform_cfg: &PlatformConfig, secret: String) -> Webhoo
             .and_then(|v| v.as_u64())
             .and_then(|v| usize::try_from(v).ok())
             .unwrap_or(1_048_576),
+        script_timeout_seconds: platform_cfg
+            .extra
+            .get("script_timeout_seconds")
+            .and_then(|v| v.as_u64())
+            .filter(|v| *v > 0)
+            .unwrap_or(30),
         routes,
     }
 }
@@ -74,7 +80,10 @@ async fn run_api_server_inbound_loop(
             thread_id: None,
             is_dm: true,
         };
-        if let Err(err) = gateway.route_message(&incoming).await {
+        if let Err(err) = gateway
+            .route_message_from_sender(&incoming, GatewayIncomingSender::unknown())
+            .await
+        {
             tracing::warn!("Failed to route api_server message: {}", err);
         }
     }
@@ -94,7 +103,10 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
             thread_id: None,
             is_dm: true,
         };
-        if let Err(err) = gateway.route_message(&incoming).await {
+        if let Err(err) = gateway
+            .route_message_from_sender(&incoming, GatewayIncomingSender::unknown())
+            .await
+        {
             tracing::warn!("Failed to route webhook message: {}", err);
         }
     }
@@ -103,6 +115,7 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
 #[cfg(any(
     feature = "gateway-dingtalk",
     feature = "gateway-ntfy",
+    feature = "gateway-slack",
     feature = "gateway-weixin"
 ))]
 async fn run_gateway_incoming_loop(
@@ -111,9 +124,97 @@ async fn run_gateway_incoming_loop(
     platform: &'static str,
 ) {
     while let Some(incoming) = rx.recv().await {
-        if let Err(err) = gateway.route_message(&incoming).await {
+        if let Err(err) = gateway
+            .route_message_from_sender(&incoming, GatewayIncomingSender::unknown())
+            .await
+        {
             tracing::warn!("Failed to route {} message: {}", platform, err);
         }
+    }
+}
+
+#[cfg(feature = "gateway-discord")]
+fn discord_bot_policy_for_platform(
+    platform_cfg: &PlatformConfig,
+) -> hermes_gateway::platforms::discord::DiscordBotMessagePolicy {
+    use hermes_gateway::platforms::discord::DiscordBotMessagePolicy;
+
+    extra_string(platform_cfg, "allow_bots")
+        .as_deref()
+        .map(|value| DiscordBotMessagePolicy::parse(Some(value)))
+        .unwrap_or_else(|| DiscordBotMessagePolicy::from_lookup(|name| std::env::var(name).ok()))
+}
+
+#[cfg(feature = "gateway-discord")]
+fn discord_proxy_config(
+    platform_cfg: &PlatformConfig,
+    global_proxy: Option<&hermes_config::ProxyConfig>,
+) -> hermes_gateway::adapter::AdapterProxyConfig {
+    let mut proxy = global_proxy
+        .map(|proxy| hermes_gateway::adapter::AdapterProxyConfig {
+            http_proxy: proxy.http_proxy.clone(),
+            socks_proxy: proxy.socks_proxy.clone(),
+        })
+        .unwrap_or_default();
+
+    if let Some(http_proxy) = extra_string(platform_cfg, "http_proxy") {
+        proxy.http_proxy = Some(http_proxy);
+    }
+    if let Some(socks_proxy) = extra_string(platform_cfg, "socks_proxy") {
+        proxy.socks_proxy = Some(socks_proxy);
+    }
+    if let Some(discord_proxy) = extra_string(platform_cfg, "proxy") {
+        proxy = hermes_gateway::adapter::AdapterProxyConfig::default();
+        if discord_proxy
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("socks")
+        {
+            proxy.socks_proxy = Some(discord_proxy);
+        } else {
+            proxy.http_proxy = Some(discord_proxy);
+        }
+    }
+
+    proxy
+}
+
+#[cfg(feature = "gateway-discord")]
+fn build_discord_config(
+    platform_cfg: &PlatformConfig,
+    global_proxy: Option<&hermes_config::ProxyConfig>,
+    token: String,
+) -> DiscordConfig {
+    DiscordConfig {
+        token,
+        application_id: extra_string(platform_cfg, "application_id"),
+        proxy: discord_proxy_config(platform_cfg, global_proxy),
+        api_base_url: extra_string(platform_cfg, "api_base_url"),
+        gateway_url: extra_string(platform_cfg, "gateway_url"),
+        liveness_interval_seconds: platform_cfg
+            .extra
+            .get("liveness_interval_seconds")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(60.0),
+        liveness_failure_threshold: platform_cfg
+            .extra
+            .get("liveness_failure_threshold")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(3),
+        require_mention: platform_cfg.require_mention.unwrap_or(true),
+        intents: platform_cfg
+            .extra
+            .get("intents")
+            .and_then(|v| v.as_u64())
+            .unwrap_or((1 << 0) | (1 << 9) | (1 << 12) | (1 << 15)),
+        bot_policy: discord_bot_policy_for_platform(platform_cfg),
+        reply_to_mode: discord_reply_to_mode_string(platform_cfg)
+            .unwrap_or_else(|| "first".to_string()),
+        channel_controls: DiscordChannelControls::from_extra(&platform_cfg.extra),
+        channel_skill_bindings: DiscordChannelSkillBinding::list_from_json(
+            platform_cfg.extra.get("channel_skill_bindings"),
+        ),
     }
 }
 
@@ -121,9 +222,19 @@ async fn register_gateway_adapters(
     config: &hermes_config::GatewayConfig,
     gateway: Arc<Gateway>,
     sidecar_tasks: &mut Vec<tokio::task::JoinHandle<()>>,
-) -> Result<(), AgentError> {
+    discord_route_spool_path: &Path,
+    cron_scheduler: Arc<CronScheduler>,
+    execution_mode: hermes_core::ResolvedExecutionMode,
+) -> Result<Option<DiscordIngressShutdown>, AgentError> {
     report_uncompiled_gateway_adapters(config);
-    let _ = (&gateway, &sidecar_tasks);
+    let _ = (
+        &gateway,
+        &sidecar_tasks,
+        discord_route_spool_path,
+        &cron_scheduler,
+        execution_mode,
+    );
+    let mut discord_ingress_shutdown = None;
 
     #[cfg(feature = "gateway-telegram")]
     if let Some(platform_cfg) = config.platforms.get("telegram") {
@@ -193,37 +304,88 @@ async fn register_gateway_adapters(
     if let Some(platform_cfg) = config.platforms.get("discord") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
-                let discord_cfg = DiscordConfig {
-                    token,
-                    application_id: extra_string(platform_cfg, "application_id"),
-                    proxy: Default::default(),
-                    api_base_url: extra_string(platform_cfg, "api_base_url"),
-                    liveness_interval_seconds: platform_cfg
-                        .extra
-                        .get("liveness_interval_seconds")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(60.0),
-                    liveness_failure_threshold: platform_cfg
-                        .extra
-                        .get("liveness_failure_threshold")
-                        .and_then(|v| v.as_u64())
-                        .and_then(|v| u32::try_from(v).ok())
-                        .unwrap_or(3),
-                    require_mention: platform_cfg.require_mention.unwrap_or(false),
-                    intents: platform_cfg
-                        .extra
-                        .get("intents")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or((1 << 0) | (1 << 9) | (1 << 15)),
-                    reply_to_mode: discord_reply_to_mode_string(platform_cfg)
-                        .unwrap_or_else(|| "first".to_string()),
-                    channel_controls: DiscordChannelControls::from_extra(&platform_cfg.extra),
-                    channel_skill_bindings: DiscordChannelSkillBinding::list_from_json(
-                        platform_cfg.extra.get("channel_skill_bindings"),
-                    ),
-                };
-                match DiscordAdapter::new(discord_cfg) {
-                    Ok(adapter) => gateway.register_adapter("discord", Arc::new(adapter)).await,
+                let discord_cfg = build_discord_config(platform_cfg, config.proxy.as_ref(), token);
+                let spool = DiscordRouteSpool::load(discord_route_spool_path)?;
+                let pre_policy_recovery = spool.recoverable_pre_policy_entries();
+                write_discord_route_spool(discord_route_spool_path, &spool)?;
+                let discord_state_root = discord_route_spool_path.parent().ok_or_else(|| {
+                    AgentError::Io(format!(
+                        "Discord route spool has no state directory: {}",
+                        discord_route_spool_path.display()
+                    ))
+                })?;
+                match DiscordAdapter::new_with_state_root(discord_cfg, discord_state_root) {
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        let (tx, rx) = tokio::sync::mpsc::channel(512);
+                        let (journal_tx, journal_rx) = tokio::sync::mpsc::channel(64);
+                        adapter.set_durable_inbound_sender(tx, journal_tx).await;
+                        adapter
+                            .queue_recovered_pre_policy_ingress(pre_policy_recovery)
+                            .map_err(|error| {
+                                AgentError::Gateway(format!(
+                                    "queue recovered pre-policy Discord ingress: {error}"
+                                ))
+                            })?;
+                        // Only explicit post-policy retry-safe records enter
+                        // the CLI route loop. Raw records re-enter the
+                        // adapter's ordered resolver after READY.
+                        gateway.register_adapter("discord", adapter.clone()).await;
+                        let ingress_adapter = Arc::clone(&adapter);
+                        gateway
+                            .register_accepted_ingress_preparer(
+                                "discord",
+                                Arc::new(move |incoming, sender| {
+                                    let adapter = Arc::clone(&ingress_adapter);
+                                    Box::pin(async move {
+                                        let thread_id = adapter
+                                            .prepare_accepted_ingress(
+                                                incoming,
+                                                sender.discord_message_is_reply(),
+                                            )
+                                            .await?;
+                                        Ok(hermes_gateway::gateway::AcceptedIngressPreparation {
+                                            thread_id,
+                                        })
+                                    })
+                                }),
+                            )
+                            .await;
+                        let gateway = gateway.clone();
+                        let spool_path = discord_route_spool_path.to_path_buf();
+                        let task_spool_path = spool_path.clone();
+                        let recovery = Arc::new(DiscordIngressRecovery::default());
+                        let task_recovery = Arc::clone(&recovery);
+                        let spool_write_fence = Arc::new(DiscordSpoolWriteFence::default());
+                        let task_spool_write_fence = Arc::clone(&spool_write_fence);
+                        let (intake_done_tx, intake_done) = tokio::sync::watch::channel(false);
+                        let (cleanup_tx, cleanup_supervisor, cleanup_supervisor_done) =
+                            start_discord_ingress_cleanup_supervisor();
+                        sidecar_tasks.push(cleanup_supervisor);
+                        let task = tokio::spawn(async move {
+                            run_discord_incoming_loop(
+                                gateway,
+                                rx,
+                                journal_rx,
+                                task_spool_path,
+                                spool,
+                                intake_done_tx,
+                                task_recovery,
+                                task_spool_write_fence,
+                            )
+                            .await;
+                        });
+                        discord_ingress_shutdown = Some(DiscordIngressShutdown {
+                            adapter,
+                            task: Some(task),
+                            intake_done,
+                            spool_path,
+                            recovery,
+                            spool_write_fence,
+                            cleanup_tx: Some(cleanup_tx),
+                            cleanup_supervisor_done: Some(cleanup_supervisor_done),
+                        });
+                    }
                     Err(e) => println!("Discord enabled but failed to initialize: {}", e),
                 }
             } else {
@@ -251,7 +413,18 @@ async fn register_gateway_adapters(
                     proxy: Default::default(),
                 };
                 match SlackAdapter::new(slack_cfg) {
-                    Ok(adapter) => gateway.register_adapter("slack", Arc::new(adapter)).await,
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        if adapter.config().socket_mode {
+                            let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                            adapter.set_inbound_sender(tx).await;
+                            let gw_clone = gateway.clone();
+                            sidecar_tasks.push(tokio::spawn(async move {
+                                run_gateway_incoming_loop(gw_clone, rx, "slack").await;
+                            }));
+                        }
+                        gateway.register_adapter("slack", adapter).await;
+                    }
                     Err(e) => println!("Slack enabled but failed to initialize: {}", e),
                 }
             } else {
@@ -506,7 +679,13 @@ async fn register_gateway_adapters(
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
                             while let Some(incoming) = rx.recv().await {
-                                if let Err(err) = gw_clone.route_message(&incoming).await {
+                                if let Err(err) = gw_clone
+                                    .route_message_from_sender(
+                                        &incoming,
+                                        GatewayIncomingSender::unknown(),
+                                    )
+                                    .await
+                                {
                                     tracing::warn!(
                                         "Failed to route wecom_callback message: {}",
                                         err
@@ -744,7 +923,10 @@ async fn register_gateway_adapters(
     {
         if platform_cfg.enabled {
             let api_cfg = build_api_server_config(platform_cfg);
-            let adapter = Arc::new(ApiServerAdapter::new(api_cfg.clone()));
+            let adapter = Arc::new(ApiServerAdapter::new(
+                api_cfg.clone(),
+                cron_scheduler.clone(),
+            ));
             let (tx, rx) = mpsc::channel::<ApiInboundRequest>(256);
             adapter.set_inbound_sender(tx).await;
             gateway.register_adapter("api_server", adapter).await;
@@ -759,7 +941,66 @@ async fn register_gateway_adapters(
         }
     }
 
-    Ok(())
+    Ok(discord_ingress_shutdown)
+}
+
+#[cfg(all(test, feature = "gateway-discord"))]
+mod discord_bot_policy_wiring_tests {
+    use super::*;
+
+    #[test]
+    fn configured_allow_bots_drives_discord_runtime_policy_without_environment() {
+        let mut platform = PlatformConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        platform.extra.insert(
+            "allow_bots".to_string(),
+            serde_json::Value::String("mentions".to_string()),
+        );
+
+        let config = build_discord_config(&platform, None, "test-token".to_string());
+        assert_eq!(
+            config.bot_policy,
+            hermes_gateway::platforms::discord::DiscordBotMessagePolicy::Mentions
+        );
+    }
+
+    #[test]
+    fn discord_require_mention_defaults_true_and_honors_explicit_override() {
+        let mut platform = PlatformConfig::default();
+        assert!(build_discord_config(&platform, None, "test-token".to_string()).require_mention);
+
+        platform.require_mention = Some(false);
+        assert!(!build_discord_config(&platform, None, "test-token".to_string()).require_mention);
+    }
+
+    #[test]
+    fn discord_proxy_precedence_is_platform_then_global() {
+        let mut platform = PlatformConfig::default();
+        let global = hermes_config::ProxyConfig {
+            http_proxy: Some("http://global-proxy:8080".to_string()),
+            socks_proxy: None,
+        };
+        let global_config =
+            build_discord_config(&platform, Some(&global), "test-token".to_string());
+        assert_eq!(
+            global_config.proxy.http_proxy.as_deref(),
+            Some("http://global-proxy:8080")
+        );
+
+        platform.extra.insert(
+            "proxy".to_string(),
+            serde_json::Value::String("socks5://discord-proxy:1080".to_string()),
+        );
+        let discord_config =
+            build_discord_config(&platform, Some(&global), "test-token".to_string());
+        assert!(discord_config.proxy.http_proxy.is_none());
+        assert_eq!(
+            discord_config.proxy.socks_proxy.as_deref(),
+            Some("socks5://discord-proxy:1080")
+        );
+    }
 }
 
 #[cfg(feature = "gateway-telegram")]
@@ -797,6 +1038,11 @@ fn telegram_polling_should_pause_for_reconnect(consecutive_errors: u64) -> bool 
 }
 
 #[cfg(feature = "gateway-telegram")]
+fn telegram_gateway_sender(msg: &TelegramIncomingMessage) -> GatewayIncomingSender {
+    GatewayIncomingSender::from_platform_bot_flag(msg.is_bot)
+}
+
+#[cfg(feature = "gateway-telegram")]
 fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMessage {
     let text = msg.text.unwrap_or_else(|| {
         if msg.is_voice {
@@ -816,10 +1062,7 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
         .unwrap_or_else(|| "unknown".to_string());
 
     let thread_id = telegram_routable_topic_thread(msg.message_thread_id);
-    let chat_id = match thread_id {
-        Some(thread_id) => format!("{}:{}", msg.chat_id, thread_id),
-        _ => msg.chat_id.to_string(),
-    };
+    let chat_id = msg.chat_id.to_string();
 
     GatewayIncomingMessage {
         platform: "telegram".to_string(),
@@ -834,8 +1077,9 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
 
 #[cfg(feature = "gateway-telegram")]
 async fn route_telegram_message(gateway: &Gateway, msg: TelegramIncomingMessage) {
+    let sender = telegram_gateway_sender(&msg);
     let incoming = telegram_gateway_message(msg);
-    if let Err(err) = gateway.route_message(&incoming).await {
+    if let Err(err) = gateway.route_message_from_sender(&incoming, sender).await {
         tracing::warn!("Failed to route telegram message: {}", err);
     }
 }

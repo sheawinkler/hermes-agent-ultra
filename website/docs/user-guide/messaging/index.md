@@ -6,9 +6,9 @@ description: "Chat with Hermes from Telegram, Discord, Slack, WhatsApp, Signal, 
 
 # Messaging Gateway
 
-Chat with Hermes from Telegram, Discord, Slack, WhatsApp, Signal, SMS, Email, Home Assistant, Mattermost, Matrix, DingTalk, Feishu/Lark, WeCom, Weixin, BlueBubbles (iMessage), QQ, Yuanbao, Microsoft Teams, ntfy, or your browser. The gateway is a single background process that connects to all your configured platforms, handles sessions, runs cron jobs, and delivers voice messages.
+Chat with Hermes from Telegram, Discord, Slack, WhatsApp, Signal, SMS, Email, Home Assistant, Mattermost, Matrix, DingTalk, Feishu/Lark, WeCom, Weixin, BlueBubbles (iMessage), Yuanbao, Microsoft Teams, ntfy, or your browser — and push outbound notifications via adapters such as **QQ** (send-only; no inbound QQ WebSocket consumer). The gateway is a single background process that connects to configured platforms, handles sessions, runs cron jobs, and can deliver `text_to_speech` media. Inbound audio may be labeled `[transcription_candidate]` for the model; STT runs only if the callable `transcription` tool is invoked.
 
-For the full voice feature set — including CLI microphone mode, spoken replies in messaging, and Discord voice-channel conversations — see [Voice Mode](/docs/user-guide/features/voice-mode) and [Use Voice Mode with Hermes](/docs/guides/use-voice-mode-with-hermes).
+Shipped voice-related surfaces are `text_to_speech` (validated media file; gateways may attach on the current turn), the callable `transcription` tool (OpenAI/Nous-managed, Groq, Mistral — not auto-STT on every voice note), and status-only `/voice`. There is no interactive CLI microphone mode, no automatic spoken-reply engine, and no Discord voice-channel join/listen/speak. See [Voice Mode](/docs/user-guide/features/voice-mode) and [Voice & TTS](/docs/user-guide/features/tts).
 
 ## Platform Comparison
 
@@ -31,12 +31,12 @@ For the full voice feature set — including CLI microphone mode, spoken replies
 | WeCom Callback | — | — | — | — | — | — | — |
 | Weixin | ✅ | ✅ | ✅ | — | — | ✅ | ✅ |
 | BlueBubbles | — | ✅ | ✅ | — | ✅ | ✅ | — |
-| QQ | ✅ | ✅ | ✅ | — | — | ✅ | — |
+| QQ | — | ✅ out | — | — | — | — | — |
 | Yuanbao | ✅ | ✅ | ✅ | — | — | ✅ | ✅ |
 | Microsoft Teams | — | ✅ | — | ✅ | — | ✅ | — |
 | ntfy | — | — | — | — | — | — | — |
 
-**Voice** = TTS audio replies and/or voice message transcription. **Images** = send/receive images. **Files** = send/receive file attachments. **Threads** = threaded conversations. **Reactions** = emoji reactions on messages. **Typing** = typing indicator while processing. **Streaming** = progressive message updates via editing.
+**Voice** = outbound `text_to_speech` media attachment and/or inbound audio that may carry a `[transcription_candidate]` hint (transcript only if `transcription` is called) — **not** live voice-channel audio, deterministic auto-STT, or always-on spoken replies. **Images** = send/receive images (**QQ: outbound image send only** — no inbound QQ chat consumer). **Files** = send/receive file attachments. **Threads** = threaded conversations. **Reactions** = emoji reactions on messages. **Typing** = typing indicator while processing. **Streaming** = progressive message updates via editing. **QQ** is outbound text/markdown/image delivery when invoked; inbound WebSocket chat is unsupported — see [QQ Bot](qqbot.md).
 
 ## Architecture
 
@@ -144,7 +144,7 @@ hermes gateway status --system         # Linux only: inspect the system service 
 | `/usage` | Show token usage for this session |
 | `/insights [days]` | Show usage insights and analytics |
 | `/reasoning [level\|show\|hide]` | Change reasoning effort or toggle reasoning display |
-| `/voice [on\|off\|tts\|join\|leave\|status]` | Control messaging voice replies and Discord voice-channel behavior |
+| `/voice` | Fixed status only — no separate interactive voice engine is active (does not inspect TTS/STT config, toggle spoken replies, or Discord VC) |
 | `/rollback [number]` | List or restore filesystem checkpoints |
 | `/background <prompt>` | Run a prompt in a separate background session |
 | `/reload-mcp` | Reload MCP servers from config |
@@ -245,7 +245,7 @@ display:
 
 The first time you message a busy agent on any platform, Hermes appends a one-line reminder to the busy-ack explaining the knob (`"💡 First-time tip — …"`). The reminder fires once per install — a flag under `onboarding.seen.busy_input_prompt` latches it. Delete that key to see the tip again.
 
-If you find the busy-ack noisy — especially with voice input or rapid-fire messages — set `display.busy_ack_enabled: false`. Your input is still queued/steered/interrupts as normal, only the chat reply is silenced.
+If you find the busy-ack noisy — especially with rapid-fire messages or frequent voice-note uploads — set `display.busy_ack_enabled: false`. Your input is still queued/steered/interrupts as normal, only the chat reply is silenced.
 
 ## Tool Progress Notifications
 

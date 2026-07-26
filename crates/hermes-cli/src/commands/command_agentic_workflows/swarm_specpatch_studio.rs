@@ -425,158 +425,358 @@ async fn handle_heatmap_command(app: &mut App, args: &[&str]) -> Result<CommandR
     Ok(CommandResult::Handled)
 }
 
-fn read_replay_export_rows(path: &Path) -> Result<Vec<serde_json::Value>, AgentError> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| AgentError::Io(format!("Failed to read {}: {}", path.display(), e)))?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-        AgentError::Config(format!(
-            "Failed to parse replay export {}: {}",
-            path.display(),
-            e
+const STUDIO_REPLAY_USAGE: &str =
+    "Usage: /studio replay [status|verify <PATH>|diff <EXPORT_A> <EXPORT_B>]";
+
+fn canonical_authoritative_run_export_path(app: &App, raw: &str) -> Result<PathBuf, AgentError> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err(AgentError::Config(
+            "authoritative export path must not be empty".to_string(),
+        ));
+    }
+    let export_dir = authoritative_run_export_dir(&app.state_root);
+    let canonical_export_dir = std::fs::canonicalize(&export_dir).map_err(|error| {
+        AgentError::Io(format!(
+            "could not resolve authoritative export directory {}: {}",
+            export_dir.display(),
+            error
         ))
     })?;
-    Ok(parsed
-        .get("rows")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default())
+    let supplied = PathBuf::from(raw);
+    let candidate = if supplied.is_absolute() {
+        supplied
+    } else {
+        std::fs::canonicalize(&supplied)
+            .unwrap_or_else(|_| canonical_export_dir.join(supplied))
+    };
+    let canonical = std::fs::canonicalize(&candidate).map_err(|error| {
+        AgentError::Io(format!(
+            "could not resolve authoritative export path {}: {}",
+            candidate.display(),
+            error
+        ))
+    })?;
+    if canonical.parent() != Some(canonical_export_dir.as_path())
+        || !canonical
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".run.json"))
+    {
+        return Err(AgentError::Config(format!(
+            "export path must be a canonical run-record-v1 export under {}",
+            canonical_export_dir.display()
+        )));
+    }
+    Ok(canonical)
+}
+
+fn verify_canonical_run_export(
+    app: &App,
+    raw: &str,
+) -> Result<(PathBuf, hermes_agent::run_export::VerifiedRunExport), AgentError> {
+    let path = canonical_authoritative_run_export_path(app, raw)?;
+    let verified = hermes_agent::run_export::verify_run_export(&path).map_err(|error| {
+        AgentError::Config(format!(
+            "authoritative run export verification rejected {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    let expected_filename = format!("{}.run.json", verified.run_id);
+    if path.file_name().and_then(|name| name.to_str()) != Some(expected_filename.as_str()) {
+        return Err(AgentError::Config(format!(
+            "canonical export filename does not bind verified run ID {}",
+            verified.run_id
+        )));
+    }
+    Ok((path, verified))
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn verified_run_export_event_hashes(
+    path: &Path,
+    verified: &hermes_agent::run_export::VerifiedRunExport,
+) -> Result<HashSet<String>, AgentError> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|error| AgentError::Io(format!("Failed to read {}: {}", path.display(), error)))?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|error| {
+        AgentError::Config(format!(
+            "verified export changed before diff parsing {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    let expected_run_id = verified.run_id.to_string();
+    if parsed.get("complete").and_then(|value| value.as_bool()) != Some(true)
+        || parsed
+            .pointer("/header/run_id")
+            .and_then(|value| value.as_str())
+            != Some(expected_run_id.as_str())
+        || parsed
+            .pointer("/digest/value")
+            .and_then(|value| value.as_str())
+            != Some(verified.digest.as_str())
+        || parsed.get("total_event_count").and_then(|value| value.as_u64())
+            != Some(verified.event_count)
+    {
+        return Err(AgentError::Config(format!(
+            "verified export metadata changed before diff parsing: {}",
+            path.display()
+        )));
+    }
+    let events = parsed
+        .get("events")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            AgentError::Config(format!(
+                "verified export has no complete event array: {}",
+                path.display()
+            ))
+        })?;
+    if events.is_empty()
+        || u64::try_from(events.len()).ok() != Some(verified.event_count)
+    {
+        return Err(AgentError::Config(format!(
+            "verified export event count is empty or inconsistent: {}",
+            path.display()
+        )));
+    }
+    let mut hashes = HashSet::with_capacity(events.len());
+    for event in events {
+        let hash = event.get("event_hash").and_then(|value| value.as_str()).ok_or_else(|| {
+            AgentError::Config(format!(
+                "verified export event lacks an event hash: {}",
+                path.display()
+            ))
+        })?;
+        if !is_sha256_hex(hash) || !hashes.insert(hash.to_string()) {
+            return Err(AgentError::Config(format!(
+                "verified export event hashes are incomplete or duplicated: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(hashes)
 }
 
 async fn handle_studio_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() {
-        emit_command_output(
-            app,
-            "Usage: /studio replay [status|verify [path]|diff <export_a.json> <export_b.json>]",
-        );
+        emit_command_output(app, STUDIO_REPLAY_USAGE);
         return Ok(CommandResult::Handled);
     }
     let section = args[0].trim().to_ascii_lowercase();
     if section != "replay" {
-        emit_command_output(
-            app,
-            "Usage: /studio replay [status|verify [path]|diff <export_a.json> <export_b.json>]",
-        );
+        emit_command_output(app, STUDIO_REPLAY_USAGE);
         return Ok(CommandResult::Handled);
     }
     let action = args
         .get(1)
-        .map(|v| v.trim().to_ascii_lowercase())
+        .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_else(|| "status".to_string());
     match action.as_str() {
         "status" => {
-            let replay_path = replay_log_path_for_session(&app.session_id);
-            let export_dir = hermes_config::hermes_home()
-                .join("logs")
-                .join("replay")
-                .join("exports");
+            let replay_path = replay_log_path_for_session(&app.state_root, &app.session_id);
+            let export_dir = authoritative_run_export_dir(&app.state_root);
+            let session_runs = app
+                .run_runtime
+                .session_runs(&app.session_id, hermes_agent::SessionRunSelection::All)
+                .map(|runs| runs.len().to_string())
+                .unwrap_or_else(|error| format!("unavailable ({error})"));
             emit_command_output(
                 app,
                 format!(
-                    "Replay studio status\nsession={}\nreplay_log={}\nreplay_exists={}\nexport_dir={}",
+                    "Replay studio status\nsession={}\nauthoritative_export_dir={}\nsession_ledger_runs={}\nlegacy_jsonl_diagnostic_path={}\nlegacy_jsonl_exists={}\nlegacy_jsonl_proof=false",
                     app.session_id,
+                    export_dir.display(),
+                    session_runs,
                     replay_path.display(),
-                    replay_path.exists(),
-                    export_dir.display()
+                    replay_path.exists()
                 ),
             );
         }
         "verify" => {
-            let replay_path = args
-                .get(2)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| replay_log_path_for_session(&app.session_id));
-            if !replay_path.exists() {
-                emit_command_output(
-                    app,
-                    format!("Replay file not found: {}", replay_path.display()),
-                );
+            if args.len() != 3 {
+                emit_command_output(app, "Usage: /studio replay verify <PATH>");
                 return Ok(CommandResult::Handled);
             }
-            if replay_path
-                .extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
-            {
-                let rows = read_replay_export_rows(&replay_path)?;
-                emit_command_output(
+            let raw_path = args[2];
+            match verify_canonical_run_export(app, raw_path) {
+                Ok((path, verified)) => {
+                    let evidence_complete = verified.evidence_complete();
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Authoritative run export verification\nstructural_verification=true\nproof={}\nevidence_complete={}\nlegacy_delivery_result_count={}\nrun_id={}\npath={}\ndigest={}\nevent_count={}\noutbox_count={}",
+                            evidence_complete,
+                            evidence_complete,
+                            verified.legacy_delivery_result_count,
+                            verified.run_id,
+                            path.display(),
+                            verified.digest,
+                            verified.event_count,
+                            verified.outbox_count
+                        ),
+                    );
+                }
+                Err(error) => emit_command_output(
                     app,
                     format!(
-                        "Replay export verification\npath={}\nrows={}\nstatus={}",
-                        replay_path.display(),
-                        rows.len(),
-                        if rows.is_empty() { "empty" } else { "ok" }
+                        "Authoritative run export verification rejected\nproof=false\npath={}\nreason={}",
+                        raw_path, error
                     ),
-                );
-            } else {
-                let (entries, parse_errors, chain_breaks) = replay_trace_integrity(&replay_path)?;
-                emit_command_output(
-                    app,
-                    format!(
-                        "Replay log verification\npath={}\nentries={}\nparse_errors={}\nchain_breaks={}\nstatus={}",
-                        replay_path.display(),
-                        entries,
-                        parse_errors,
-                        chain_breaks,
-                        if parse_errors == 0 && chain_breaks == 0 {
-                            "pass"
-                        } else {
-                            "fail"
-                        }
-                    ),
-                );
+                ),
             }
         }
         "diff" => {
-            if args.len() < 4 {
-                emit_command_output(
-                    app,
-                    "Usage: /studio replay diff <export_a.json> <export_b.json>",
-                );
+            if args.len() != 4 {
+                emit_command_output(app, "Usage: /studio replay diff <EXPORT_A> <EXPORT_B>");
                 return Ok(CommandResult::Handled);
             }
-            let a = PathBuf::from(args[2]);
-            let b = PathBuf::from(args[3]);
-            let a_rows = read_replay_export_rows(&a)?;
-            let b_rows = read_replay_export_rows(&b)?;
-            let a_hashes: HashSet<String> = a_rows
-                .iter()
-                .filter_map(|row| {
-                    row.get("event_hash")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                })
-                .collect();
-            let b_hashes: HashSet<String> = b_rows
-                .iter()
-                .filter_map(|row| {
-                    row.get("event_hash")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                })
-                .collect();
+            let raw_a = args[2];
+            let raw_b = args[3];
+            let (a_path, a_verified) = match verify_canonical_run_export(app, raw_a) {
+                Ok(verified) => verified,
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=A\npath={}\nreason={}",
+                            raw_a, error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+            let (b_path, b_verified) = match verify_canonical_run_export(app, raw_b) {
+                Ok(verified) => verified,
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=B\npath={}\nreason={}",
+                            raw_b, error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+
+            let a_hashes = match verified_run_export_event_hashes(&a_path, &a_verified) {
+                Ok(hashes) => hashes,
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=A\npath={}\nreason={}",
+                            a_path.display(),
+                            error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+            let b_hashes = match verified_run_export_event_hashes(&b_path, &b_verified) {
+                Ok(hashes) => hashes,
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=B\npath={}\nreason={}",
+                            b_path.display(),
+                            error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+
+            let a_reverified = match hermes_agent::run_export::verify_run_export(&a_path) {
+                Ok(verified) if verified == a_verified => verified,
+                Ok(_) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=A\npath={}\nreason=export changed during diff",
+                            a_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=A\npath={}\nreason=export no longer verifies: {}",
+                            a_path.display(),
+                            error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+            let b_reverified = match hermes_agent::run_export::verify_run_export(&b_path) {
+                Ok(verified) if verified == b_verified => verified,
+                Ok(_) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=B\npath={}\nreason=export changed during diff",
+                            b_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                Err(error) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay diff refused\nproof=false\ninput=B\npath={}\nreason=export no longer verifies: {}",
+                            b_path.display(),
+                            error
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+
             let only_a = a_hashes.difference(&b_hashes).count();
             let only_b = b_hashes.difference(&a_hashes).count();
             let overlap = a_hashes.intersection(&b_hashes).count();
+            let evidence_complete =
+                a_reverified.evidence_complete() && b_reverified.evidence_complete();
             emit_command_output(
                 app,
                 format!(
-                    "Replay diff\nA={} rows={} hashes={}\nB={} rows={} hashes={}\noverlap_hashes={}\nonly_in_a={}\nonly_in_b={}",
-                    a.display(),
-                    a_rows.len(),
+                    "Authoritative run export diff\nstructural_verification=verified\nproof={}\nA run_id={} digest={} event_count={} unique_event_hashes={} evidence_complete={} legacy_delivery_result_count={} path={}\nB run_id={} digest={} event_count={} unique_event_hashes={} evidence_complete={} legacy_delivery_result_count={} path={}\noverlap_hashes={}\nonly_in_a={}\nonly_in_b={}",
+                    evidence_complete,
+                    a_reverified.run_id,
+                    a_reverified.digest,
+                    a_reverified.event_count,
                     a_hashes.len(),
-                    b.display(),
-                    b_rows.len(),
+                    a_reverified.evidence_complete(),
+                    a_reverified.legacy_delivery_result_count,
+                    a_path.display(),
+                    b_reverified.run_id,
+                    b_reverified.digest,
+                    b_reverified.event_count,
                     b_hashes.len(),
+                    b_reverified.evidence_complete(),
+                    b_reverified.legacy_delivery_result_count,
+                    b_path.display(),
                     overlap,
                     only_a,
                     only_b
                 ),
             );
         }
-        _ => emit_command_output(
-            app,
-            "Usage: /studio replay [status|verify [path]|diff <export_a.json> <export_b.json>]",
-        ),
+        _ => emit_command_output(app, STUDIO_REPLAY_USAGE),
     }
     Ok(CommandResult::Handled)
 }

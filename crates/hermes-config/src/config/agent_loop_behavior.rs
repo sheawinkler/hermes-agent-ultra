@@ -27,7 +27,7 @@ pub struct AgentLoopBehaviorConfig {
     /// non-core deltas so core tools shared by other presets stay available.
     #[serde(default)]
     pub disabled_toolsets: Vec<String>,
-    /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
+    /// Requests a post-session review. Disabled by default until durable scheduling is available.
     #[serde(default = "default_agent_background_review_enabled")]
     pub background_review_enabled: bool,
     /// Enable always-on workspace code indexing + repo-map context injection.
@@ -86,7 +86,7 @@ fn default_agent_coding_context() -> String {
 }
 
 fn default_agent_background_review_enabled() -> bool {
-    true
+    false
 }
 
 fn default_agent_code_index_enabled() -> bool {

@@ -322,17 +322,13 @@ impl AuxiliaryClient {
                         });
                     }
                     Err(_elapsed) => {
-                        tracing::info!(
-                            "auxiliary {}: provider {} timed out after {:?}, trying next",
+                        tracing::warn!(
+                            "auxiliary {}: provider {} timed out after {:?}; outcome is unknown and fallback is blocked",
                             task.as_key(),
                             label,
                             settings.timeout
                         );
-                        errors.push((
-                            label.clone(),
-                            format!("timeout after {:?}", settings.timeout),
-                        ));
-                        break;
+                        return Err(AuxiliaryError::Timeout(settings.timeout));
                     }
                 }
             }

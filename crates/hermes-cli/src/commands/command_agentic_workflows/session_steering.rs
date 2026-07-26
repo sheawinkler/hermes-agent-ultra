@@ -360,7 +360,7 @@ fn handle_queue_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
     }
 
     if args[0].eq_ignore_ascii_case("status") || args[0].eq_ignore_ascii_case("list") {
-        emit_command_output(app, render_background_status(12));
+        emit_command_output(app, render_background_status(&app.state_root, 12));
         return Ok(CommandResult::Handled);
     }
 
@@ -412,7 +412,7 @@ fn handle_btw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
         "Ephemeral side question (do not alter objective/contracts unless explicitly asked): {}",
         question
     );
-    let job = queue_background_job(&task)?;
+    let job = queue_background_job(&app.state_root, &task)?;
     emit_command_output(
         app,
         format!(

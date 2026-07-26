@@ -13,7 +13,8 @@ use serde_json::json;
 
 use crate::adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
 use crate::error::EvalResult;
-use crate::runner::TaskRollout;
+use crate::result::TaskTelemetry;
+use crate::runner::{TaskRollout, TaskRolloutResult};
 use crate::verifier::{VerificationOutcome, Verifier};
 
 /// Fixed smoke tasks (subset of TBLite-style instructions; no external I/O).
@@ -94,18 +95,21 @@ pub struct SmokeRollout;
 
 #[async_trait]
 impl TaskRollout for SmokeRollout {
-    async fn execute(&self, task: &TaskSpec) -> EvalResult<serde_json::Value> {
-        Ok(json!({
-            "smoke": true,
-            "task_id": task.task_id,
-            "instruction": task.instruction,
-            "context": task.context,
-            "response": format!(
-                "deterministic smoke rollout for task_id={} instruction={}",
-                task.task_id, task.instruction
-            ),
-            "note": "deterministic smoke rollout; use --rollout agent for live agent evals",
-        }))
+    async fn execute(&self, task: &TaskSpec) -> EvalResult<TaskRolloutResult> {
+        Ok(TaskRolloutResult::completed(
+            json!({
+                "smoke": true,
+                "task_id": task.task_id,
+                "instruction": task.instruction,
+                "context": task.context,
+                "response": format!(
+                    "deterministic smoke rollout for task_id={} instruction={}",
+                    task.task_id, task.instruction
+                ),
+                "note": "deterministic smoke rollout; use --rollout agent for live agent evals",
+            }),
+            TaskTelemetry::default(),
+        ))
     }
 }
 
@@ -147,5 +151,35 @@ mod tests {
             .tasks
             .iter()
             .all(|t| t.status == crate::TaskStatus::Passed));
+        assert!(record.tasks.iter().all(|task| {
+            matches!(task.tokens_input, crate::result::Telemetry::Unavailable)
+                && matches!(task.tokens_output, crate::result::Telemetry::Unavailable)
+                && matches!(
+                    task.cost_usd.as_ref(),
+                    crate::result::Telemetry::Unavailable
+                )
+                && matches!(task.agent_turns, crate::result::Telemetry::Unavailable)
+                && matches!(task.retry_count, crate::result::Telemetry::Unavailable)
+        }));
+        assert!(matches!(
+            record.metrics.total_tokens_input,
+            crate::result::Telemetry::Unavailable
+        ));
+        assert!(matches!(
+            record.metrics.total_tokens_output,
+            crate::result::Telemetry::Unavailable
+        ));
+        assert!(matches!(
+            record.metrics.total_cost_usd,
+            crate::result::Telemetry::Unavailable
+        ));
+        assert!(matches!(
+            record.metrics.total_agent_turns,
+            crate::result::Telemetry::Unavailable
+        ));
+        assert!(matches!(
+            record.metrics.total_retries,
+            crate::result::Telemetry::Unavailable
+        ));
     }
 }

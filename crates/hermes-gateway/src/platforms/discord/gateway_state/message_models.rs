@@ -20,22 +20,30 @@ pub struct DiscordUser {
 }
 
 /// Incoming message parsed from a Discord MESSAGE_CREATE event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncomingDiscordMessage {
     pub channel_id: String,
+    pub channel_type: Option<u8>,
+    pub guild_id: Option<String>,
+    pub parent_channel_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub is_dm: bool,
     pub message_id: String,
     pub user_id: Option<String>,
     pub username: Option<String>,
     pub content: String,
     pub is_bot: bool,
+    /// Role IDs from the authenticated gateway event's guild-member object.
+    pub member_role_ids: Vec<String>,
     pub message_type: u8,
     pub mention_user_ids: Vec<String>,
     pub reply_to_message_id: Option<String>,
     pub reply_to_text: Option<String>,
+    pub reply_to_attachments: Vec<DiscordIncomingAttachment>,
     pub attachments: Vec<DiscordIncomingAttachment>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscordIncomingAttachment {
     pub filename: String,
     pub url: String,
@@ -51,6 +59,110 @@ impl IncomingDiscordMessage {
                 .mention_user_ids
                 .iter()
                 .any(|mentioned| mentioned.trim() == needle)
+    }
+
+    pub fn channel_context(&self) -> DiscordChannelContext {
+        DiscordChannelContext {
+            channel_id: self.channel_id.clone(),
+            parent_channel_id: self.parent_channel_id.clone(),
+            is_dm: self.is_dm,
+            is_thread: self.thread_id.is_some(),
+            is_reply: self.reply_to_message_id.is_some(),
+            voice_linked_text_channel: false,
+        }
+    }
+
+    fn gateway_text(&self) -> String {
+        use std::fmt::Write as _;
+
+        fn append_attachment(
+            text: &mut String,
+            label: &str,
+            attachment: &DiscordIncomingAttachment,
+        ) {
+            let _ = write!(text, "[{label}");
+            if !attachment.filename.trim().is_empty() {
+                let _ = write!(text, ": {}", attachment.filename.trim());
+            }
+            text.push(']');
+            if let Some(content_type) = attachment
+                .content_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|content_type| !content_type.is_empty())
+            {
+                let _ = write!(text, " ({content_type}");
+                if let Some(size) = attachment.size {
+                    let _ = write!(text, ", {size} bytes");
+                }
+                text.push(')');
+            } else if let Some(size) = attachment.size {
+                let _ = write!(text, " ({size} bytes)");
+            }
+            text.push('\n');
+            text.push_str(&attachment.url);
+        }
+
+        let mut text = self.content.clone();
+        let reply_text = self
+            .reply_to_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|reply| !reply.is_empty());
+        if reply_text.is_some() || !self.reply_to_attachments.is_empty() {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str("[Discord reply context]");
+            if let Some(reply) = reply_text {
+                text.push('\n');
+                text.push_str(reply);
+            }
+            for attachment in &self.reply_to_attachments {
+                text.push_str("\n\n");
+                append_attachment(&mut text, "Referenced Discord attachment", attachment);
+            }
+        }
+        for attachment in &self.attachments {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            append_attachment(&mut text, "Discord attachment", attachment);
+        }
+        text
+    }
+
+    /// Convert a verified Discord message into the platform-neutral gateway shape.
+    ///
+    /// A missing Discord author ID is never routeable: it cannot be authorized
+    /// or attributed to a human/bot sender.
+    pub fn to_gateway_message(&self) -> Option<crate::gateway::IncomingMessage> {
+        let user_id = self
+            .user_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())?
+            .to_string();
+        let chat_id = self
+            .parent_channel_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or(self.channel_id.trim())
+            .to_string();
+        if chat_id.is_empty() {
+            return None;
+        }
+
+        Some(crate::gateway::IncomingMessage {
+            platform: "discord".to_string(),
+            chat_id,
+            user_id,
+            text: self.gateway_text(),
+            message_id: Some(self.message_id.clone()),
+            thread_id: self.thread_id.clone(),
+            is_dm: self.is_dm,
+        })
     }
 }
 
@@ -84,135 +196,7 @@ fn parse_discord_incoming_attachments(
         .unwrap_or_default()
 }
 
-// ---------------------------------------------------------------------------
-// Event types: MESSAGE_UPDATE
-// ---------------------------------------------------------------------------
 
-/// Parsed data from a `MESSAGE_UPDATE` dispatch event.
-///
-/// Discord may send partial updates — only `id` and `channel_id` are
-/// guaranteed; other fields are optional.
-#[derive(Debug, Clone)]
-pub struct MessageUpdateEvent {
-    pub channel_id: String,
-    pub message_id: String,
-    pub content: Option<String>,
-    pub author_id: Option<String>,
-    pub guild_id: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Event types: INTERACTION_CREATE (slash commands)
-// ---------------------------------------------------------------------------
-
-/// Parsed interaction from `INTERACTION_CREATE`.
-#[derive(Debug, Clone)]
-pub struct InteractionData {
-    pub id: String,
-    pub application_id: String,
-    /// Interaction type (2 = APPLICATION_COMMAND, 3 = MESSAGE_COMPONENT, …).
-    pub interaction_type: u8,
-    pub token: String,
-    pub channel_id: Option<String>,
-    pub guild_id: Option<String>,
-    pub user_id: Option<String>,
-    pub command_name: Option<String>,
-    pub command_options: Vec<InteractionOption>,
-}
-
-/// A single option supplied to a slash command invocation.
-#[derive(Debug, Clone)]
-pub struct InteractionOption {
-    pub name: String,
-    pub value: serde_json::Value,
-}
-
-// ---------------------------------------------------------------------------
-// Event types: Reactions
-// ---------------------------------------------------------------------------
-
-/// Parsed data from `MESSAGE_REACTION_ADD` / `MESSAGE_REACTION_REMOVE`.
-#[derive(Debug, Clone)]
-pub struct ReactionEvent {
-    pub user_id: String,
-    pub channel_id: String,
-    pub message_id: String,
-    pub guild_id: Option<String>,
-    pub emoji_name: Option<String>,
-    pub emoji_id: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Event types: Voice state
-// ---------------------------------------------------------------------------
-
-/// Parsed `VOICE_STATE_UPDATE` event.
-#[derive(Debug, Clone)]
-pub struct VoiceState {
-    pub guild_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub user_id: String,
-    pub session_id: String,
-    pub deaf: bool,
-    pub mute: bool,
-    pub self_deaf: bool,
-    pub self_mute: bool,
-    pub suppress: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Slash command registration types
-// ---------------------------------------------------------------------------
-
-/// Definition of a slash command to register with Discord.
-#[derive(Debug, Clone, Serialize)]
-pub struct SlashCommand {
-    pub name: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub options: Option<Vec<SlashCommandOption>>,
-    /// Discord permission bitset string. "0" hides the command by default.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_member_permissions: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dm_permission: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nsfw: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub contexts: Option<Vec<u8>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub integration_types: Option<Vec<u8>>,
-    /// Command type (1 = CHAT_INPUT, 2 = USER, 3 = MESSAGE). Default 1.
-    #[serde(rename = "type", default = "default_command_type")]
-    pub command_type: u8,
-}
-
-/// A single option for a slash command.
-#[derive(Debug, Clone, Serialize)]
-pub struct SlashCommandOption {
-    pub name: String,
-    pub description: String,
-    /// Option type (3 = STRING, 4 = INTEGER, 5 = BOOLEAN, 6 = USER, …).
-    #[serde(rename = "type")]
-    pub option_type: u8,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub required: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub choices: Option<Vec<SlashCommandChoice>>,
-}
-
-/// A predefined choice for a slash command option.
-#[derive(Debug, Clone, Serialize)]
-pub struct SlashCommandChoice {
-    pub name: String,
-    pub value: serde_json::Value,
-}
-
-pub fn apply_owner_only_slash_visibility(commands: &mut [SlashCommand]) {
-    for command in commands {
-        command.default_member_permissions = Some("0".to_string());
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Embed types

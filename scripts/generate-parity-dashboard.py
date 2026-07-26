@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--proof-json",
         default="docs/parity/global-parity-proof.json",
-        help="Global parity proof JSON path relative to repo root",
+        help="Global parity gate report JSON path relative to repo root",
     )
     parser.add_argument(
         "--test-coverage-audit",
@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sota-harness-matrix",
         default="docs/parity/sota-harness-matrix.json",
-        help="SOTA harness matrix JSON path relative to repo root",
+        help="Fixture-reference regression matrix JSON path relative to repo root",
     )
     parser.add_argument(
         "--behavioral-diff",
@@ -142,6 +142,16 @@ def render_dashboard(
         if isinstance(sota_harness_matrix.get("gate"), dict)
         else {}
     )
+    harness_authority = (
+        sota_harness_matrix.get("authority", {})
+        if isinstance(sota_harness_matrix.get("authority"), dict)
+        else {}
+    )
+    harness_scope = (
+        sota_harness_matrix.get("scope", {})
+        if isinstance(sota_harness_matrix.get("scope"), dict)
+        else {}
+    )
     behavioral_summary = (
         behavioral_diff.get("summary", {})
         if isinstance(behavioral_diff.get("summary"), dict)
@@ -189,14 +199,17 @@ def render_dashboard(
     lines.append(f"- Workstream snapshot generated: `{ws_generated}`")
     lines.append(f"- Parity matrix generated: `{pm_generated}`")
     lines.append(f"- Queue snapshot generated: `{queue_generated}`")
-    lines.append(f"- Proof snapshot generated: `{proof_generated}`")
+    lines.append(f"- Global gate report snapshot generated: `{proof_generated}`")
     lines.append("")
     lines.append("## Gate Status")
     lines.append("")
     lines.append(f"- Release gate: **{gate_status(release_gate.get('pass'))}**")
     lines.append(f"- CI/tree-drift gate: **{gate_status(ci_gate.get('pass'))}**")
     lines.append(f"- Test coverage audit: **{gate_status(coverage_gate.get('pass'))}**")
-    lines.append(f"- SOTA harness matrix: **{gate_status(harness_gate.get('pass'))}**")
+    lines.append(
+        "- Fixture-reference regression matrix: "
+        f"**{gate_status(harness_gate.get('pass'))}** (non-authoritative for capability promotion)"
+    )
     lines.append(f"- Behavioral similarity diff: **{gate_status(behavioral_gate.get('pass'))}**")
     lines.append(f"- Deep problem-solving diff: **{gate_status(deep_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
@@ -227,22 +240,43 @@ def render_dashboard(
         f"| Critical gaps | {int(coverage_gate.get('critical_gaps', 0) or 0)} |"
     )
     lines.append("")
-    lines.append("## SOTA Harness Matrix")
+    lines.append("## Fixture-Reference Regression Hygiene (Non-Authoritative)")
     lines.append("")
-    lines.append("| Metric | Value |")
-    lines.append("| --- | ---: |")
-    lines.append(f"| Domains total | {int(harness_summary.get('domains_total', 0) or 0)} |")
-    lines.append(f"| Domains passing | {int(harness_summary.get('domains_passing', 0) or 0)} |")
     lines.append(
-        "| Domain coverage ratio | "
+        f"- Coverage scope: `{harness_scope.get('coverage_kind', 'missing')}`"
+    )
+    lines.append(
+        "- Capability-promotion authority: "
+        f"`{str(harness_authority.get('capability_promotion_authoritative', 'missing')).lower()}`"
+    )
+    lines.append(
+        "- Production complete: "
+        f"`{str(harness_authority.get('production_complete', 'missing')).lower()}`"
+    )
+    lines.append(
+        "- Registry/fixture entries and their referenced Rust tests preserve regression coverage only. They do not establish an implemented product capability or executable protocol, client, or chaos evidence."
+    )
+    lines.append("")
+    lines.append("| Fixture-reference hygiene metric | Value |")
+    lines.append("| --- | ---: |")
+    lines.append(
+        f"| Declared fixture categories | {int(harness_summary.get('domains_total', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Fixture categories passing | {int(harness_summary.get('domains_passing', 0) or 0)} |"
+    )
+    lines.append(
+        "| Fixture-category coverage ratio | "
         f"{float(harness_summary.get('domain_coverage_ratio', 0.0) or 0.0):.4f} |"
     )
-    lines.append(f"| Direct Rust tests | {int(harness_summary.get('direct_rust_tests', 0) or 0)} |")
     lines.append(
-        f"| Critical gaps | {int(harness_gate.get('critical_gaps', 0) or 0)} |"
+        f"| Referenced Rust tests | {int(harness_summary.get('direct_rust_tests', 0) or 0)} |"
     )
     lines.append(
-        f"| Missing Rust test refs | {int(harness_gate.get('missing_rust_test_refs', 0) or 0)} |"
+        f"| Unresolved fixture-reference gaps | {int(harness_gate.get('critical_gaps', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Missing referenced Rust test refs | {int(harness_gate.get('missing_rust_test_refs', 0) or 0)} |"
     )
     lines.append("")
     lines.append("## Behavioral Similarity Diff")

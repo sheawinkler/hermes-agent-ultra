@@ -37,17 +37,17 @@ By default this command fetches upstream directly from GitHub
 - `test-intent-mapping.md`: human-readable intent mapping table
 - `test-coverage-audit.json`: upstream behavior/test-intent coverage audit with Rust test-reference validation
 - `test-coverage-audit.md`: human-readable coverage audit, advisory gaps, and next harness moves
-- `sota-harness-matrix.json`: release-gated matrix for workflow replay, protocol differential contracts, and fault injection
-- `sota-harness-matrix.md`: human-readable SOTA harness domain summary
+- `sota-harness-matrix.json`: scoped fixture-reference regression matrix for workflow, protocol, and fault categories; its registry/fixtures and referenced Rust tests do not establish an implemented capability
+- `sota-harness-matrix.md`: human-readable fixture-reference regression scope and category summary
 - `behavioral-similarity-cases.json`: upstream-vs-Ultra outcome comparison case manifest
-- `behavioral-similarity-diff.json`: release-gated behavioral similarity and superiority proof
+- `behavioral-similarity-diff.json`: release-gated behavioral similarity and superiority evaluation
 - `behavioral-similarity-diff.md`: human-readable behavior diff summary
 - `deep-problem-solving-cases.json`: upstream-vs-Ultra deep problem-solving behavior case manifest
-- `deep-problem-solving-diff.json`: release-gated deep problem-solving parity and superiority proof
+- `deep-problem-solving-diff.json`: release-gated deep problem-solving parity and superiority evaluation
 - `deep-problem-solving-diff.md`: human-readable deep problem-solving behavior summary
-- `harness-trend-ledger.json` / `harness-trend-ledger.md`: coverage and SOTA harness trend ledger
-- `contextlattice-replay-evidence-index.json` / `contextlattice-replay-evidence-index.md`: ContextLattice replay evidence index for SOTA harness proofs
-- `harness-budget.json` / `harness-budget.md`: cross-version review budgets for queue, coverage, and harness growth
+- `harness-trend-ledger.json` / `harness-trend-ledger.md`: fixture-reference regression hygiene trend ledger
+- `contextlattice-replay-evidence-index.json` / `contextlattice-replay-evidence-index.md`: ContextLattice index for non-authoritative fixture-reference regression artifacts
+- `harness-budget.json` / `harness-budget.md`: cross-version review budgets for queue, coverage, and fixture-reference hygiene growth
 - `adapter-feature-matrix.json`: platform adapter + memory plugin matrix
 - `adapter-feature-matrix.md`: human-readable adapter matrix
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences
@@ -55,8 +55,8 @@ By default this command fetches upstream directly from GitHub
   - `ci_thresholds`: tree-drift observability gate
   - `ci_thresholds.special_rules`: scoped exemptions for non-actionable upstream-only drift
   - `release_thresholds`: functional parity gate (GPAR/workstream + divergence/test integrity + behavioral/deep problem-solving similarity)
-- `global-parity-proof.json`: consolidated parity proof with gate results for tickets #19-#28
-- `global-parity-proof.md`: human-readable parity proof summary
+- `global-parity-proof.json`: consolidated parity gate report; fixture-reference metrics are serialized separately as non-authoritative hygiene
+- `global-parity-proof.md`: human-readable parity gate summary
 - `gpar-01-04-proof.json`: scoped proof for GPAR-01..04 queue closure parity release
 - `gpar-01-04-proof.md`: human-readable scoped proof for GPAR-01..04
 - `PARITY_DASHBOARD.md`: operator-facing dashboard synthesized from parity JSON artifacts

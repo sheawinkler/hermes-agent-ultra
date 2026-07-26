@@ -587,7 +587,7 @@ fn handle_subconscious_command(app: &mut App, args: &[&str]) -> Result<CommandRe
                     notes.push(format!("{} would dispatch ({})", task.id, guard_note));
                     continue;
                 }
-                let job = queue_background_job(&task.prompt)?;
+                let job = queue_background_job(&app.state_root, &task.prompt)?;
                 task.status = "dispatched".to_string();
                 task.job_id = Some(job.id.clone());
                 task.updated_at = chrono::Utc::now().to_rfc3339();
@@ -789,7 +789,7 @@ fn handle_trigger_triage_command(
                         );
                     }
                     TriggerTriageDecision::AgentRun => {
-                        let job = queue_background_job(payload.trim())?;
+                        let job = queue_background_job(&app.state_root, payload.trim())?;
                         let _ = write!(
                             out,
                             "\n\nqueue_action: background job queued id={} status_file={}",
@@ -809,7 +809,416 @@ fn handle_trigger_triage_command(
     Ok(CommandResult::Handled)
 }
 
-fn queue_background_job(task: &str) -> Result<QueuedBackgroundJob, AgentError> {
+use fs2::FileExt;
+
+const SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER: &str = "[sealed alpha-runtime-v1 task]";
+
+type BackgroundStatusMap = serde_json::Map<String, serde_json::Value>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct BackgroundChildIdentity {
+    pid: u32,
+    start_token: String,
+    executable: String,
+    claim_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObservedBackgroundProcess {
+    start_token: String,
+    executable: PathBuf,
+}
+
+trait BackgroundProcessInspector: Send + Sync {
+    fn inspect(&self, pid: u32) -> Result<Option<ObservedBackgroundProcess>, String>;
+}
+
+struct SystemBackgroundProcessInspector;
+
+impl BackgroundProcessInspector for SystemBackgroundProcessInspector {
+    fn inspect(&self, raw_pid: u32) -> Result<Option<ObservedBackgroundProcess>, String> {
+        use sysinfo::{Pid, ProcessesToUpdate, System};
+
+        let pid = Pid::from_u32(raw_pid);
+        let mut system = System::new();
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        let Some(process) = system.process(pid) else {
+            return Ok(None);
+        };
+        let executable = process
+            .exe()
+            .ok_or_else(|| "process executable is unavailable".to_string())?;
+        let executable = std::fs::canonicalize(executable)
+            .map_err(|error| format!("failed to canonicalize process executable: {error}"))?;
+        Ok(Some(ObservedBackgroundProcess {
+            start_token: process.start_time().to_string(),
+            executable,
+        }))
+    }
+}
+
+trait BackgroundSignalSink: Send + Sync {
+    fn terminate(&self, pid: u32) -> Result<(), String>;
+}
+
+struct SystemBackgroundSignalSink;
+
+impl BackgroundSignalSink for SystemBackgroundSignalSink {
+    #[cfg(unix)]
+    fn terminate(&self, pid: u32) -> Result<(), String> {
+        // SAFETY: callers validate the complete process identity immediately before signaling.
+        let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error().to_string())
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn terminate(&self, _pid: u32) -> Result<(), String> {
+        Err("process termination is unsupported on this platform".to_string())
+    }
+}
+
+#[derive(Clone)]
+struct BackgroundExecutionDependencies {
+    inspector: Arc<dyn BackgroundProcessInspector>,
+    signals: Arc<dyn BackgroundSignalSink>,
+    writer: Arc<dyn BackgroundStatusWriter>,
+}
+
+impl BackgroundExecutionDependencies {
+    fn system() -> Self {
+        Self {
+            inspector: Arc::new(SystemBackgroundProcessInspector),
+            signals: Arc::new(SystemBackgroundSignalSink),
+            writer: Arc::new(AtomicBackgroundStatusWriter),
+        }
+    }
+}
+
+trait BackgroundStatusWriter: Send + Sync {
+    fn replace(&self, path: &Path, map: &BackgroundStatusMap) -> std::io::Result<()>;
+}
+
+struct AtomicBackgroundStatusWriter;
+
+impl BackgroundStatusWriter for AtomicBackgroundStatusWriter {
+    fn replace(&self, path: &Path, map: &BackgroundStatusMap) -> std::io::Result<()> {
+        atomic_replace_background_status(path, map)
+    }
+}
+
+fn atomic_replace_background_status(
+    path: &Path,
+    map: &BackgroundStatusMap,
+) -> std::io::Result<()> {
+    let content = serde_json::to_vec_pretty(&serde_json::Value::Object(map.clone())).map_err(
+        |error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
+    )?;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "background status path has no parent directory",
+        )
+    })?;
+    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "background status path has no UTF-8 file name",
+        )
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let temporary_path = parent.join(format!(
+        ".{file_name}.{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let result = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut temporary = options.open(&temporary_path)?;
+        std::io::Write::write_all(&mut temporary, &content)?;
+        temporary.sync_all()?;
+        drop(temporary);
+        std::fs::rename(&temporary_path, path)?;
+        sync_background_status_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_background_status_directory(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_background_status_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn background_coordination_lock_path(
+    status_path: &Path,
+    purpose: &str,
+) -> std::io::Result<PathBuf> {
+    let file_name = status_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "background status path has no UTF-8 file name",
+            )
+        })?;
+    Ok(status_path.with_file_name(format!(".{file_name}.{purpose}.lock")))
+}
+
+fn open_background_coordination_lock(
+    status_path: &Path,
+    purpose: &str,
+) -> std::io::Result<std::fs::File> {
+    let lock_path = background_coordination_lock_path(status_path, purpose)?;
+    let parent = lock_path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "background lock path has no parent directory",
+        )
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&lock_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
+struct BackgroundSupervisorLease {
+    _file: std::fs::File,
+}
+
+impl BackgroundSupervisorLease {
+    fn try_acquire(status_path: &Path) -> std::io::Result<Option<Self>> {
+        let file = open_background_coordination_lock(status_path, "supervisor")?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+struct BackgroundStateLock {
+    _file: std::fs::File,
+}
+
+impl BackgroundStateLock {
+    fn acquire(status_path: &Path) -> std::io::Result<Self> {
+        let file = open_background_coordination_lock(status_path, "state")?;
+        file.lock_exclusive()?;
+        Ok(Self { _file: file })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AlphaBackgroundBinding {
+    metadata: serde_json::Value,
+    id: Option<serde_json::Value>,
+    task: serde_json::Value,
+    log_path: Option<serde_json::Value>,
+}
+
+impl AlphaBackgroundBinding {
+    fn capture(map: &BackgroundStatusMap) -> Result<Option<Self>, AgentError> {
+        let Some(metadata) = map.get("alpha_runtime_v1") else {
+            return Ok(None);
+        };
+        if !metadata.is_object()
+            || map.get("task").and_then(|value| value.as_str())
+                != Some(SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER)
+        {
+            return Err(AgentError::Io(
+                "Refusing malformed sealed Alpha background status.".to_string(),
+            ));
+        }
+        Ok(Some(Self {
+            metadata: metadata.clone(),
+            id: map.get("id").cloned(),
+            task: map
+                .get("task")
+                .cloned()
+                .expect("sealed Alpha task was checked above"),
+            log_path: map.get("log_path").cloned(),
+        }))
+    }
+
+    fn ensure_preserved(&self, map: &BackgroundStatusMap) -> Result<(), AgentError> {
+        if map.get("alpha_runtime_v1") != Some(&self.metadata)
+            || map.get("id") != self.id.as_ref()
+            || map.get("task") != Some(&self.task)
+            || map.get("log_path") != self.log_path.as_ref()
+        {
+            return Err(AgentError::Io(
+                "Refusing mutation that changes immutable sealed Alpha job binding.".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn read_background_status_map(path: &Path) -> Result<BackgroundStatusMap, AgentError> {
+    let raw = std::fs::read_to_string(path).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to read background status {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .map_err(|_| AgentError::Io("Background status is not valid JSON.".to_string()))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AgentError::Io("Background status is not a JSON object.".to_string()))
+}
+
+fn read_background_status_map_locked(path: &Path) -> Result<BackgroundStatusMap, AgentError> {
+    let _state_lock = BackgroundStateLock::acquire(path)
+        .map_err(|error| AgentError::Io(format!("Failed to lock background status: {error}")))?;
+    read_background_status_map(path)
+}
+
+fn mutate_background_status<R>(
+    path: &Path,
+    writer: &dyn BackgroundStatusWriter,
+    mutation: impl FnOnce(&mut BackgroundStatusMap) -> Result<(R, bool), AgentError>,
+) -> Result<R, AgentError> {
+    let _state_lock = BackgroundStateLock::acquire(path)
+        .map_err(|error| AgentError::Io(format!("Failed to lock background status: {error}")))?;
+    let mut map = read_background_status_map(path)?;
+    let alpha_binding = AlphaBackgroundBinding::capture(&map)?;
+    let (result, changed) = mutation(&mut map)?;
+    if changed {
+        if let Some(binding) = alpha_binding {
+            binding.ensure_preserved(&map)?;
+        }
+        writer
+            .replace(path, &map)
+            .map_err(|error| AgentError::Io(format!("Failed to replace background status: {error}")))?;
+    }
+    Ok(result)
+}
+
+fn background_status_name(map: &BackgroundStatusMap) -> String {
+    map.get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown")
+        .to_ascii_lowercase()
+}
+
+fn is_background_terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "canceled" | "outcome_unknown")
+}
+
+fn status_claim_id(map: &BackgroundStatusMap) -> Option<&str> {
+    map.get("claim_id").and_then(|value| value.as_str())
+}
+
+fn map_child_identity(map: &BackgroundStatusMap) -> Result<BackgroundChildIdentity, ()> {
+    let identity = map
+        .get("child_identity")
+        .cloned()
+        .ok_or(())
+        .and_then(|value| serde_json::from_value::<BackgroundChildIdentity>(value).map_err(|_| ()))?;
+    if identity.pid == 0
+        || identity.start_token.trim().is_empty()
+        || identity.executable.trim().is_empty()
+        || identity.claim_id.trim().is_empty()
+        || status_claim_id(map) != Some(identity.claim_id.as_str())
+        || map
+            .get("pid")
+            .and_then(|value| value.as_u64())
+            .and_then(|pid| u32::try_from(pid).ok())
+            != Some(identity.pid)
+    {
+        return Err(());
+    }
+    Ok(identity)
+}
+
+enum BackgroundIdentityCheck {
+    Exact,
+    Absent,
+    Mismatch,
+    Unverifiable,
+}
+
+fn check_background_child_identity(
+    inspector: &dyn BackgroundProcessInspector,
+    identity: &BackgroundChildIdentity,
+) -> BackgroundIdentityCheck {
+    match inspector.inspect(identity.pid) {
+        Ok(Some(observed))
+            if observed.start_token == identity.start_token
+                && observed.executable.to_string_lossy() == identity.executable =>
+        {
+            BackgroundIdentityCheck::Exact
+        }
+        Ok(Some(_)) => BackgroundIdentityCheck::Mismatch,
+        Ok(None) => BackgroundIdentityCheck::Absent,
+        Err(_) => BackgroundIdentityCheck::Unverifiable,
+    }
+}
+
+fn canonical_background_executable(path: &Path) -> Result<String, String> {
+    std::fs::canonicalize(path)
+        .map_err(|error| format!("failed to canonicalize executable: {error}"))?
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "canonical executable path is not UTF-8".to_string())
+}
+
+fn capture_background_child_identity(
+    inspector: &dyn BackgroundProcessInspector,
+    pid: u32,
+    executable: &Path,
+    claim_id: &str,
+) -> Result<BackgroundChildIdentity, String> {
+    let expected_executable = canonical_background_executable(executable)?;
+    let observed = inspector
+        .inspect(pid)?
+        .ok_or_else(|| "child exited before its identity could be captured".to_string())?;
+    let observed_executable = observed
+        .executable
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "observed child executable path is not UTF-8".to_string())?;
+    if observed.start_token.trim().is_empty() || observed_executable != expected_executable {
+        return Err("child process identity did not match the spawned executable".to_string());
+    }
+    Ok(BackgroundChildIdentity {
+        pid,
+        start_token: observed.start_token,
+        executable: expected_executable,
+        claim_id: claim_id.to_string(),
+    })
+}
+fn queue_background_job(state_root: &Path, task: &str) -> Result<QueuedBackgroundJob, AgentError> {
     let task = task.trim();
     if task.is_empty() {
         return Err(AgentError::Config(
@@ -821,7 +1230,7 @@ fn queue_background_job(task: &str) -> Result<QueuedBackgroundJob, AgentError> {
         chrono::Utc::now().format("%Y%m%d%H%M%S"),
         uuid::Uuid::new_v4().simple()
     );
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let jobs_dir = state_root.join("background_jobs");
     std::fs::create_dir_all(&jobs_dir).map_err(|e| {
         AgentError::Io(format!(
             "Failed to create background job directory {}: {}",
@@ -843,13 +1252,19 @@ fn queue_background_job(task: &str) -> Result<QueuedBackgroundJob, AgentError> {
         "exit_code": serde_json::Value::Null,
         "log_path": log_path,
     });
-    std::fs::write(
-        &status_path,
-        serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".to_string()),
-    )
-    .map_err(|e| AgentError::Io(format!("Failed to write background status: {}", e)))?;
+    let status_map = status
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AgentError::Io("Failed to encode background status.".to_string()))?;
+    atomic_replace_background_status(&status_path, &status_map)
+        .map_err(|error| AgentError::Io(format!("Failed to write background status: {error}")))?;
 
-    schedule_background_job_execution(status_path.clone(), log_path.clone(), task.to_string());
+    schedule_background_job_execution(
+        state_root.to_path_buf(),
+        status_path.clone(),
+        log_path.clone(),
+        task.to_string(),
+    );
     Ok(QueuedBackgroundJob {
         id: status["id"].as_str().unwrap_or("unknown").to_string(),
         task: task.to_string(),
@@ -873,7 +1288,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
     }
     let sub = args[0].trim().to_ascii_lowercase();
     if sub == "status" || sub == "list" {
-        emit_command_output(app, render_background_status(12));
+        emit_command_output(app, render_background_status(&app.state_root, 12));
         return Ok(CommandResult::Handled);
     }
     if sub == "tail" || sub == "log" || sub == "logs" || sub == "show" {
@@ -887,7 +1302,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| {
-                collect_background_jobs(1)
+                collect_background_jobs(&app.state_root, 1)
                     .into_iter()
                     .next()
                     .map(|row| row.id)
@@ -899,7 +1314,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             );
             return Ok(CommandResult::Handled);
         };
-        let Some(job) = resolve_background_job(&id_or_prefix) else {
+        let Some(job) = resolve_background_job(&app.state_root, &id_or_prefix) else {
             emit_command_output(
                 app,
                 format!(
@@ -938,7 +1353,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| {
-                collect_background_jobs(200).into_iter().find_map(|job| {
+                collect_background_jobs(&app.state_root, 200).into_iter().find_map(|job| {
                     if matches!(job.status.as_str(), "running" | "queued") {
                         Some(job.id)
                     } else {
@@ -953,7 +1368,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
             );
             return Ok(CommandResult::Handled);
         };
-        emit_command_output(app, terminate_background_job(&id_or_prefix)?);
+        emit_command_output(app, terminate_background_job(&app.state_root, &id_or_prefix)?);
         return Ok(CommandResult::Handled);
     }
     if sub == "event" {
@@ -974,11 +1389,11 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
         merged.extend(payload_refs);
         return handle_trigger_triage_command(app, &merged);
     }
-    let job = queue_background_job(&args.join(" "))?;
+    let job = queue_background_job(&app.state_root, &args.join(" "))?;
     emit_command_output(
         app,
         format!(
-            "[Background task queued: \"{}\"]\nJob ID: {}\nStatus: {}\nLogs:   {}\nThis task runs in a detached `hermes chat --query ...` process.",
+            "[Background task queued: \"{}\"]\nJob ID: {}\nStatus: {}\nLogs:   {}\nThis task runs in a detached `hermes chat --query-stdin` process.",
             job.task,
             job.id,
             job.status_path.display(),
@@ -988,275 +1403,834 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
     Ok(CommandResult::Handled)
 }
 
-#[cfg(unix)]
-fn process_running(pid: u32) -> bool {
-    // SAFETY: libc::kill with signal 0 only performs existence/permission check.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        true
-    } else {
-        matches!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::EPERM)
-        )
+fn apply_background_terminal_state(
+    map: &mut BackgroundStatusMap,
+    status: &str,
+    terminal_reason: &str,
+    exit_code: Option<i32>,
+    error: Option<&str>,
+) {
+    map.insert(
+        "status".to_string(),
+        serde_json::Value::String(status.to_string()),
+    );
+    map.insert(
+        "finished_at".to_string(),
+        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+    );
+    map.insert(
+        "terminal_reason".to_string(),
+        serde_json::Value::String(terminal_reason.to_string()),
+    );
+    if let Some(exit_code) = exit_code {
+        map.insert("exit_code".to_string(), serde_json::json!(exit_code));
     }
-}
-
-#[cfg(not(unix))]
-fn process_running(_pid: u32) -> bool {
-    false
-}
-
-#[cfg(unix)]
-fn terminate_pid(pid: u32) -> std::io::Result<()> {
-    // SAFETY: pid is sourced from our own status record; SIGTERM is best-effort.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-    if rc == 0 {
-        Ok(())
+    if let Some(error) = error {
+        map.insert(
+            "error".to_string(),
+            serde_json::Value::String(error.to_string()),
+        );
     } else {
-        Err(std::io::Error::last_os_error())
+        map.remove("error");
     }
+    map.insert("pid".to_string(), serde_json::Value::Null);
+    map.insert(
+        "execution_phase".to_string(),
+        serde_json::Value::String("terminal".to_string()),
+    );
 }
 
-#[cfg(not(unix))]
-fn terminate_pid(_pid: u32) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Process termination is unsupported on this platform.",
-    ))
+fn transition_running_to_terminal(
+    status_path: &Path,
+    writer: &dyn BackgroundStatusWriter,
+    expected_claim_id: &str,
+    terminal_status: &str,
+    terminal_reason: &str,
+    exit_code: Option<i32>,
+    error: Option<&str>,
+) -> Result<bool, AgentError> {
+    if !is_background_terminal_status(terminal_status) {
+        return Err(AgentError::Io(
+            "Background terminal transition requires a terminal status.".to_string(),
+        ));
+    }
+    mutate_background_status(status_path, writer, |map| {
+        if background_status_name(map) != "running"
+            || status_claim_id(map) != Some(expected_claim_id)
+        {
+            return Ok((false, false));
+        }
+        apply_background_terminal_state(
+            map,
+            terminal_status,
+            terminal_reason,
+            exit_code,
+            error,
+        );
+        Ok((true, true))
+    })
 }
 
-fn terminate_background_job(id_or_prefix: &str) -> Result<String, AgentError> {
-    let Some(job) = resolve_background_job(id_or_prefix) else {
+fn transition_running_to_outcome_unknown(
+    status_path: &Path,
+    writer: &dyn BackgroundStatusWriter,
+    expected_claim_id: Option<&str>,
+    terminal_reason: &str,
+) -> Result<bool, AgentError> {
+    mutate_background_status(status_path, writer, |map| {
+        if background_status_name(map) != "running"
+            || expected_claim_id.is_some_and(|claim_id| status_claim_id(map) != Some(claim_id))
+        {
+            return Ok((false, false));
+        }
+        apply_background_terminal_state(
+            map,
+            "outcome_unknown",
+            terminal_reason,
+            None,
+            Some("background child outcome cannot be established"),
+        );
+        Ok((true, true))
+    })
+}
+
+enum BackgroundStopOutcome {
+    AlreadyTerminal(String),
+    CanceledQueued,
+    CanceledStarting,
+    CanceledRunning(u32),
+    IdentityRefused,
+    SignalFailed,
+    UnsupportedState(String),
+}
+
+fn background_job_is_starting_without_identity(map: &BackgroundStatusMap) -> bool {
+    map.get("execution_phase").and_then(|value| value.as_str()) == Some("claiming")
+        && map.get("pid").is_some_and(serde_json::Value::is_null)
+        && map
+            .get("child_identity")
+            .is_some_and(serde_json::Value::is_null)
+}
+
+fn terminate_background_job(state_root: &Path, id_or_prefix: &str) -> Result<String, AgentError> {
+    let dependencies = BackgroundExecutionDependencies::system();
+    terminate_background_job_with_dependencies(state_root, id_or_prefix, &dependencies)
+}
+
+fn terminate_background_job_with_dependencies(
+    state_root: &Path,
+    id_or_prefix: &str,
+    dependencies: &BackgroundExecutionDependencies,
+) -> Result<String, AgentError> {
+    let Some(job) = resolve_background_job(state_root, id_or_prefix) else {
         return Ok(format!(
             "Background job '{}' not found. Use `/background status`.",
             id_or_prefix
         ));
     };
-    let mut map = read_json_map(&job.status_path);
-    if map.is_empty() {
-        return Err(AgentError::Io(format!(
-            "Status file missing or unreadable: {}",
-            job.status_path.display()
-        )));
-    }
-    let status = map
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_ascii_lowercase();
-    if status == "completed" || status == "failed" || status == "canceled" {
-        return Ok(format!(
-            "Background job {} already {}.\nStatus file: {}",
-            job.id,
-            status,
-            job.status_path.display()
-        ));
-    }
+    let outcome = mutate_background_status(&job.status_path, dependencies.writer.as_ref(), |map| {
+        let status = background_status_name(map);
+        if is_background_terminal_status(&status) {
+            return Ok((BackgroundStopOutcome::AlreadyTerminal(status), false));
+        }
+        if status == "queued" {
+            apply_background_terminal_state(
+                map,
+                "canceled",
+                "operator_canceled",
+                None,
+                Some("canceled by operator"),
+            );
+            return Ok((BackgroundStopOutcome::CanceledQueued, true));
+        }
+        if status != "running" {
+            return Ok((BackgroundStopOutcome::UnsupportedState(status), false));
+        }
 
-    let mut termination_note = String::new();
-    if let Some(pid) = map
-        .get("pid")
-        .and_then(|v| v.as_u64())
-        .and_then(|raw| u32::try_from(raw).ok())
-    {
-        if process_running(pid) {
-            match terminate_pid(pid) {
-                Ok(()) => termination_note = format!("Sent SIGTERM to pid {}.", pid),
-                Err(err) => termination_note = format!("Failed to terminate pid {}: {}.", pid, err),
+        let identity = match map_child_identity(map) {
+            Ok(identity) => identity,
+            Err(()) if background_job_is_starting_without_identity(map) => {
+                apply_background_terminal_state(
+                    map,
+                    "canceled",
+                    "operator_canceled",
+                    None,
+                    Some("canceled by operator before child input"),
+                );
+                return Ok((BackgroundStopOutcome::CanceledStarting, true));
             }
-        } else {
-            termination_note = format!("Pid {} was not running.", pid);
+            Err(()) => {
+                apply_background_terminal_state(
+                    map,
+                    "outcome_unknown",
+                    "malformed_child_identity",
+                    None,
+                    Some("background child identity is malformed"),
+                );
+                return Ok((BackgroundStopOutcome::IdentityRefused, true));
+            }
+        };
+        match check_background_child_identity(dependencies.inspector.as_ref(), &identity) {
+            BackgroundIdentityCheck::Exact => {
+                if dependencies.signals.terminate(identity.pid).is_err() {
+                    return Ok((BackgroundStopOutcome::SignalFailed, false));
+                }
+                apply_background_terminal_state(
+                    map,
+                    "canceled",
+                    "operator_canceled",
+                    None,
+                    Some("canceled by operator"),
+                );
+                Ok((BackgroundStopOutcome::CanceledRunning(identity.pid), true))
+            }
+            BackgroundIdentityCheck::Absent => {
+                apply_background_terminal_state(
+                    map,
+                    "outcome_unknown",
+                    "child_identity_absent",
+                    None,
+                    Some("background child was absent before operator cancellation"),
+                );
+                Ok((BackgroundStopOutcome::IdentityRefused, true))
+            }
+            BackgroundIdentityCheck::Mismatch => {
+                apply_background_terminal_state(
+                    map,
+                    "outcome_unknown",
+                    "child_identity_mismatch",
+                    None,
+                    Some("background child identity no longer matched"),
+                );
+                Ok((BackgroundStopOutcome::IdentityRefused, true))
+            }
+            BackgroundIdentityCheck::Unverifiable => {
+                apply_background_terminal_state(
+                    map,
+                    "outcome_unknown",
+                    "child_identity_unverifiable",
+                    None,
+                    Some("background child identity could not be verified"),
+                );
+                Ok((BackgroundStopOutcome::IdentityRefused, true))
+            }
         }
-    }
+    })?;
 
-    map.insert(
-        "status".into(),
-        serde_json::Value::String("canceled".into()),
-    );
-    map.insert(
-        "finished_at".into(),
-        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-    );
-    map.insert(
-        "error".into(),
-        serde_json::Value::String("canceled by operator".into()),
-    );
-    map.insert("pid".into(), serde_json::Value::Null);
-    write_json_map(&job.status_path, &map)
-        .map_err(|e| AgentError::Io(format!("Failed to update background status: {}", e)))?;
-
-    Ok(format!(
-        "Canceled background job {}\nStatus file: {}\n{}",
-        job.id,
-        job.status_path.display(),
-        if termination_note.is_empty() {
-            "No active child pid recorded.".to_string()
-        } else {
-            termination_note
+    let message = match outcome {
+        BackgroundStopOutcome::AlreadyTerminal(status) => {
+            format!("Background job {} already {}.", job.id, status)
         }
-    ))
+        BackgroundStopOutcome::CanceledQueued => {
+            format!("Canceled queued background job {}.", job.id)
+        }
+        BackgroundStopOutcome::CanceledStarting => format!(
+            "Canceled background job {} before child input was delivered.",
+            job.id
+        ),
+        BackgroundStopOutcome::CanceledRunning(pid) => format!(
+            "Canceled background job {}. Sent SIGTERM to pid {} after exact child identity validation.",
+            job.id, pid
+        ),
+        BackgroundStopOutcome::IdentityRefused => format!(
+            "Refused SIGTERM for background job {} because its child identity could not be proven; status is outcome_unknown.",
+            job.id
+        ),
+        BackgroundStopOutcome::SignalFailed => format!(
+            "Failed to signal background job {}; status was left unchanged.",
+            job.id
+        ),
+        BackgroundStopOutcome::UnsupportedState(status) => {
+            format!("Background job {} cannot be canceled from status {}.", job.id, status)
+        }
+    };
+    Ok(format!("{message}\nStatus file: {}", job.status_path.display()))
+}
+
+#[derive(Clone)]
+struct BackgroundClaim {
+    claim_id: String,
+    started_at: String,
+    status_snapshot: BackgroundStatusMap,
 }
 
 fn claim_queued_background_job(
     status_path: &Path,
-) -> Result<Option<serde_json::Map<String, serde_json::Value>>, AgentError> {
-    let mut queued = read_json_map(status_path);
-    if queued.is_empty() {
-        return Ok(None);
-    }
-    let status = queued
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("queued")
-        .to_ascii_lowercase();
-    if status != "queued" {
-        return Ok(None);
-    }
-    let started = chrono::Utc::now().to_rfc3339();
-    let attempts = queued
-        .get("attempts")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0)
-        .saturating_add(1);
-    queued.insert(
-        "status".to_string(),
-        serde_json::Value::String("running".into()),
-    );
-    queued.insert("started_at".to_string(), serde_json::Value::String(started));
-    queued.insert("attempts".to_string(), serde_json::json!(attempts));
-    write_json_map(status_path, &queued)
-        .map_err(|e| AgentError::Io(format!("Failed to claim background job: {}", e)))?;
-    Ok(Some(queued))
+    writer: &dyn BackgroundStatusWriter,
+) -> Result<Option<BackgroundClaim>, AgentError> {
+    mutate_background_status(status_path, writer, |queued| {
+        if background_status_name(queued) != "queued" {
+            return Ok((None, false));
+        }
+        let claim_id = uuid::Uuid::new_v4().to_string();
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let attempts = queued
+            .get("attempts")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0)
+            .saturating_add(1);
+        queued.insert(
+            "status".to_string(),
+            serde_json::Value::String("running".to_string()),
+        );
+        queued.insert(
+            "execution_phase".to_string(),
+            serde_json::Value::String("claiming".to_string()),
+        );
+        queued.insert(
+            "claim_id".to_string(),
+            serde_json::Value::String(claim_id.clone()),
+        );
+        queued.insert(
+            "started_at".to_string(),
+            serde_json::Value::String(started_at.clone()),
+        );
+        queued.insert("attempts".to_string(), serde_json::json!(attempts));
+        queued.insert("pid".to_string(), serde_json::Value::Null);
+        queued.insert("child_identity".to_string(), serde_json::Value::Null);
+        queued.insert("finished_at".to_string(), serde_json::Value::Null);
+        queued.insert("exit_code".to_string(), serde_json::Value::Null);
+        queued.remove("terminal_reason");
+        queued.remove("error");
+        Ok((
+            Some(BackgroundClaim {
+                claim_id,
+                started_at,
+                status_snapshot: queued.clone(),
+            }),
+            true,
+        ))
+    })
 }
 
-fn schedule_background_job_execution(status_path: PathBuf, log_path: PathBuf, task: String) {
+fn running_claim_is_current(status_path: &Path, claim_id: &str) -> Result<bool, AgentError> {
+    let map = read_background_status_map_locked(status_path)?;
+    Ok(background_status_name(&map) == "running" && status_claim_id(&map) == Some(claim_id))
+}
+
+fn attach_background_child_identity(
+    status_path: &Path,
+    writer: &dyn BackgroundStatusWriter,
+    claim_id: &str,
+    identity: &BackgroundChildIdentity,
+) -> Result<bool, AgentError> {
+    if identity.claim_id != claim_id {
+        return Ok(false);
+    }
+    let identity_value = serde_json::to_value(identity)
+        .map_err(|_| AgentError::Io("Failed to encode child identity.".to_string()))?;
+    mutate_background_status(status_path, writer, |map| {
+        if background_status_name(map) != "running" || status_claim_id(map) != Some(claim_id) {
+            return Ok((false, false));
+        }
+        map.insert("pid".to_string(), serde_json::json!(identity.pid));
+        map.insert("child_identity".to_string(), identity_value);
+        map.insert(
+            "execution_phase".to_string(),
+            serde_json::Value::String("running".to_string()),
+        );
+        Ok((true, true))
+    })
+}
+
+#[derive(Clone)]
+struct BackgroundLaunch {
+    state_root: PathBuf,
+    status_path: PathBuf,
+    log_path: PathBuf,
+    task: String,
+    dependencies: BackgroundExecutionDependencies,
+}
+
+struct BackgroundChildSpawnPlan<'a> {
+    executable: &'a Path,
+    state_root: &'a Path,
+    stdin: &'a [u8],
+}
+
+impl<'a> BackgroundChildSpawnPlan<'a> {
+    fn arguments(&self) -> [&'static str; 2] {
+        ["chat", "--query-stdin"]
+    }
+
+    fn environment(&self) -> [(&'static str, &'a std::ffi::OsStr); 1] {
+        [("HERMES_HOME", self.state_root.as_os_str())]
+    }
+}
+
+fn background_child_spawn_plan<'a>(
+    executable: &'a Path,
+    state_root: &'a Path,
+    task: &'a str,
+) -> BackgroundChildSpawnPlan<'a> {
+    BackgroundChildSpawnPlan {
+        executable,
+        state_root,
+        stdin: task.as_bytes(),
+    }
+}
+
+fn background_child_command(plan: &BackgroundChildSpawnPlan<'_>) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(plan.executable);
+    command
+        .args(plan.arguments())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.suppress_windows_console();
+    // The lease is held through wait, and the child does not outlive a dropped supervisor.
+    command.kill_on_drop(true);
+    for (key, value) in plan.environment() {
+        command.env(key, value);
+    }
+    command
+}
+
+fn schedule_background_job_execution(
+    state_root: PathBuf,
+    status_path: PathBuf,
+    log_path: PathBuf,
+    task: String,
+) {
+    let schedule_status_path = status_path.clone();
+    if schedule_background_job_with_dependencies(
+        state_root,
+        status_path,
+        log_path,
+        task,
+        BackgroundExecutionDependencies::system(),
+    )
+    .is_err()
+    {
+        tracing::warn!(
+            status_path = %schedule_status_path.display(),
+            "background job remains queued after a scheduling failure and will be retried by recovery"
+        );
+    }
+}
+
+fn schedule_background_job_with_dependencies(
+    state_root: PathBuf,
+    status_path: PathBuf,
+    log_path: PathBuf,
+    task: String,
+    dependencies: BackgroundExecutionDependencies,
+) -> Result<bool, AgentError> {
+    let Some(supervisor_lease) = BackgroundSupervisorLease::try_acquire(&status_path)
+        .map_err(|error| AgentError::Io(format!("Failed to acquire background supervisor lease: {error}")))?
+    else {
+        return Ok(false);
+    };
+    spawn_background_launch(
+        BackgroundLaunch {
+            state_root,
+            status_path,
+            log_path,
+            task,
+            dependencies,
+        },
+        supervisor_lease,
+    );
+    Ok(true)
+}
+
+fn spawn_background_launch(launch: BackgroundLaunch, supervisor_lease: BackgroundSupervisorLease) {
     tokio::spawn(async move {
-        let queued = match claim_queued_background_job(&status_path) {
-            Ok(Some(claimed)) => claimed,
-            Ok(None) => return,
-            Err(_) => return,
-        };
-        let started = queued
-            .get("started_at")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let exe = match std::env::current_exe() {
-            Ok(p) => p,
-            Err(e) => {
-                let mut failed = queued.clone();
-                failed.insert("status".into(), serde_json::Value::String("failed".into()));
-                failed.insert(
-                    "finished_at".into(),
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-                );
-                failed.insert(
-                    "error".into(),
-                    serde_json::Value::String(format!("current_exe: {}", e)),
-                );
-                let _ = write_json_map(&status_path, &failed);
-                return;
-            }
-        };
-
-        let mut cmd = tokio::process::Command::new(exe);
-        cmd.arg("chat")
-            .arg("--query")
-            .arg(task)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        cmd.suppress_windows_console();
-        // Ensure detached children do not survive runtime/session teardown.
-        cmd.kill_on_drop(true);
-
-        if let Ok(home) = std::env::var("HERMES_HOME") {
-            cmd.env("HERMES_HOME", home);
-        }
-
-        let child = match cmd.spawn() {
-            Ok(child) => child,
-            Err(e) => {
-                let mut failed = queued.clone();
-                failed.insert("status".into(), serde_json::Value::String("failed".into()));
-                failed.insert(
-                    "finished_at".into(),
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-                );
-                failed.insert(
-                    "error".into(),
-                    serde_json::Value::String(format!("spawn failed: {}", e)),
-                );
-                failed.insert("pid".into(), serde_json::Value::Null);
-                let _ = write_json_map(&status_path, &failed);
-                return;
-            }
-        };
-        if let Some(pid) = child.id() {
-            let mut running = queued.clone();
-            running.insert("pid".into(), serde_json::json!(pid));
-            let _ = write_json_map(&status_path, &running);
-        }
-
-        let out = child.wait_with_output().await;
-        match out {
-            Ok(output) => {
-                let exit = output.status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let log = format!(
-                    "task: {}\nstarted_at: {}\nfinished_at: {}\nexit_code: {}\n\n[stdout]\n{}\n\n[stderr]\n{}\n",
-                    queued
-                        .get("task")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(""),
-                    started,
-                    chrono::Utc::now().to_rfc3339(),
-                    exit,
-                    stdout,
-                    stderr
-                );
-                let _ = std::fs::write(&log_path, log);
-
-                let mut done = queued.clone();
-                done.insert(
-                    "status".into(),
-                    serde_json::Value::String(if output.status.success() {
-                        "completed".into()
-                    } else {
-                        "failed".into()
-                    }),
-                );
-                done.insert(
-                    "finished_at".into(),
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-                );
-                done.insert("exit_code".into(), serde_json::json!(exit));
-                done.insert("pid".into(), serde_json::Value::Null);
-                let _ = write_json_map(&status_path, &done);
-            }
-            Err(e) => {
-                let mut failed = queued.clone();
-                failed.insert("status".into(), serde_json::Value::String("failed".into()));
-                failed.insert(
-                    "finished_at".into(),
-                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
-                );
-                failed.insert(
-                    "error".into(),
-                    serde_json::Value::String(format!("spawn/output failed: {}", e)),
-                );
-                failed.insert("pid".into(), serde_json::Value::Null);
-                let _ = write_json_map(&status_path, &failed);
-            }
-        }
+        execute_background_launch(launch, supervisor_lease).await;
     });
 }
 
-pub fn recover_queued_background_jobs(max_jobs: usize) -> usize {
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+async fn refuse_unidentified_background_child(
+    mut child: tokio::process::Child,
+    launch: &BackgroundLaunch,
+    claim: &BackgroundClaim,
+) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    let _ = transition_running_to_terminal(
+        &launch.status_path,
+        launch.dependencies.writer.as_ref(),
+        &claim.claim_id,
+        "outcome_unknown",
+        "child_identity_capture_failed",
+        None,
+        Some("background child identity could not be captured safely"),
+    );
+}
+
+async fn write_background_child_stdin(
+    child: &mut tokio::process::Child,
+    query: &[u8],
+) -> Result<(), ()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(());
+    };
+    stdin.write_all(query).await.map_err(|_| ())?;
+    stdin.shutdown().await.map_err(|_| ())
+}
+
+async fn refuse_background_child_stdin_failure(
+    mut child: tokio::process::Child,
+    launch: &BackgroundLaunch,
+    claim: &BackgroundClaim,
+) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    let _ = transition_running_to_terminal(
+        &launch.status_path,
+        launch.dependencies.writer.as_ref(),
+        &claim.claim_id,
+        "outcome_unknown",
+        "stdin_write_failed",
+        None,
+        Some("failed to deliver the background query to the child"),
+    );
+}
+
+fn render_background_completion_log(
+    status_snapshot: &BackgroundStatusMap,
+    started_at: &str,
+    finished_at: &str,
+    exit_code: i32,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> String {
+    let alpha_job = status_snapshot.contains_key("alpha_runtime_v1");
+    let (task, stdout, stderr) = if alpha_job {
+        (
+            SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER.to_string(),
+            "[sealed Alpha child output withheld]".to_string(),
+            "[sealed Alpha child diagnostics withheld]".to_string(),
+        )
+    } else {
+        (
+            status_snapshot
+                .get("task")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string(),
+            String::from_utf8_lossy(stdout).into_owned(),
+            String::from_utf8_lossy(stderr).into_owned(),
+        )
+    };
+    format!(
+        "task: {task}\nstarted_at: {started_at}\nfinished_at: {finished_at}\nexit_code: {exit_code}\n\n[stdout]\n{stdout}\n\n[stderr]\n{stderr}\n"
+    )
+}
+
+async fn execute_background_launch(
+    launch: BackgroundLaunch,
+    _supervisor_lease: BackgroundSupervisorLease,
+) {
+    let claim = match claim_queued_background_job(&launch.status_path, launch.dependencies.writer.as_ref()) {
+        Ok(Some(claim)) => claim,
+        Ok(None) => return,
+        Err(_) => {
+            tracing::warn!(
+                status_path = %launch.status_path.display(),
+                "background job remains durable after a claim failure and will be retried by recovery"
+            );
+            return;
+        }
+    };
+    if !running_claim_is_current(&launch.status_path, &claim.claim_id).unwrap_or(false) {
+        return;
+    }
+
+    let executable = match std::env::current_exe()
+        .map_err(|error| error.to_string())
+        .and_then(|path| {
+            canonical_background_executable(&path)?;
+            Ok(path)
+        }) {
+        Ok(path) => path,
+        Err(_) => {
+            let _ = transition_running_to_terminal(
+                &launch.status_path,
+                launch.dependencies.writer.as_ref(),
+                &claim.claim_id,
+                "failed",
+                "current_exe_unavailable",
+                None,
+                Some("unable to determine the background executable"),
+            );
+            return;
+        }
+    };
+
+    let spawn_plan =
+        background_child_spawn_plan(&executable, &launch.state_root, launch.task.as_str());
+    let mut command = background_child_command(&spawn_plan);
+    if !running_claim_is_current(&launch.status_path, &claim.claim_id).unwrap_or(false) {
+        return;
+    }
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            let _ = transition_running_to_terminal(
+                &launch.status_path,
+                launch.dependencies.writer.as_ref(),
+                &claim.claim_id,
+                "failed",
+                "spawn_failed",
+                None,
+                Some("failed to spawn background child"),
+            );
+            return;
+        }
+    };
+    let Some(pid) = child.id() else {
+        refuse_unidentified_background_child(child, &launch, &claim).await;
+        return;
+    };
+    let identity = match capture_background_child_identity(
+        launch.dependencies.inspector.as_ref(),
+        pid,
+        &executable,
+        &claim.claim_id,
+    ) {
+        Ok(identity) => identity,
+        Err(_) => {
+            refuse_unidentified_background_child(child, &launch, &claim).await;
+            return;
+        }
+    };
+    match attach_background_child_identity(
+        &launch.status_path,
+        launch.dependencies.writer.as_ref(),
+        &claim.claim_id,
+        &identity,
+    ) {
+        Ok(true) => {}
+        Ok(false) | Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return;
+        }
+    }
+    if write_background_child_stdin(&mut child, spawn_plan.stdin)
+        .await
+        .is_err()
+    {
+        refuse_background_child_stdin_failure(child, &launch, &claim).await;
+        return;
+    }
+
+
+    let output = child.wait_with_output().await;
+    match output {
+        Ok(output) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let finished_at = chrono::Utc::now().to_rfc3339();
+            let log = render_background_completion_log(
+                &claim.status_snapshot,
+                &claim.started_at,
+                &finished_at,
+                exit_code,
+                &output.stdout,
+                &output.stderr,
+            );
+            let _ = std::fs::write(&launch.log_path, log);
+            let (terminal_status, terminal_reason) = if output.status.success() {
+                ("completed", "child_exit_success")
+            } else {
+                ("failed", "child_exit_failure")
+            };
+            let _ = transition_running_to_terminal(
+                &launch.status_path,
+                launch.dependencies.writer.as_ref(),
+                &claim.claim_id,
+                terminal_status,
+                terminal_reason,
+                Some(exit_code),
+                None,
+            );
+        }
+        Err(_) => {
+            let _ = transition_running_to_terminal(
+                &launch.status_path,
+                launch.dependencies.writer.as_ref(),
+                &claim.claim_id,
+                "failed",
+                "child_wait_failed",
+                None,
+                Some("failed while waiting for background child output"),
+            );
+        }
+    }
+}
+
+/// Start a certified AlphaRuntimeV1 durable job only after the runtime has
+/// exact-unsealed the receipt-bound task. The job status itself never stores
+/// plaintext task material.
+fn schedule_alpha_runtime_v1_background_job(
+    state_root: &Path,
+    runtime: &RunRuntime,
+    job: &hermes_agent::AlphaRuntimeV1BackgroundJob,
+) -> Result<(), AgentError> {
+    let dependencies = BackgroundExecutionDependencies::system();
+    let Some(supervisor_lease) = BackgroundSupervisorLease::try_acquire(job.status_path())
+        .map_err(|error| AgentError::Io(format!("Failed to acquire background supervisor lease: {error}")))?
+    else {
+        return Ok(());
+    };
+    let task = runtime
+        .resolve_alpha_runtime_v1_background_job_task(job)
+        .map_err(|_| AgentError::Io("sealed AlphaRuntimeV1 job rejected".to_string()))?;
+    spawn_background_launch(
+        BackgroundLaunch {
+            state_root: state_root.to_path_buf(),
+            status_path: job.status_path().to_path_buf(),
+            log_path: job.log_path().to_path_buf(),
+            task,
+            dependencies,
+        },
+        supervisor_lease,
+    );
+    Ok(())
+}
+
+#[derive(Clone)]
+struct BackgroundRunningMonitor {
+    status_path: PathBuf,
+    claim_id: Option<String>,
+    identity: BackgroundChildIdentity,
+    dependencies: BackgroundExecutionDependencies,
+}
+
+fn monitor_background_running_job_once(
+    monitor: &BackgroundRunningMonitor,
+) -> Result<bool, AgentError> {
+    match check_background_child_identity(monitor.dependencies.inspector.as_ref(), &monitor.identity) {
+        BackgroundIdentityCheck::Exact => Ok(true),
+        BackgroundIdentityCheck::Absent | BackgroundIdentityCheck::Mismatch => {
+            let _ = transition_running_to_outcome_unknown(
+                &monitor.status_path,
+                monitor.dependencies.writer.as_ref(),
+                monitor.claim_id.as_deref(),
+                "supervisor_process_death",
+            )?;
+            Ok(false)
+        }
+        BackgroundIdentityCheck::Unverifiable => {
+            let _ = transition_running_to_outcome_unknown(
+                &monitor.status_path,
+                monitor.dependencies.writer.as_ref(),
+                monitor.claim_id.as_deref(),
+                "child_identity_unverifiable",
+            )?;
+            Ok(false)
+        }
+    }
+}
+
+async fn monitor_background_running_job(
+    monitor: BackgroundRunningMonitor,
+    _supervisor_lease: BackgroundSupervisorLease,
+) {
+    while monitor_background_running_job_once(&monitor).unwrap_or(false) {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+#[derive(Clone)]
+struct BackgroundRecoveryHooks {
+    launch: Arc<dyn Fn(BackgroundLaunch, BackgroundSupervisorLease) + Send + Sync>,
+    monitor: Arc<dyn Fn(BackgroundRunningMonitor, BackgroundSupervisorLease) + Send + Sync>,
+}
+
+impl BackgroundRecoveryHooks {
+    fn production() -> Self {
+        Self {
+            launch: Arc::new(spawn_background_launch),
+            monitor: Arc::new(|monitor, supervisor_lease| {
+                tokio::spawn(async move {
+                    monitor_background_running_job(monitor, supervisor_lease).await;
+                });
+            }),
+        }
+    }
+}
+
+fn recover_running_background_job(
+    status_path: &Path,
+    map: &BackgroundStatusMap,
+    supervisor_lease: BackgroundSupervisorLease,
+    dependencies: BackgroundExecutionDependencies,
+    hooks: &BackgroundRecoveryHooks,
+) -> bool {
+    let claim_id = status_claim_id(map).map(ToString::to_string);
+    let identity = match map_child_identity(map) {
+        Ok(identity) => identity,
+        Err(()) => {
+            return transition_running_to_outcome_unknown(
+                status_path,
+                dependencies.writer.as_ref(),
+                claim_id.as_deref(),
+                "malformed_child_identity",
+            )
+            .unwrap_or(false);
+        }
+    };
+    match check_background_child_identity(dependencies.inspector.as_ref(), &identity) {
+        BackgroundIdentityCheck::Exact => {
+            (hooks.monitor)(
+                BackgroundRunningMonitor {
+                    status_path: status_path.to_path_buf(),
+                    claim_id,
+                    identity,
+                    dependencies,
+                },
+                supervisor_lease,
+            );
+            true
+        }
+        BackgroundIdentityCheck::Absent | BackgroundIdentityCheck::Mismatch => {
+            transition_running_to_outcome_unknown(
+                status_path,
+                dependencies.writer.as_ref(),
+                claim_id.as_deref(),
+                "supervisor_process_death",
+            )
+            .unwrap_or(false)
+        }
+        BackgroundIdentityCheck::Unverifiable => transition_running_to_outcome_unknown(
+            status_path,
+            dependencies.writer.as_ref(),
+            claim_id.as_deref(),
+            "child_identity_unverifiable",
+        )
+        .unwrap_or(false),
+    }
+}
+
+pub fn recover_queued_background_jobs(
+    state_root: &Path,
+    runtime: &RunRuntime,
+    max_jobs: usize,
+) -> usize {
+    let dependencies = BackgroundExecutionDependencies::system();
+    let hooks = BackgroundRecoveryHooks::production();
+    recover_background_jobs_with_dependencies(
+        state_root,
+        Some(runtime),
+        max_jobs,
+        dependencies,
+        &hooks,
+    )
+}
+
+fn recover_background_jobs_with_dependencies(
+    state_root: &Path,
+    runtime: Option<&RunRuntime>,
+    max_jobs: usize,
+    dependencies: BackgroundExecutionDependencies,
+    hooks: &BackgroundRecoveryHooks,
+) -> usize {
+    let jobs_dir = state_root.join("background_jobs");
     let Ok(entries) = std::fs::read_dir(&jobs_dir) else {
         return 0;
     };
@@ -1266,37 +2240,98 @@ pub fn recover_queued_background_jobs(max_jobs: usize) -> usize {
             break;
         }
         let status_path = entry.path();
-        if status_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            != "json"
-        {
+        if status_path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
-        let map = read_json_map(&status_path);
-        let status = map
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if status != "queued" {
-            continue;
-        }
-        let task = map
-            .get("task")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string);
-        let log_path = map
-            .get("log_path")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| status_path.with_extension("log"));
-        if let Some(task) = task {
-            schedule_background_job_execution(status_path.clone(), log_path, task);
-            recovered = recovered.saturating_add(1);
+        let supervisor_lease = match BackgroundSupervisorLease::try_acquire(&status_path) {
+            Ok(Some(lease)) => lease,
+            Ok(None) => continue,
+            Err(_) => {
+                tracing::warn!(
+                    status_path = %status_path.display(),
+                    "durable background job was left unchanged because its supervisor lease could not be inspected"
+                );
+                continue;
+            }
+        };
+        let map = match read_background_status_map_locked(&status_path) {
+            Ok(map) => map,
+            Err(_) => continue,
+        };
+        match background_status_name(&map).as_str() {
+            "running" => {
+                let _ = recover_running_background_job(
+                    &status_path,
+                    &map,
+                    supervisor_lease,
+                    dependencies.clone(),
+                    hooks,
+                );
+            }
+            "queued" => {
+                let (task, log_path) = if map.contains_key("alpha_runtime_v1") {
+                    let alpha_job = match hermes_agent::AlphaRuntimeV1BackgroundJob::from_status_value(
+                        state_root,
+                        &status_path,
+                        &serde_json::Value::Object(map.clone()),
+                    ) {
+                        Ok(Some(job)) => job,
+                        Ok(None) | Err(_) => {
+                            tracing::warn!(
+                                status_path = %status_path.display(),
+                                "refusing malformed sealed Alpha background job during recovery"
+                            );
+                            continue;
+                        }
+                    };
+                    let Some(runtime) = runtime else {
+                        continue;
+                    };
+                    let task = match runtime.resolve_alpha_runtime_v1_background_job_task(&alpha_job) {
+                        Ok(task) => task,
+                        Err(_) => {
+                            tracing::warn!(
+                                status_path = %status_path.display(),
+                                "sealed Alpha background task remains queued because it could not be resolved"
+                            );
+                            continue;
+                        }
+                    };
+                    (task, alpha_job.log_path().to_path_buf())
+                } else {
+                    let Some(task) = map
+                        .get("task")
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string)
+                    else {
+                        tracing::warn!(
+                            status_path = %status_path.display(),
+                            "background job remains queued because its task is missing"
+                        );
+                        continue;
+                    };
+                    let log_path = map
+                        .get("log_path")
+                        .and_then(|value| value.as_str())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| status_path.with_extension("log"));
+                    (task, log_path)
+                };
+                (hooks.launch)(
+                    BackgroundLaunch {
+                        state_root: state_root.to_path_buf(),
+                        status_path,
+                        log_path,
+                        task,
+                        dependencies: dependencies.clone(),
+                    },
+                    supervisor_lease,
+                );
+                recovered = recovered.saturating_add(1);
+            }
+            _ => {}
         }
     }
     recovered
@@ -1305,18 +2340,656 @@ pub fn recover_queued_background_jobs(max_jobs: usize) -> usize {
 fn read_json_map(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
     std::fs::read_to_string(path)
         .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.as_object().cloned())
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+        .and_then(|value| value.as_object().cloned())
         .unwrap_or_default()
 }
 
-fn write_json_map(
-    path: &std::path::Path,
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), std::io::Error> {
-    let content = serde_json::to_string_pretty(&serde_json::Value::Object(map.clone()))
-        .unwrap_or_else(|_| "{}".to_string());
-    std::fs::write(path, content)
+
+#[cfg(test)]
+mod background_durable_tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    struct FakeProcessInspector {
+        observations: Mutex<VecDeque<Result<Option<ObservedBackgroundProcess>, String>>>,
+    }
+
+    impl FakeProcessInspector {
+        fn new(observations: Vec<Result<Option<ObservedBackgroundProcess>, String>>) -> Self {
+            Self {
+                observations: Mutex::new(observations.into()),
+            }
+        }
+    }
+
+    impl BackgroundProcessInspector for FakeProcessInspector {
+        fn inspect(&self, _pid: u32) -> Result<Option<ObservedBackgroundProcess>, String> {
+            self.observations
+                .lock()
+                .expect("fake inspector lock")
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeSignalSink {
+        calls: Mutex<Vec<u32>>,
+        fail: bool,
+    }
+
+    impl BackgroundSignalSink for FakeSignalSink {
+        fn terminate(&self, pid: u32) -> Result<(), String> {
+            self.calls.lock().expect("fake signal lock").push(pid);
+            if self.fail {
+                Err("signal failed".to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    struct FailingStatusWriter;
+
+    impl BackgroundStatusWriter for FailingStatusWriter {
+        fn replace(&self, _path: &Path, _map: &BackgroundStatusMap) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "injected atomic replacement failure",
+            ))
+        }
+    }
+
+    fn test_dependencies(
+        observations: Vec<Result<Option<ObservedBackgroundProcess>, String>>,
+        signals: Arc<FakeSignalSink>,
+    ) -> BackgroundExecutionDependencies {
+        BackgroundExecutionDependencies {
+            inspector: Arc::new(FakeProcessInspector::new(observations)),
+            signals,
+            writer: Arc::new(AtomicBackgroundStatusWriter),
+        }
+    }
+
+    fn write_test_status(
+        root: &Path,
+        id: &str,
+        status: &str,
+        task: &str,
+        claim_id: Option<&str>,
+        identity: Option<BackgroundChildIdentity>,
+    ) -> PathBuf {
+        let jobs = root.join("background_jobs");
+        std::fs::create_dir_all(&jobs).expect("jobs directory");
+        let status_path = jobs.join(format!("{id}.json"));
+        let log_path = jobs.join(format!("{id}.log"));
+        let mut map = BackgroundStatusMap::new();
+        map.insert("id".to_string(), serde_json::Value::String(id.to_string()));
+        map.insert("status".to_string(), serde_json::Value::String(status.to_string()));
+        map.insert("task".to_string(), serde_json::Value::String(task.to_string()));
+        map.insert("attempts".to_string(), serde_json::json!(1));
+        map.insert(
+            "created_at".to_string(),
+            serde_json::Value::String("2026-07-20T00:00:00Z".to_string()),
+        );
+        map.insert("started_at".to_string(), serde_json::Value::Null);
+        map.insert("finished_at".to_string(), serde_json::Value::Null);
+        map.insert("exit_code".to_string(), serde_json::Value::Null);
+        map.insert(
+            "log_path".to_string(),
+            serde_json::Value::String(log_path.display().to_string()),
+        );
+        if let Some(claim_id) = claim_id {
+            map.insert(
+                "claim_id".to_string(),
+                serde_json::Value::String(claim_id.to_string()),
+            );
+        }
+        if let Some(identity) = identity {
+            map.insert("pid".to_string(), serde_json::json!(identity.pid));
+            map.insert(
+                "child_identity".to_string(),
+                serde_json::to_value(identity).expect("identity json"),
+            );
+        } else {
+            map.insert("pid".to_string(), serde_json::Value::Null);
+            map.insert("child_identity".to_string(), serde_json::Value::Null);
+        }
+        atomic_replace_background_status(&status_path, &map).expect("status write");
+        status_path
+    }
+
+    fn running_identity(pid: u32, start_token: &str, executable: &str) -> BackgroundChildIdentity {
+        BackgroundChildIdentity {
+            pid,
+            start_token: start_token.to_string(),
+            executable: executable.to_string(),
+            claim_id: "claim-a".to_string(),
+        }
+    }
+
+    fn observed(identity: &BackgroundChildIdentity) -> ObservedBackgroundProcess {
+        ObservedBackgroundProcess {
+            start_token: identity.start_token.clone(),
+            executable: PathBuf::from(&identity.executable),
+        }
+    }
+
+    fn no_op_hooks() -> BackgroundRecoveryHooks {
+        BackgroundRecoveryHooks {
+            launch: Arc::new(|_, _| {}),
+            monitor: Arc::new(|_, _| {}),
+        }
+    }
+
+    #[test]
+    fn concurrent_queued_recovery_schedules_once() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path().to_path_buf();
+        let status_path = write_test_status(&root, "queued-once", "queued", "ordinary task", None, None);
+        let signals = Arc::new(FakeSignalSink::default());
+        let dependencies = test_dependencies(Vec::new(), signals);
+        let scheduled = Arc::new(Mutex::new(0usize));
+        let held_leases = Arc::new(Mutex::new(Vec::<BackgroundSupervisorLease>::new()));
+        let hooks = BackgroundRecoveryHooks {
+            launch: {
+                let scheduled = Arc::clone(&scheduled);
+                let held_leases = Arc::clone(&held_leases);
+                Arc::new(move |_, lease| {
+                    *scheduled.lock().expect("schedule count") += 1;
+                    held_leases.lock().expect("lease storage").push(lease);
+                })
+            },
+            monitor: Arc::new(|_, _| {}),
+        };
+
+        let (first, second) = std::thread::scope(|scope| {
+            let first_root = root.clone();
+            let first_dependencies = dependencies.clone();
+            let first_hooks = hooks.clone();
+            let first = scope.spawn(move || {
+                recover_background_jobs_with_dependencies(
+                    &first_root,
+                    None,
+                    8,
+                    first_dependencies,
+                    &first_hooks,
+                )
+            });
+            let second_root = root.clone();
+            let second_dependencies = dependencies.clone();
+            let second_hooks = hooks.clone();
+            let second = scope.spawn(move || {
+                recover_background_jobs_with_dependencies(
+                    &second_root,
+                    None,
+                    8,
+                    second_dependencies,
+                    &second_hooks,
+                )
+            });
+            (
+                first.join().expect("first recovery"),
+                second.join().expect("second recovery"),
+            )
+        });
+
+        assert_eq!(first + second, 1);
+        assert_eq!(*scheduled.lock().expect("schedule count"), 1);
+        assert_eq!(background_status_name(&read_background_status_map(&status_path).unwrap()), "queued");
+    }
+
+    #[test]
+    fn stale_running_absent_child_becomes_outcome_unknown() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let identity = running_identity(41, "start-a", "/tmp/hermes-child");
+        let status_path = write_test_status(
+            root,
+            "stale-absent",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            Some(identity),
+        );
+        let dependencies = test_dependencies(Vec::new(), Arc::new(FakeSignalSink::default()));
+        let recovered = recover_background_jobs_with_dependencies(
+            root,
+            None,
+            8,
+            dependencies,
+            &no_op_hooks(),
+        );
+
+        let map = read_background_status_map(&status_path).expect("status");
+        assert_eq!(recovered, 0);
+        assert_eq!(background_status_name(&map), "outcome_unknown");
+        assert_eq!(
+            map.get("terminal_reason").and_then(|value| value.as_str()),
+            Some("supervisor_process_death")
+        );
+    }
+
+    #[test]
+    fn malformed_running_identity_becomes_unknown_without_launching() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let status_path = write_test_status(
+            root,
+            "malformed-running",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            None,
+        );
+        let recovered = recover_background_jobs_with_dependencies(
+            root,
+            None,
+            8,
+            test_dependencies(Vec::new(), Arc::new(FakeSignalSink::default())),
+            &no_op_hooks(),
+        );
+
+        let map = read_background_status_map(&status_path).expect("status");
+        assert_eq!(recovered, 0);
+        assert_eq!(background_status_name(&map), "outcome_unknown");
+        assert_eq!(
+            map.get("terminal_reason").and_then(|value| value.as_str()),
+            Some("malformed_child_identity")
+        );
+    }
+
+    #[test]
+    fn exact_live_running_child_is_monitored_without_resubmission() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let identity = running_identity(42, "start-b", "/tmp/hermes-child");
+        let status_path = write_test_status(
+            root,
+            "live-monitor",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            Some(identity.clone()),
+        );
+        let dependencies = test_dependencies(
+            vec![Ok(Some(observed(&identity))), Ok(None)],
+            Arc::new(FakeSignalSink::default()),
+        );
+        let launches = Arc::new(Mutex::new(0usize));
+        let monitors = Arc::new(Mutex::new(0usize));
+        let hooks = BackgroundRecoveryHooks {
+            launch: {
+                let launches = Arc::clone(&launches);
+                Arc::new(move |_, _| *launches.lock().expect("launch count") += 1)
+            },
+            monitor: {
+                let monitors = Arc::clone(&monitors);
+                Arc::new(move |monitor, _| {
+                    *monitors.lock().expect("monitor count") += 1;
+                    assert!(!monitor_background_running_job_once(&monitor).expect("monitor check"));
+                })
+            },
+        };
+
+        let recovered =
+            recover_background_jobs_with_dependencies(root, None, 8, dependencies, &hooks);
+        let map = read_background_status_map(&status_path).expect("status");
+        assert_eq!(recovered, 0);
+        assert_eq!(*launches.lock().expect("launch count"), 0);
+        assert_eq!(*monitors.lock().expect("monitor count"), 1);
+        assert_eq!(background_status_name(&map), "outcome_unknown");
+        assert_eq!(
+            map.get("terminal_reason").and_then(|value| value.as_str()),
+            Some("supervisor_process_death")
+        );
+    }
+
+    #[test]
+    fn active_supervisor_lease_is_untouched_by_recovery() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let identity = running_identity(43, "start-c", "/tmp/hermes-child");
+        let status_path = write_test_status(
+            root,
+            "active-supervisor",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            Some(identity),
+        );
+        let _lease = BackgroundSupervisorLease::try_acquire(&status_path)
+            .expect("lease")
+            .expect("lease acquired");
+        let recovered = recover_background_jobs_with_dependencies(
+            root,
+            None,
+            8,
+            test_dependencies(Vec::new(), Arc::new(FakeSignalSink::default())),
+            &no_op_hooks(),
+        );
+
+        assert_eq!(recovered, 0);
+        assert_eq!(
+            background_status_name(&read_background_status_map(&status_path).expect("status")),
+            "running"
+        );
+    }
+
+    #[test]
+    fn pid_reuse_mismatch_is_never_signaled() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let identity = running_identity(44, "old-start", "/tmp/hermes-child");
+        let status_path = write_test_status(
+            root,
+            "pid-reuse",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            Some(identity.clone()),
+        );
+        let signals = Arc::new(FakeSignalSink::default());
+        let dependencies = test_dependencies(
+            vec![Ok(Some(ObservedBackgroundProcess {
+                start_token: "new-start".to_string(),
+                executable: PathBuf::from(&identity.executable),
+            }))],
+            Arc::clone(&signals),
+        );
+        let message =
+            terminate_background_job_with_dependencies(root, "pid-reuse", &dependencies).expect("stop");
+
+        assert!(message.contains("Refused SIGTERM"));
+        assert!(signals.calls.lock().expect("signal calls").is_empty());
+        assert_eq!(
+            background_status_name(&read_background_status_map(&status_path).expect("status")),
+            "outcome_unknown"
+        );
+    }
+
+    #[test]
+    fn pending_claim_cancellation_never_signals_without_an_identity() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let status_path = write_test_status(
+            root,
+            "pending-cancel",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            None,
+        );
+        let mut map = read_background_status_map(&status_path).expect("status");
+        map.insert(
+            "execution_phase".to_string(),
+            serde_json::Value::String("claiming".to_string()),
+        );
+        atomic_replace_background_status(&status_path, &map).expect("claiming fixture");
+        let signals = Arc::new(FakeSignalSink::default());
+        let dependencies = test_dependencies(Vec::new(), Arc::clone(&signals));
+
+        let message =
+            terminate_background_job_with_dependencies(root, "pending-cancel", &dependencies)
+                .expect("cancel");
+        assert!(message.contains("before child input"));
+        assert!(signals.calls.lock().expect("signal calls").is_empty());
+        assert_eq!(
+            background_status_name(&read_background_status_map(&status_path).expect("status")),
+            "canceled"
+        );
+    }
+
+    #[test]
+    fn canceled_job_cannot_be_regressed_by_stale_waiter() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let identity = running_identity(45, "start-d", "/tmp/hermes-child");
+        let status_path = write_test_status(
+            root,
+            "cancel-race",
+            "running",
+            "ordinary task",
+            Some("claim-a"),
+            Some(identity.clone()),
+        );
+        let signals = Arc::new(FakeSignalSink::default());
+        let dependencies =
+            test_dependencies(vec![Ok(Some(observed(&identity)))], Arc::clone(&signals));
+        let _ = terminate_background_job_with_dependencies(root, "cancel-race", &dependencies)
+            .expect("operator cancellation");
+        assert!(signals.calls.lock().expect("signal calls").contains(&45));
+
+        assert!(!transition_running_to_terminal(
+            &status_path,
+            dependencies.writer.as_ref(),
+            "claim-a",
+            "completed",
+            "child_exit_success",
+            Some(0),
+            None,
+        )
+        .expect("stale waiter transition"));
+        assert_eq!(
+            background_status_name(&read_background_status_map(&status_path).expect("status")),
+            "canceled"
+        );
+    }
+
+    #[test]
+    fn all_terminal_statuses_are_immutable_to_claim_waiters() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let writer = AtomicBackgroundStatusWriter;
+        for terminal in ["completed", "failed", "canceled", "outcome_unknown"] {
+            let status_path = write_test_status(
+                temp.path(),
+                terminal,
+                terminal,
+                "ordinary task",
+                Some("claim-a"),
+                None,
+            );
+            assert!(!transition_running_to_terminal(
+                &status_path,
+                &writer,
+                "claim-a",
+                "completed",
+                "child_exit_success",
+                Some(0),
+                None,
+            )
+            .expect("terminal transition check"));
+            assert_eq!(
+                background_status_name(&read_background_status_map(&status_path).expect("status")),
+                terminal
+            );
+        }
+    }
+
+    #[test]
+    fn failed_atomic_replacement_keeps_last_valid_status_json() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let status_path =
+            write_test_status(temp.path(), "atomic-failure", "queued", "ordinary task", None, None);
+        let result = mutate_background_status(&status_path, &FailingStatusWriter, |map| {
+            map.insert(
+                "status".to_string(),
+                serde_json::Value::String("running".to_string()),
+            );
+            Ok(((), true))
+        });
+
+        assert!(result.is_err());
+        let raw = std::fs::read_to_string(&status_path).expect("preserved status bytes");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("valid JSON remains");
+        assert_eq!(parsed.get("status").and_then(|value| value.as_str()), Some("queued"));
+    }
+
+    #[test]
+    fn status_rendering_enumerates_each_terminal_state() {
+        let temp = tempfile::tempdir().expect("temp root");
+        for status in [
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "canceled",
+            "outcome_unknown",
+            "unknown",
+        ] {
+            write_test_status(temp.path(), status, status, "ordinary task", None, None);
+        }
+
+        assert_eq!(
+            background_job_counts(temp.path()),
+            BackgroundJobCounts {
+                queued: 1,
+                running: 1,
+                completed: 1,
+                failed: 1,
+                canceled: 1,
+                outcome_unknown: 2,
+            }
+        );
+        assert!(
+            render_background_status(temp.path(), 12).contains(
+                "queued=1 running=1 completed=1 failed=1 canceled=1 outcome_unknown=2"
+            )
+        );
+    }
+
+    #[test]
+    fn background_spawn_plan_keeps_query_out_of_argv_and_environment() {
+        let sentinel = "sealed Alpha task sentinel";
+        let plan = background_child_spawn_plan(
+            Path::new("/private/background-child"),
+            Path::new("/private/background-state"),
+            sentinel,
+        );
+
+        assert!(!plan
+            .arguments()
+            .iter()
+            .any(|argument| *argument == "--query" || *argument == sentinel));
+        assert!(plan
+            .environment()
+            .iter()
+            .all(|(_, value)| !value.to_string_lossy().contains(sentinel)));
+        let command = background_child_command(&plan);
+        assert!(command
+            .as_std()
+            .get_args()
+            .all(|argument| !argument.to_string_lossy().contains(sentinel)));
+        assert!(command.as_std().get_envs().all(|(_, value)| match value {
+            Some(value) => !value.to_string_lossy().contains(sentinel),
+            None => true,
+        }));
+        assert_eq!(plan.stdin, sentinel.as_bytes());
+    }
+
+    #[test]
+    fn alpha_completion_log_redacts_task_and_child_diagnostics() {
+        let secret = "sealed Alpha task sentinel";
+        let mut status = BackgroundStatusMap::new();
+        status.insert(
+            "alpha_runtime_v1".to_string(),
+            serde_json::json!({"schema": "hermes.alpha-runtime-v1.background-job/v1"}),
+        );
+        status.insert(
+            "task".to_string(),
+            serde_json::Value::String(SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER.to_string()),
+        );
+
+        let log = render_background_completion_log(
+            &status,
+            "2026-07-20T00:00:00Z",
+            "2026-07-20T00:01:00Z",
+            0,
+            secret.as_bytes(),
+            secret.as_bytes(),
+        );
+        assert!(!log.contains(secret));
+        assert!(log.contains(SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER));
+        assert!(log.contains("withheld"));
+    }
+
+    #[test]
+    fn malformed_alpha_status_is_refused_without_plaintext_diagnostics() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = temp.path();
+        let secret = "TOP SECRET sealed alpha task";
+        let status_path = write_test_status(root, "malformed-alpha", "queued", secret, None, None);
+        let mut map = read_background_status_map(&status_path).expect("status");
+        map.insert("alpha_runtime_v1".to_string(), serde_json::json!({}));
+        atomic_replace_background_status(&status_path, &map).expect("malformed fixture");
+
+        let launches = Arc::new(Mutex::new(0usize));
+        let hooks = BackgroundRecoveryHooks {
+            launch: {
+                let launches = Arc::clone(&launches);
+                Arc::new(move |_, _| *launches.lock().expect("launch count") += 1)
+            },
+            monitor: Arc::new(|_, _| {}),
+        };
+        let recovered = recover_background_jobs_with_dependencies(
+            root,
+            None,
+            8,
+            test_dependencies(Vec::new(), Arc::new(FakeSignalSink::default())),
+            &hooks,
+        );
+        let guard_error = AlphaBackgroundBinding::capture(&map)
+            .expect_err("plaintext Alpha status is rejected")
+            .to_string();
+
+        assert_eq!(recovered, 0);
+        assert_eq!(*launches.lock().expect("launch count"), 0);
+        assert!(!guard_error.contains(secret));
+        assert_eq!(
+            read_background_status_map(&status_path)
+                .expect("status")
+                .get("task")
+                .and_then(|value| value.as_str()),
+            Some(secret)
+        );
+        assert!(!status_path.with_extension("log").exists());
+    }
+
+    #[test]
+    fn alpha_binding_survives_background_state_mutation() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let status_path = write_test_status(
+            temp.path(),
+            "sealed-alpha",
+            "running",
+            SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER,
+            Some("claim-a"),
+            None,
+        );
+        let mut map = read_background_status_map(&status_path).expect("status");
+        let metadata = serde_json::json!({"schema": "hermes.alpha-runtime-v1.background-job/v1"});
+        map.insert("alpha_runtime_v1".to_string(), metadata.clone());
+        atomic_replace_background_status(&status_path, &map).expect("alpha fixture");
+
+        assert!(transition_running_to_terminal(
+            &status_path,
+            &AtomicBackgroundStatusWriter,
+            "claim-a",
+            "failed",
+            "spawn_failed",
+            None,
+            Some("failed to spawn background child"),
+        )
+        .expect("transition"));
+        let after = read_background_status_map(&status_path).expect("status");
+        assert_eq!(after.get("alpha_runtime_v1"), Some(&metadata));
+        assert_eq!(
+            after.get("task").and_then(|value| value.as_str()),
+            Some(SEALED_ALPHA_BACKGROUND_TASK_PLACEHOLDER)
+        );
+    }
 }
 
 fn handle_verbose_command(app: &mut App) -> Result<CommandResult, AgentError> {

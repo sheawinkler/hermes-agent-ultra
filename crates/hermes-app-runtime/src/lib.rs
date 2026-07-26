@@ -14,9 +14,11 @@ use hermes_agent::agent_loop::{
 };
 use hermes_agent::provider::is_openai_dynamic_model_alias;
 use hermes_agent::smart_model_routing::ApiMode;
-use hermes_agent::{AgentCallbacks, AgentConfig, AgentLoop};
+use hermes_agent::{AgentCallbacks, AgentConfig, AgentLoop, RunRuntime};
 use hermes_config::{normalize_service_tier, GatewayConfig, LlmProviderConfig};
-use hermes_core::{AgentError, AgentResult, LlmProvider, Message, MessageRole, ToolSchema};
+use hermes_core::{
+    AgentError, AgentResult, LlmProvider, Message, MessageRole, ResolvedExecutionMode, ToolSchema,
+};
 use hermes_intelligence::future_grade_problem_solving_guidance;
 use hermes_provider_runtime::{
     active_llm_provider_config, normalize_runtime_provider_name, resolve_provider_and_model,
@@ -124,8 +126,31 @@ fn configured_agent_max_tokens(provider_config: Option<&LlmProviderConfig>) -> O
     }
     provider_config.and_then(|cfg| cfg.max_tokens.filter(|value| *value > 0))
 }
+fn runtime_surface_platform() -> &'static str {
+    let enabled = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes"
+                )
+            })
+            .unwrap_or(false)
+    };
 
-pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
+    if enabled("HERMES_DESKTOP") && !enabled("HERMES_DESKTOP_TERMINAL") {
+        "desktop"
+    } else {
+        "cli"
+    }
+}
+
+pub fn build_agent_config(
+    config: &GatewayConfig,
+    model: &str,
+    execution_mode: ResolvedExecutionMode,
+) -> AgentConfig {
     let (resolved_provider, _) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
     let provider_config = active_llm_provider_config(
@@ -203,7 +228,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         skip_memory,
         skip_context_files,
         coding_context: config.agent.coding_context.clone(),
-        platform: Some("cli".to_string()),
+        platform: Some(runtime_surface_platform().to_string()),
+        execution_mode,
         enabled_skills: config.skills.enabled.clone(),
         disabled_skills: config.skills.disabled.clone(),
         pass_session_id: true,
@@ -680,6 +706,8 @@ pub fn assistant_reply_from_result(result: &AgentResult) -> String {
 
 pub async fn run_noninteractive_query(
     config: &GatewayConfig,
+    run_runtime: Arc<RunRuntime>,
+    execution_mode: ResolvedExecutionMode,
     active_model: &str,
     query: &str,
     agent_tool_registry: Arc<AgentToolRegistry>,
@@ -689,10 +717,11 @@ pub async fn run_noninteractive_query(
 ) -> Result<NoninteractiveQueryOutcome, AgentError> {
     let active_model = active_model.trim().to_string();
     apply_cli_chat_runtime_env(&active_model);
-    let agent_config = build_agent_config(config, &active_model);
+    let agent_config = build_agent_config(config, &active_model, execution_mode);
     let provider = provider_factory(config, &active_model);
-    let agent =
-        AgentLoop::new(agent_config, agent_tool_registry, provider).with_callbacks(callbacks);
+    let agent = AgentLoop::new(agent_config, agent_tool_registry, provider)
+        .with_run_runtime(run_runtime)
+        .with_callbacks(callbacks);
     let result = agent
         .run(vec![Message::user(query)], Some(tool_schemas))
         .await?;

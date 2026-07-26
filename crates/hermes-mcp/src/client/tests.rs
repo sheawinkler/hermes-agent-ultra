@@ -1,8 +1,9 @@
 use super::{
-    cache_mcp_image_block, is_stale_transport_error, mcp_call_timeout_duration,
-    mcp_input_schema_to_json_schema, mcp_keepalive_interval_duration, validate_mcp_server_config,
-    LlmCallback, McpClient, McpManager, McpServerConfig, SamplingConfig,
-    DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS, MIN_MCP_KEEPALIVE_INTERVAL_SECS,
+    cache_mcp_image_block, extract_mcp_error_message, is_stale_transport_error,
+    mcp_call_timeout_duration, mcp_input_schema_to_json_schema, mcp_keepalive_interval_duration,
+    mcp_resource_filename, render_mcp_resource_block, validate_mcp_server_config, LlmCallback,
+    McpClient, McpManager, McpServerConfig, SamplingConfig, DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS,
+    MIN_MCP_KEEPALIVE_INTERVAL_SECS,
 };
 use crate::transport::McpTransport;
 use crate::McpError;
@@ -438,6 +439,17 @@ async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
                     "content": [{"type": "text", "text": "mcp search ok"}]
                 }
             }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "result": {
+                    "contents": [{
+                        "uri": "mcp://dyn.server/notes.txt",
+                        "mimeType": "text/plain",
+                        "text": "MCP resource contents"
+                    }]
+                }
+            }),
         ],
         closed.clone(),
         sent.clone(),
@@ -463,7 +475,10 @@ async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
     );
     assert_eq!(
         registry.tool_names_for_toolset("dyn.server", true),
-        vec!["mcp_dyn_server_search_file".to_string()]
+        vec![
+            "mcp_dyn_server_read_resource".to_string(),
+            "mcp_dyn_server_search_file".to_string(),
+        ]
     );
 
     let output = registry
@@ -471,6 +486,13 @@ async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
         .await;
     let parsed: serde_json::Value = serde_json::from_str(&output).expect("tool json");
     assert_eq!(parsed["result"], "mcp search ok");
+    let resource_output = registry
+        .dispatch_async(
+            "mcp_dyn_server_read_resource",
+            json!({"uri": "mcp://dyn.server/notes.txt"}),
+        )
+        .await;
+    assert!(resource_output.contains("MCP resource contents"));
 
     {
         let sent = sent.lock().expect("sent lock");
@@ -480,6 +502,11 @@ async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
             .expect("tools/call sent");
         assert_eq!(call["params"]["name"], "search-file");
         assert_eq!(call["params"]["arguments"]["query"], "rust");
+        let resource = sent
+            .iter()
+            .find(|msg| msg["method"] == "resources/read")
+            .expect("resources/read sent");
+        assert_eq!(resource["params"]["uri"], "mcp://dyn.server/notes.txt");
     }
 
     manager.disconnect("dyn.server").await.expect("disconnect");
@@ -703,24 +730,60 @@ async fn send_request_replies_to_sampling_request_then_continues_waiting() {
 }
 
 #[test]
-fn cache_mcp_image_block_writes_media_file() {
+fn mcp_resource_blocks_are_materialized_with_safe_names() {
     let td = TempDir::new().expect("tempdir");
     let old_home = std::env::var("HERMES_HOME").ok();
     std::env::set_var("HERMES_HOME", td.path().display().to_string());
-    // 1x1 PNG.
+
+    // 1x1 PNG still follows its existing MEDIA cache path.
     let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5Xn8cAAAAASUVORK5CYII=";
-    let item = json!({
+    let image = json!({
         "type": "image",
         "mimeType": "image/png",
         "data": png_b64
     });
-    let media = cache_mcp_image_block(&item).expect("expected media tag");
-    assert!(media.starts_with("MEDIA:"));
-    let path = media.trim_start_matches("MEDIA:");
-    assert!(
-        std::path::Path::new(path).exists(),
-        "cached media path should exist"
+    let media = cache_mcp_image_block(&image).expect("expected image media tag");
+    assert!(std::path::Path::new(media.trim_start_matches("MEDIA:")).exists());
+
+    let embedded = json!({
+        "type": "resource",
+        "resource": {
+            "uri": "mcp://files/../../report.pdf",
+            "mimeType": "application/pdf",
+            "blob": "JVBERi0="
+        }
+    });
+    let rendered = render_mcp_resource_block(&embedded, Some("team.alpha"))
+        .expect("embedded resource should render");
+    assert!(rendered.contains("saved to"));
+    assert!(rendered.contains("application/pdf"));
+    assert!(!rendered.contains("../"));
+    let path = rendered
+        .split("saved to ")
+        .nth(1)
+        .and_then(|tail| tail.split(" (").next())
+        .expect("resource path");
+    assert_eq!(std::fs::read(path).expect("cached resource"), b"%PDF-");
+    assert_eq!(
+        mcp_resource_filename("mcp://files/../../report.pdf", "application/pdf"),
+        "report.pdf"
     );
+
+    let link = json!({
+        "type": "resource_link",
+        "uri": "mcp://files/report.pdf",
+        "name": "report.pdf",
+        "mimeType": "application/pdf"
+    });
+    let marker = render_mcp_resource_block(&link, Some("team.alpha")).expect("resource link");
+    assert!(marker.contains("mcp_team_alpha_read_resource"));
+
+    let error = extract_mcp_error_message(
+        &json!({"content": [{"type": "resource", "resource": {"text": "quota exceeded"}}]}),
+        Some("team.alpha"),
+    );
+    assert_eq!(error, "quota exceeded");
+
     if let Some(prev) = old_home {
         std::env::set_var("HERMES_HOME", prev);
     } else {

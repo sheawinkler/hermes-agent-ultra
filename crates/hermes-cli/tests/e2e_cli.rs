@@ -95,6 +95,132 @@ fn e2e_cli_config_set_persists_model_to_yaml() {
         raw
     );
 }
+#[test]
+fn e2e_cli_config_set_get_and_show_never_echo_url_credentials() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    let password = "proxy-password-sentinel";
+    let query_secret = "proxy-query-sentinel";
+    let proxy = format!("http://alice:{password}@proxy.example.test:8080?api_key={query_secret}");
+
+    let mut set = Command::cargo_bin("hermes").expect("binary exists");
+    set.env("HERMES_HOME", home);
+    for key in [
+        "HERMES_PROXY_HTTP",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ] {
+        set.env_remove(key);
+    }
+    set.args(["config", "set", "proxy.http", proxy.as_str()]);
+    let set_output = set.assert().success().get_output().clone();
+
+    let raw = fs::read_to_string(home.join("config.yaml")).expect("read config");
+    assert!(raw.contains(password), "password should persist to config");
+    assert!(
+        raw.contains(query_secret),
+        "query credential should persist to config"
+    );
+
+    let mut get = Command::cargo_bin("hermes").expect("binary exists");
+    get.env("HERMES_HOME", home);
+    for key in [
+        "HERMES_PROXY_HTTP",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ] {
+        get.env_remove(key);
+    }
+    get.args(["config", "get", "proxy.http"]);
+    let get_output = get.assert().success().get_output().clone();
+
+    let mut show = Command::cargo_bin("hermes").expect("binary exists");
+    show.env("HERMES_HOME", home);
+    for key in [
+        "HERMES_PROXY_HTTP",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ] {
+        show.env_remove(key);
+    }
+    show.args(["config", "show"]);
+    let show_output = show.assert().success().get_output().clone();
+    for (surface, output) in [("get", &get_output), ("show", &show_output)] {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("proxy.example.test"),
+            "{surface} did not exercise the persisted proxy: {stdout:?}"
+        );
+        assert!(
+            stdout.contains("REDACTED"),
+            "{surface} did not render a redacted proxy: {stdout:?}"
+        );
+    }
+
+    for (surface, output) in [
+        ("set", set_output),
+        ("get", get_output),
+        ("show", show_output),
+    ] {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for sentinel in [password, query_secret] {
+            assert!(
+                !stdout.contains(sentinel),
+                "{surface} stdout leaked {sentinel}: {stdout:?}"
+            );
+            assert!(
+                !stderr.contains(sentinel),
+                "{surface} stderr leaked {sentinel}: {stderr:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn e2e_cli_config_model_url_credentials_never_reach_output() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    let user = "model-user-sentinel";
+    let password = "model-password-sentinel";
+    let query = "model-query-sentinel";
+    let model = format!("https://{user}:{password}@models.example.test/v1?api_key={query}");
+
+    let mut set = Command::cargo_bin("hermes").expect("binary exists");
+    set.env("HERMES_HOME", home);
+    set.args(["config", "set", "model", model.as_str()]);
+    let set_output = set.assert().success().get_output().clone();
+    let raw = fs::read_to_string(home.join("config.yaml")).expect("read config");
+    assert!(raw.contains(user) && raw.contains(password) && raw.contains(query));
+
+    let mut get = Command::cargo_bin("hermes").expect("binary exists");
+    get.env("HERMES_HOME", home);
+    get.args(["config", "get", "model"]);
+    let get_output = get.assert().success().get_output().clone();
+
+    let mut show = Command::cargo_bin("hermes").expect("binary exists");
+    show.env("HERMES_HOME", home);
+    show.args(["config", "show"]);
+    let show_output = show.assert().success().get_output().clone();
+
+    for (surface, output) in [
+        ("set", set_output),
+        ("get", get_output),
+        ("show", show_output),
+    ] {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for secret in [user, password, query] {
+            assert!(
+                !stdout.contains(secret) && !stderr.contains(secret),
+                "{surface} leaked {secret}: stdout={stdout:?} stderr={stderr:?}"
+            );
+        }
+    }
+}
 
 #[test]
 fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
@@ -110,10 +236,7 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
     get.args(["config", "get", "llm.openai.api_key"]);
     let out = get.assert().success().get_output().stdout.clone();
     let text = std::str::from_utf8(&out).expect("utf8");
-    assert!(
-        text.contains("***"),
-        "expected masked api key, got: {text:?}"
-    );
+    assert_eq!(text.trim(), "[REDACTED]");
 }
 
 #[test]
@@ -253,16 +376,17 @@ fn e2e_cli_systems_status_and_reports_are_json() {
     for args in [
         vec!["systems", "status", "--json"],
         vec!["systems", "release", "--json"],
-        vec!["systems", "agent-card", "card", "--json"],
-        vec!["systems", "mcp", "conformance", "--json"],
-        vec!["systems", "acp", "conformance", "--json"],
+        vec!["systems", "a2a-availability", "show", "--json"],
+        vec!["systems", "mcp", "diagnostic", "--json"],
+        vec!["systems", "acp", "diagnostic", "--json"],
         vec!["systems", "providers", "--json"],
         vec!["systems", "handoff", "template", "--json"],
         vec!["systems", "provenance", "--json"],
     ] {
+        let expects_a2a_availability = args == ["systems", "a2a-availability", "show", "--json"];
         let mut cmd = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
         cmd.env("HERMES_HOME", dir.path());
-        cmd.args(args);
+        cmd.args(&args);
         let out = cmd.assert().success().get_output().stdout.clone();
         let text = std::str::from_utf8(&out).expect("utf8");
         let value: serde_json::Value = serde_json::from_str(text)
@@ -271,11 +395,27 @@ fn e2e_cli_systems_status_and_reports_are_json() {
             value.get("kind").is_some() || value.get("name").is_some(),
             "expected report/card json, got {value}"
         );
+        if expects_a2a_availability {
+            assert_eq!(
+                value.get("kind").and_then(serde_json::Value::as_str),
+                Some("hermes.a2a.availability")
+            );
+            assert_eq!(
+                value.get("available").and_then(serde_json::Value::as_bool),
+                Some(false)
+            );
+            assert_eq!(
+                value
+                    .get("production_complete")
+                    .and_then(serde_json::Value::as_bool),
+                Some(false)
+            );
+        }
     }
 }
 
 #[test]
-fn e2e_cli_systems_replay_reports_existing_trace() {
+fn e2e_cli_systems_replay_marks_legacy_trace_diagnostic_only() {
     let dir = tempfile::tempdir().expect("tempdir");
     let replay_dir = dir.path().join("logs").join("replay");
     fs::create_dir_all(&replay_dir).expect("mkdir replay");
@@ -294,6 +434,30 @@ fn e2e_cli_systems_replay_reports_existing_trace() {
     let out = show.assert().success().get_output().stdout.clone();
     let text = std::str::from_utf8(&out).expect("utf8");
     let report: serde_json::Value = serde_json::from_str(text).expect("show json");
-    assert_eq!(report.get("log_count").and_then(|v| v.as_u64()), Some(1));
-    assert_eq!(report.get("passed").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        report.get("kind").and_then(serde_json::Value::as_str),
+        Some("hermes.run-export.report")
+    );
+    assert_eq!(
+        report
+            .get("assessed_export_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        report
+            .pointer("/diagnostic_only/log_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .get("evidence_complete")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        report.get("passed").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }

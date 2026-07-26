@@ -13,26 +13,6 @@ pub fn discord_client_reentry_action(previous_client_open: bool) -> DiscordClien
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiscordSlashSyncPolicy {
-    Off,
-    Diff,
-    Bulk,
-}
-
-impl DiscordSlashSyncPolicy {
-    pub fn parse(raw: Option<&str>) -> Self {
-        match raw.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(value) if value.eq_ignore_ascii_case("off") => Self::Off,
-            Some(value) if value.eq_ignore_ascii_case("bulk") => Self::Bulk,
-            _ => Self::Diff,
-        }
-    }
-
-    pub fn should_register(self, slash_commands_enabled: bool) -> bool {
-        slash_commands_enabled && self != Self::Off
-    }
-}
 
 /// Resolve a Discord channel prompt, preferring exact thread/channel IDs over parents.
 pub fn discord_resolve_channel_prompt<'a>(
@@ -276,108 +256,6 @@ impl DiscordVoiceJoinTracker {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiscordSlashRegistrationSpec {
-    pub name: String,
-    pub description: String,
-    pub args_hint: Option<String>,
-    pub command_text: String,
-}
-
-impl DiscordSlashRegistrationSpec {
-    pub fn new(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        args_hint: Option<impl Into<String>>,
-        command_text: impl Into<String>,
-    ) -> Self {
-        let args_hint = args_hint
-            .map(Into::into)
-            .map(|hint: String| hint.trim().to_string())
-            .filter(|hint| !hint.is_empty());
-        Self {
-            name: name.into(),
-            description: description.into(),
-            args_hint,
-            command_text: command_text.into(),
-        }
-    }
-
-    pub fn to_slash_command(&self) -> SlashCommand {
-        let options = self.args_hint.as_ref().map(|hint| {
-            vec![SlashCommandOption {
-                name: "args".into(),
-                description: hint.chars().take(100).collect(),
-                option_type: 3,
-                required: Some(false),
-                choices: None,
-            }]
-        });
-        SlashCommand {
-            name: self.name.clone(),
-            description: self.description.chars().take(100).collect(),
-            options,
-            default_member_permissions: None,
-            dm_permission: Some(true),
-            nsfw: Some(false),
-            contexts: None,
-            integration_types: None,
-            command_type: 1,
-        }
-    }
-
-    pub fn dispatch_text(&self, args: Option<&str>) -> String {
-        let args = args.map(str::trim).filter(|args| !args.is_empty());
-        match args {
-            Some(args) => format!("{} {}", self.command_text.trim(), args),
-            None => self.command_text.trim().to_string(),
-        }
-    }
-}
-
-mod command_sync;
-pub use command_sync::{
-    discord_auto_registered_commands, discord_command_fingerprint, plan_discord_command_sync,
-    DiscordCommandSyncMutation, DiscordCommandSyncSummary,
-};
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DiscordCommandSyncStateEntry {
-    pub fingerprint: Option<String>,
-    pub last_success_at: Option<u64>,
-    pub last_attempt_at: Option<u64>,
-    pub retry_after_until: Option<u64>,
-    pub retry_after: Option<u64>,
-}
-
-impl DiscordCommandSyncStateEntry {
-    pub fn should_attempt(&self, fingerprint: &str, now_epoch_secs: u64) -> bool {
-        if self
-            .retry_after_until
-            .map(|until| until > now_epoch_secs)
-            .unwrap_or(false)
-        {
-            return false;
-        }
-        self.fingerprint.as_deref() != Some(fingerprint)
-    }
-
-    pub fn record_attempt(&mut self, now_epoch_secs: u64) {
-        self.last_attempt_at = Some(now_epoch_secs);
-    }
-
-    pub fn record_success(&mut self, fingerprint: impl Into<String>, now_epoch_secs: u64) {
-        self.fingerprint = Some(fingerprint.into());
-        self.last_success_at = Some(now_epoch_secs);
-        self.retry_after = None;
-        self.retry_after_until = None;
-    }
-
-    pub fn record_rate_limit(&mut self, retry_after_secs: u64, now_epoch_secs: u64) {
-        self.retry_after = Some(retry_after_secs);
-        self.retry_after_until = Some(now_epoch_secs.saturating_add(retry_after_secs));
-    }
-}
 
 /// Channel-bound skill binding parsed from Python-style Discord config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

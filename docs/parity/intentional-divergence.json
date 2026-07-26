@@ -7,8 +7,8 @@
       "summary": "Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime.",
       "owner": "sheawinkler",
       "ticket": 23,
-      "last_reviewed": "2026-04-21",
-      "review_date": "2026-07-21",
+      "last_reviewed": "2026-07-26",
+      "review_date": "2026-10-26",
       "rationale": "This is an intentional Rust-native enhancement that improves memory orchestration and does not replace or remove upstream behavior.",
       "path_prefixes": [
         "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
@@ -22,8 +22,8 @@
       "summary": "Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support.",
       "owner": "sheawinkler",
       "ticket": 26,
-      "last_reviewed": "2026-04-21",
-      "review_date": "2026-07-21",
+      "last_reviewed": "2026-07-26",
+      "review_date": "2026-10-26",
       "rationale": "Queue backend plurality (sqlite/SQS/Kafka) is an ultra reliability extension for upstream sync maintenance and does not reduce upstream parity scope.",
       "path_prefixes": [
         "scripts/upstream_webhook_sync.py",
@@ -39,8 +39,8 @@
       "summary": "Preserve launchd-based interactive dev lifecycle management for webhook listener and worker.",
       "owner": "sheawinkler",
       "ticket": 26,
-      "last_reviewed": "2026-04-21",
-      "review_date": "2026-07-21",
+      "last_reviewed": "2026-07-26",
+      "review_date": "2026-10-26",
       "rationale": "launchd lifecycle is a macOS operational hardening layer for development upkeep and is intentionally additive.",
       "path_prefixes": [
         "scripts/install-upstream-webhook-launchd.sh",
@@ -110,8 +110,8 @@
       "summary": "Track the upstream Raft Python platform plugin as non-runtime until a Rust-native Raft adapter is scoped.",
       "owner": "sheawinkler",
       "ticket": 570,
-      "last_reviewed": "2026-06-20",
-      "review_date": "2026-07-20",
+      "last_reviewed": "2026-07-26",
+      "review_date": "2026-08-26",
       "rationale": "No Rust gateway Raft adapter is registered locally. Ultra preserves Rust-only runtime behavior and does not vendor the upstream Python wake-bridge adapter; this remains an explicit platform-gap item rather than an unclassified missing plugin tree.",
       "path_prefixes": [
         "plugins/platforms/raft/"

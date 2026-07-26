@@ -1,7 +1,25 @@
 {
-  "schema_version": 1,
-  "generated_at_utc": "2026-06-10T23:45:00Z",
+  "schema_version": 2,
+  "generated_at_utc": "2026-07-19T00:26:02Z",
+  "authority": {
+    "capability_promotion_authoritative": false,
+    "production_complete": false
+  },
+  "scope": {
+    "coverage_kind": "fixture_reference_regression",
+    "authoritative_for": [
+      "fixture/reference regression coverage",
+      "referenced Rust test existence"
+    ],
+    "not_evidence_of": [
+      "implemented production capability",
+      "executable protocol behavior",
+      "executable client behavior",
+      "executable chaos behavior"
+    ]
+  },
   "gate": {
+    "scope": "fixture_reference_regression",
     "pass": true,
     "critical_gaps": 0,
     "missing_rust_test_refs": 0
@@ -21,19 +39,19 @@
     {
       "id": "workflow-replay-and-terminal-snapshots",
       "title": "User workflow replay and terminal snapshots",
-      "why": "Protects operator journeys by replaying real CLI commands, release-facing proof surfaces, provider QoS snapshots, memory status, and normalized terminal diagnostics.",
-      "status": "covered_by_rust_contracts",
+      "why": "Indexes fixture/reference regression rows for CLI output and listed Rust tests; it does not establish that each listed journey is implemented as a production capability.",
+      "status": "fixture_reference_regression_coverage",
       "fixtures": [
         "crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json"
       ],
-      "required_capabilities": [
-        "cli workflow replay",
-        "normalized stdout snapshots",
-        "non-TTY/PTY diagnostic snapshot",
-        "one-true-harness cockpit registry",
-        "release systems proof snapshot",
-        "provider QoS route-health snapshot",
-        "memory backend status snapshot"
+      "fixture_reference_categories": [
+        "CLI workflow replay fixture",
+        "normalized stdout snapshot fixture",
+        "non-TTY/PTY diagnostic snapshot fixture",
+        "audited capability-inventory registry snapshot fixture",
+        "release systems snapshot fixture",
+        "provider QoS route-health snapshot fixture",
+        "memory backend status snapshot fixture"
       ],
       "rust_tests": [
         {
@@ -49,12 +67,12 @@
     {
       "id": "protocol-differential-contracts",
       "title": "Protocol differential contracts",
-      "why": "Normalizes ACP, MCP, and gateway protocol surfaces against fixture expectations before transport-specific details hide regressions.",
-      "status": "covered_by_rust_contracts",
+      "why": "Indexes fixture/reference expectations for normalized ACP, MCP, and gateway values; it does not establish executable protocol or client behavior.",
+      "status": "fixture_reference_regression_coverage",
       "fixtures": [
         "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json"
       ],
-      "required_capabilities": [
+      "fixture_reference_categories": [
         "ACP method alias normalization",
         "ACP JSON-RPC response serialization",
         "MCP initialize capability envelope",
@@ -75,12 +93,12 @@
     {
       "id": "fault-injection-matrix",
       "title": "Fault-injection matrix",
-      "why": "Exercises retry, failover, fail-closed auth, stream recovery, and malformed tool-payload recovery behavior in the Rust runtime.",
-      "status": "covered_by_rust_contracts",
+      "why": "Indexes fault-scenario fixture references and selected Rust unit or contract tests; it does not record an executed production client or external chaos run.",
+      "status": "fixture_reference_regression_coverage",
       "fixtures": [
         "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
       ],
-      "required_capabilities": [
+      "fixture_reference_categories": [
         "timeout recovery",
         "HTTP 5xx failover",
         "rate limit exhaustion",
@@ -112,15 +130,15 @@
         },
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+          "name": "stream_retry_before_visible_output_recovers"
         },
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
-          "name": "stream_text_only_drop_does_not_retry"
+          "name": "stream_partial_tool_args_eof_retries_and_recovers"
         },
         {
           "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
-          "name": "fault_injection_matrix_covers_required_classes"
+          "name": "fault_injection_fixture_reference_matrix_covers_required_categories"
         }
       ]
     }

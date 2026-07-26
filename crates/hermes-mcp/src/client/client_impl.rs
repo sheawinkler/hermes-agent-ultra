@@ -15,8 +15,12 @@ impl McpClient {
             sampling_tool_rounds: 0,
             sampling_metrics: SamplingMetrics::default(),
             connected_at: None,
+            server_name: None,
             ping_unsupported: false,
         }
+    }
+    fn set_server_name(&mut self, server_name: &str) {
+        self.server_name = Some(server_name.to_string());
     }
 
     /// Connect to the MCP server: start transport, perform initialize
@@ -138,24 +142,35 @@ impl McpClient {
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
         {
-            let message = extract_mcp_error_message(&result);
+            let message = extract_mcp_error_message(&result, self.server_name.as_deref());
             return Err(Self::classify_protocol_error(-1, &message));
         }
 
-        if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
-            let mut parts: Vec<String> = Vec::new();
+        if let Some(content) = result.get("content").and_then(|value| value.as_array()) {
+            let mut parts = Vec::new();
             for item in content {
-                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                if item.get("type").and_then(|value| value.as_str()) == Some("text") {
+                    if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
                         if !text.trim().is_empty() {
                             parts.push(text.to_string());
                         }
                     }
                     continue;
                 }
-                if let Some(media_tag) = cache_mcp_image_block(item) {
+                if let Some(media_tag) = cache_mcp_image_block(item)
+                    .or_else(|| cache_mcp_audio_block(item))
+                {
                     parts.push(media_tag);
+                    continue;
                 }
+                if let Some(rendered) = render_mcp_resource_block(item, self.server_name.as_deref())
+                {
+                    if !rendered.is_empty() {
+                        parts.push(rendered);
+                    }
+                    continue;
+                }
+                warn!("MCP tools/call returned an unsupported content block: {}", item);
             }
             if !parts.is_empty() {
                 return Ok(serde_json::json!(parts.join("\n")));
@@ -181,7 +196,10 @@ impl McpClient {
     /// Read a single resource by URI from this server.
     pub async fn read_resource(&mut self, uri: &str) -> Result<Value, McpError> {
         let params = serde_json::json!({ "uri": uri });
-        self.send_request("resources/read", params).await
+        let result = self.send_request("resources/read", params).await?;
+        Ok(render_mcp_resource_contents(&result, self.server_name.as_deref())
+            .map(Value::String)
+            .unwrap_or(result))
     }
 
     /// Return the cached tool list from the last `list_tools` / `connect` call.
@@ -244,6 +262,7 @@ impl McpClient {
 
     async fn reconnect_after_keepalive_failure(&mut self) -> Result<(), McpError> {
         let config = self.config.clone();
+        let server_name = self.server_name.clone();
         let sampling_config = self.sampling_config.clone();
         let sampling_callback = self.sampling_callback.clone();
         if let Some(mut transport) = self.transport.take() {
@@ -255,6 +274,7 @@ impl McpClient {
         self.resources.clear();
 
         let mut replacement = McpClient::new(config);
+        replacement.server_name = server_name;
         if let Some(config) = sampling_config {
             replacement.set_sampling_config(config);
         }
@@ -1023,6 +1043,39 @@ impl ToolHandler for RegisteredMcpToolHandler {
                     self.original_tool_name, err
                 ))
             })?;
+        Ok(match result {
+            Value::String(text) => text,
+            other => other.to_string(),
+        })
+    }
+
+    fn schema(&self) -> ToolSchema {
+        self.schema.clone()
+    }
+}
+
+struct RegisteredMcpResourceHandler {
+    client: SharedMcpClient,
+    schema: ToolSchema,
+    available: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl ToolHandler for RegisteredMcpResourceHandler {
+    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+        if !self.available.load(Ordering::SeqCst) {
+            return Err(ToolError::NotFound(self.schema.name.clone()));
+        }
+        let uri = params
+            .get("uri")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|uri| !uri.is_empty())
+            .ok_or_else(|| ToolError::InvalidParams("MCP resource reader requires a URI".into()))?;
+        let mut client = self.client.lock().await;
+        let result = client.read_resource(uri).await.map_err(|err| {
+            ToolError::ExecutionFailed(format!("MCP resource '{}' failed: {}", uri, err))
+        })?;
         Ok(match result {
             Value::String(text) => text,
             other => other.to_string(),

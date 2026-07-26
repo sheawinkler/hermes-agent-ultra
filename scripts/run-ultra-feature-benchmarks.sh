@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-: "${CARGO_TARGET_DIR:=/Volumes/wd_black/hermes-agent-ultra/target}"
+: "${CARGO_TARGET_DIR:=${TMPDIR:-/tmp}/hermes-agent-ultra-target}"
 export CARGO_TARGET_DIR
 
 cargo test -p hermes-tools tools::ultra_features --lib

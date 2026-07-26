@@ -67,6 +67,14 @@ pub fn set_user_config_value(
         ));
     }
 
+    // Persist public CLI aliases under the typed serde field names so a later
+    // `config get`/`config show` round-trip reads the value back.
+    let persisted_key = match key {
+        "proxy.http" => "proxy.http_proxy",
+        "proxy.socks" => "proxy.socks_proxy",
+        _ => key,
+    };
+
     let config_path = home_dir.join("config.yaml");
     let env_path = home_dir.join(".env");
     let bridge_env_key = config_env_bridge_key(key);
@@ -82,7 +90,11 @@ pub fn set_user_config_value(
 
     if writes_config {
         let mut root = load_user_config_yaml_value(&config_path)?;
-        set_yaml_path(&mut root, &split_config_key(key), scalar_yaml_value(value))?;
+        set_yaml_path(
+            &mut root,
+            &split_config_key(persisted_key),
+            scalar_yaml_value(value),
+        )?;
         validate_user_config_value(&root)?;
         atomic_yaml_write(&config_path, &root, None)?;
         secure_config_file(&config_path)?;

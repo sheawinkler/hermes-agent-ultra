@@ -3,12 +3,14 @@
 //! Checks whether a terminal command requires explicit user approval
 //! before execution, based on dangerous command patterns.
 
+use hermes_environments::{ExecutionContainmentContext, VerifiedIsolatedBackendCapability};
+use parking_lot::{Condvar, Mutex};
 use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, LazyLock, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // ApprovalDecision
@@ -23,6 +25,92 @@ pub enum ApprovalDecision {
     Denied,
     /// Command requires user confirmation before execution.
     RequiresConfirmation,
+}
+
+/// Execution backend identity supplied to command approval.
+///
+/// A backend name alone is never evidence of isolation. Every environment
+/// starts host-sensitive, including Docker and remote backends, unless the
+/// caller holds a typed capability that was issued after proving there are no
+/// host mounts, inherited host secrets, or network access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandExecutionEnvironment {
+    backend: String,
+    isolation: Option<VerifiedIsolatedBackendCapability>,
+}
+
+impl CommandExecutionEnvironment {
+    pub fn host_sensitive(backend: impl Into<String>) -> Self {
+        let backend = backend.into();
+        let backend = backend.trim();
+        Self {
+            backend: if backend.is_empty() {
+                "local".to_string()
+            } else {
+                backend.to_ascii_lowercase()
+            },
+            isolation: None,
+        }
+    }
+
+    /// Capture the configured backend identity without inferring containment
+    /// from environment rewriting or a backend label.
+    pub fn from_configured_environment() -> Self {
+        let backend = std::env::var("TERMINAL_ENV")
+            .or_else(|_| std::env::var("TERMINAL_BACKEND"))
+            .unwrap_or_else(|_| "local".to_string());
+        Self::host_sensitive(backend)
+    }
+
+    /// Derive an isolated command environment only from the same executable
+    /// containment context that the registry will bind into dispatch.
+    pub(crate) fn from_containment_context(context: &ExecutionContainmentContext) -> Self {
+        let Some(capability) = context.certificate() else {
+            return Self::host_sensitive("local");
+        };
+        if !context.is_certified_dispatch_context() {
+            return Self::host_sensitive(capability.backend_kind().as_str());
+        }
+        let mut environment = Self::host_sensitive(capability.backend_kind().as_str());
+        environment.isolation = Some(capability.clone());
+        environment
+    }
+
+    pub fn backend(&self) -> &str {
+        &self.backend
+    }
+
+    fn bypasses_host_guards(&self) -> bool {
+        self.isolation.is_some()
+    }
+}
+
+impl From<&str> for CommandExecutionEnvironment {
+    fn from(backend: &str) -> Self {
+        Self::host_sensitive(backend)
+    }
+}
+
+impl From<String> for CommandExecutionEnvironment {
+    fn from(backend: String) -> Self {
+        Self::host_sensitive(backend)
+    }
+}
+
+/// Opaque evidence of an explicit approval for one exact command.
+///
+/// There is intentionally no constructor from tool parameters, yolo flags, or
+/// cron/session state. Callers without this typed token cannot execute a
+/// confirmation-required command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalToken {
+    command: String,
+}
+
+impl ApprovalToken {
+    fn authorizes(&self, command: &str) -> bool {
+        self.command == command
+    }
 }
 
 /// User choice from an interactive approval prompt.
@@ -357,7 +445,7 @@ impl GatewayApprovalEntry {
     }
 
     pub fn result(&self) -> Option<ApprovalChoice> {
-        *self.result.lock().expect("gateway approval lock poisoned")
+        *self.result.lock()
     }
 
     pub fn is_resolved(&self) -> bool {
@@ -365,7 +453,7 @@ impl GatewayApprovalEntry {
     }
 
     fn resolve(&self, choice: ApprovalChoice) {
-        let mut result = self.result.lock().expect("gateway approval lock poisoned");
+        let mut result = self.result.lock();
         if result.is_none() {
             *result = Some(choice);
             self.resolved.notify_all();
@@ -373,11 +461,14 @@ impl GatewayApprovalEntry {
     }
 
     pub fn wait(&self, timeout: Duration) -> Option<ApprovalChoice> {
-        let result = self.result.lock().expect("gateway approval lock poisoned");
-        let (result, _) = self
-            .resolved
-            .wait_timeout_while(result, timeout, |choice| choice.is_none())
-            .expect("gateway approval condvar poisoned");
+        let deadline = Instant::now() + timeout;
+        let mut result = self.result.lock();
+        while result.is_none() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() || self.resolved.wait_for(&mut result, remaining).timed_out() {
+                break;
+            }
+        }
         *result
     }
 }
@@ -467,7 +558,6 @@ pub fn approve_session(session_key: &str, pattern_key: &str) {
     }
     SESSION_APPROVED
         .lock()
-        .expect("session approval lock poisoned")
         .entry(session_key.to_string())
         .or_default()
         .insert(pattern_key.to_string());
@@ -479,10 +569,7 @@ pub fn approve_permanent(pattern_key: &str) {
     if pattern_key.is_empty() {
         return;
     }
-    PERMANENT_APPROVED
-        .lock()
-        .expect("permanent approval lock poisoned")
-        .insert(pattern_key.to_string());
+    PERMANENT_APPROVED.lock().insert(pattern_key.to_string());
 }
 
 /// Return whether a warning pattern is approved in this session or process.
@@ -492,11 +579,7 @@ pub fn is_approved(session_key: &str, pattern_key: &str) -> bool {
     if pattern_key.is_empty() {
         return false;
     }
-    if PERMANENT_APPROVED
-        .lock()
-        .expect("permanent approval lock poisoned")
-        .contains(pattern_key)
-    {
+    if PERMANENT_APPROVED.lock().contains(pattern_key) {
         return true;
     }
     if session_key.is_empty() {
@@ -504,7 +587,6 @@ pub fn is_approved(session_key: &str, pattern_key: &str) -> bool {
     }
     SESSION_APPROVED
         .lock()
-        .expect("session approval lock poisoned")
         .get(session_key)
         .map(|patterns| patterns.contains(pattern_key))
         .unwrap_or(false)
@@ -521,7 +603,6 @@ where
     }
     GATEWAY_NOTIFY_CBS
         .lock()
-        .expect("gateway notify lock poisoned")
         .insert(session_key.to_string(), Arc::new(callback));
 }
 
@@ -531,10 +612,7 @@ pub fn unregister_gateway_notify(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    GATEWAY_NOTIFY_CBS
-        .lock()
-        .expect("gateway notify lock poisoned")
-        .remove(session_key);
+    GATEWAY_NOTIFY_CBS.lock().remove(session_key);
     cancel_gateway_approvals(session_key, ApprovalChoice::Deny);
 }
 
@@ -546,7 +624,6 @@ pub fn has_blocking_approval(session_key: &str) -> bool {
     }
     GATEWAY_QUEUES
         .lock()
-        .expect("gateway queue lock poisoned")
         .get(session_key)
         .map(|entries| !entries.is_empty())
         .unwrap_or(false)
@@ -560,7 +637,6 @@ pub fn pending_gateway_approval_count(session_key: &str) -> usize {
     }
     GATEWAY_QUEUES
         .lock()
-        .expect("gateway queue lock poisoned")
         .get(session_key)
         .map(VecDeque::len)
         .unwrap_or(0)
@@ -578,7 +654,7 @@ pub fn resolve_gateway_approval(
     }
 
     let resolved = {
-        let mut queues = GATEWAY_QUEUES.lock().expect("gateway queue lock poisoned");
+        let mut queues = GATEWAY_QUEUES.lock();
         let Some(queue) = queues.get_mut(session_key) else {
             return 0;
         };
@@ -609,20 +685,13 @@ where
     F: Fn(ApprovalHookEvent) + Send + Sync + 'static,
 {
     let id = NEXT_APPROVAL_OBSERVER_ID.fetch_add(1, Ordering::SeqCst);
-    APPROVAL_OBSERVERS
-        .lock()
-        .expect("approval observer lock poisoned")
-        .insert(id, Arc::new(callback));
+    APPROVAL_OBSERVERS.lock().insert(id, Arc::new(callback));
     id
 }
 
 /// Remove a previously registered approval observer.
 pub fn unregister_approval_observer(id: u64) -> bool {
-    APPROVAL_OBSERVERS
-        .lock()
-        .expect("approval observer lock poisoned")
-        .remove(&id)
-        .is_some()
+    APPROVAL_OBSERVERS.lock().remove(&id).is_some()
 }
 
 fn approval_surface(context: &CommandGuardContext) -> ApprovalSurface {
@@ -654,7 +723,6 @@ fn emit_approval_hook(
     };
     let observers = APPROVAL_OBSERVERS
         .lock()
-        .expect("approval observer lock poisoned")
         .values()
         .cloned()
         .collect::<Vec<_>>();
@@ -669,11 +737,7 @@ fn cancel_gateway_approvals(session_key: &str, choice: ApprovalChoice) -> usize 
 }
 
 fn gateway_notify_callback(session_key: &str) -> Option<GatewayNotifyCallback> {
-    GATEWAY_NOTIFY_CBS
-        .lock()
-        .expect("gateway notify lock poisoned")
-        .get(session_key)
-        .cloned()
+    GATEWAY_NOTIFY_CBS.lock().get(session_key).cloned()
 }
 
 enum GatewayApprovalWaitOutcome {
@@ -693,7 +757,7 @@ fn submit_gateway_approval_and_wait(
     let session_key = request.session_key.clone();
     let entry = Arc::new(GatewayApprovalEntry::new(request.clone()));
     {
-        let mut queues = GATEWAY_QUEUES.lock().expect("gateway queue lock poisoned");
+        let mut queues = GATEWAY_QUEUES.lock();
         queues
             .entry(session_key.clone())
             .or_default()
@@ -705,7 +769,7 @@ fn submit_gateway_approval_and_wait(
     if let Some(choice) = entry.wait(timeout) {
         GatewayApprovalWaitOutcome::Resolved(choice)
     } else {
-        let mut queues = GATEWAY_QUEUES.lock().expect("gateway queue lock poisoned");
+        let mut queues = GATEWAY_QUEUES.lock();
         if let Some(queue) = queues.get_mut(&session_key) {
             queue.retain(|candidate| !Arc::ptr_eq(candidate, &entry));
             let remove_queue = queue.is_empty();
@@ -733,10 +797,7 @@ pub fn enable_session_yolo(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_YOLO
-        .lock()
-        .expect("session yolo lock poisoned")
-        .insert(session_key.to_string());
+    SESSION_YOLO.lock().insert(session_key.to_string());
 }
 
 /// Disable yolo approval bypass for a single session key.
@@ -745,10 +806,7 @@ pub fn disable_session_yolo(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_YOLO
-        .lock()
-        .expect("session yolo lock poisoned")
-        .remove(session_key);
+    SESSION_YOLO.lock().remove(session_key);
 }
 
 /// Remove approval state associated with a session boundary.
@@ -758,10 +816,7 @@ pub fn clear_session(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_APPROVED
-        .lock()
-        .expect("session approval lock poisoned")
-        .remove(session_key);
+    SESSION_APPROVED.lock().remove(session_key);
     cancel_gateway_approvals(session_key, ApprovalChoice::Deny);
 }
 
@@ -771,16 +826,7 @@ pub fn is_session_yolo_enabled(session_key: &str) -> bool {
     if session_key.is_empty() {
         return false;
     }
-    SESSION_YOLO
-        .lock()
-        .expect("session yolo lock poisoned")
-        .contains(session_key)
-}
-
-fn environment_bypasses_host_guards(environment: &str) -> bool {
-    CONTAINER_BACKENDS
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(environment))
+    SESSION_YOLO.lock().contains(session_key)
 }
 
 fn delete_without_where(command: &str) -> bool {
@@ -920,10 +966,13 @@ fn user_denied_result(pattern_key: String, description: String) -> CommandGuardR
 }
 
 /// Run Tirith and dangerous-command checks as one approval surface.
-pub fn check_all_command_guards(
+pub fn check_all_command_guards<E>(
     command: &str,
-    environment: &str,
-) -> Result<CommandGuardResult, CommandGuardError> {
+    environment: E,
+) -> Result<CommandGuardResult, CommandGuardError>
+where
+    E: Into<CommandExecutionEnvironment>,
+{
     check_all_command_guards_with_context(
         command,
         environment,
@@ -933,13 +982,17 @@ pub fn check_all_command_guards(
 }
 
 /// Run combined command guards with explicit policy inputs and optional prompt callback.
-pub fn check_all_command_guards_with_context(
+pub fn check_all_command_guards_with_context<E>(
     command: &str,
-    environment: &str,
+    environment: E,
     context: CommandGuardContext,
     mut approval_callback: Option<&mut dyn FnMut(ApprovalPrompt) -> ApprovalChoice>,
-) -> Result<CommandGuardResult, CommandGuardError> {
-    if environment_bypasses_host_guards(environment) {
+) -> Result<CommandGuardResult, CommandGuardError>
+where
+    E: Into<CommandExecutionEnvironment>,
+{
+    let environment = environment.into();
+    if environment.bypasses_host_guards() {
         return Ok(CommandGuardResult::approved());
     }
 
@@ -1140,24 +1193,39 @@ impl ApprovalManager {
     /// - `RequiresConfirmation` if the command matches a confirm pattern
     /// - `Approved` if no patterns match
     pub fn check_approval(&self, command: &str) -> ApprovalDecision {
-        self.check_approval_with_context(command, "local", false, false)
+        self.check_approval_with_context(
+            command,
+            CommandExecutionEnvironment::host_sensitive("local"),
+            false,
+            false,
+        )
     }
 
-    /// Check whether a command requires approval for a backend/environment.
+    /// Check whether a command requires approval for a backend environment.
     ///
-    /// Containerized backends cannot affect the host filesystem directly, so
-    /// they intentionally bypass the host-level approval floor.
-    pub fn check_approval_for_environment(
+    /// Backend labels are host-sensitive by default. Only a typed,
+    /// independently verified isolation capability can bypass host guards.
+    pub fn check_approval_for_environment<E>(
         &self,
         command: &str,
-        environment: &str,
-    ) -> ApprovalDecision {
+        environment: E,
+    ) -> ApprovalDecision
+    where
+        E: Into<CommandExecutionEnvironment>,
+    {
         self.check_approval_with_context(command, environment, false, false)
     }
 
     /// Check approval using process environment toggles such as
     /// `HERMES_YOLO_MODE` and `SUDO_PASSWORD`.
-    pub fn check_approval_from_env(&self, command: &str, environment: &str) -> ApprovalDecision {
+    ///
+    /// This remains useful for non-execution policy reporting. Tool handlers
+    /// must use [`Self::check_approval_for_execution`] so yolo, cron, and
+    /// session state cannot substitute for explicit approval evidence.
+    pub fn check_approval_from_env<E>(&self, command: &str, environment: E) -> ApprovalDecision
+    where
+        E: Into<CommandExecutionEnvironment>,
+    {
         let cron_approve =
             env_var_enabled("HERMES_CRON_SESSION") && cron_approval_mode_approves_from_env();
         self.check_approval_with_context(
@@ -1168,15 +1236,44 @@ impl ApprovalManager {
         )
     }
 
-    /// Check approval with explicit policy inputs for deterministic callers.
-    pub fn check_approval_with_context(
+    /// Gate a command that will actually be handed to an execution backend.
+    ///
+    /// Confirmation-required commands stay blocked unless an opaque approval
+    /// token for this exact command is supplied. Yolo, cron, and session
+    /// overrides are intentionally ignored here.
+    pub fn check_approval_for_execution<E>(
         &self,
         command: &str,
-        environment: &str,
+        environment: E,
+        approval_token: Option<&ApprovalToken>,
+    ) -> ApprovalDecision
+    where
+        E: Into<CommandExecutionEnvironment>,
+    {
+        let decision =
+            self.check_approval_with_context(command, environment, false, has_sudo_password_env());
+        if matches!(decision, ApprovalDecision::RequiresConfirmation)
+            && approval_token.is_some_and(|token| token.authorizes(command))
+        {
+            ApprovalDecision::Approved
+        } else {
+            decision
+        }
+    }
+
+    /// Check approval with explicit policy inputs for deterministic callers.
+    pub fn check_approval_with_context<E>(
+        &self,
+        command: &str,
+        environment: E,
         yolo_mode: bool,
         sudo_password_configured: bool,
-    ) -> ApprovalDecision {
-        if environment_bypasses_host_guards(environment) {
+    ) -> ApprovalDecision
+    where
+        E: Into<CommandExecutionEnvironment>,
+    {
+        let environment = environment.into();
+        if environment.bypasses_host_guards() {
             return ApprovalDecision::Approved;
         }
 
@@ -1184,7 +1281,7 @@ impl ApprovalManager {
             return ApprovalDecision::Denied;
         }
 
-        // Check denied patterns first (built-in then custom)
+        // Check denied patterns first (built-in then custom).
         for re in DENIED_PATTERNS.iter() {
             if re.is_match(command) {
                 return ApprovalDecision::Denied;
@@ -1205,7 +1302,7 @@ impl ApprovalManager {
             return ApprovalDecision::RequiresConfirmation;
         }
 
-        // Check confirm patterns (built-in then custom)
+        // Check confirm patterns (built-in then custom).
         for re in CONFIRM_PATTERNS.iter() {
             if re.is_match(&normalized) {
                 return ApprovalDecision::RequiresConfirmation;

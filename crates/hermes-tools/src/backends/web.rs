@@ -1519,6 +1519,13 @@ pub struct DuckDuckGoSearchBackend {
     timeout: Duration,
 }
 
+fn checked_positive_duration(seconds: f64) -> Option<Duration> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
 impl DuckDuckGoSearchBackend {
     pub fn new(endpoint: String) -> Self {
         Self::with_timeout(
@@ -1541,8 +1548,7 @@ impl DuckDuckGoSearchBackend {
         let timeout = env_optional_nonempty("DDG_SEARCH_TIMEOUT_SECONDS")
             .or_else(|| env_optional_nonempty("HERMES_DDGS_TIMEOUT_SECONDS"))
             .and_then(|raw| raw.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .map(Duration::from_secs_f64)
+            .and_then(checked_positive_duration)
             .unwrap_or_else(|| Duration::from_secs(DDG_SEARCH_TIMEOUT_SECS_DEFAULT));
         Ok(Self::with_timeout(endpoint, timeout))
     }
@@ -1655,3 +1661,31 @@ fn collect_duckduckgo_related(value: Option<&Value>, rows: &mut Vec<Value>) {
 include!("web/parallel_xai_firecrawl.rs");
 
 include!("web/web_search_env_tests.rs");
+
+#[cfg(test)]
+mod duckduckgo_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn duckduckgo_timeout_accepts_fractional_seconds() {
+        assert_eq!(
+            checked_positive_duration(1.25),
+            Some(Duration::from_millis(1_250))
+        );
+    }
+
+    #[test]
+    fn duckduckgo_timeout_rejects_invalid_or_unrepresentable_seconds() {
+        for seconds in [
+            1e300,
+            1e308,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.0,
+            0.0,
+        ] {
+            assert_eq!(checked_positive_duration(seconds), None);
+        }
+    }
+}

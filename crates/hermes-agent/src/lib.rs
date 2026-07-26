@@ -5,9 +5,12 @@
 //! model finishes naturally or the turn budget is exhausted.
 
 pub mod agent_loop;
+mod alpha_runtime_v1;
 pub mod api_bridge;
+pub mod artifact_lifecycle;
 pub mod auxiliary_builder;
 pub mod bedrock;
+pub(crate) mod branch_replay_lifecycle;
 pub mod budget;
 pub mod code_index;
 pub mod coding_context;
@@ -16,6 +19,8 @@ pub mod context;
 pub mod context_files;
 pub mod context_references;
 pub mod credential_pool;
+pub mod deterministic_replay;
+pub mod exact_replay_lifecycle;
 pub mod fallback;
 pub mod honcho_provider;
 pub mod interrupt;
@@ -33,6 +38,12 @@ pub mod providers_extra;
 pub mod python_alignment;
 pub mod rate_limit;
 pub mod reasoning;
+pub mod run_export;
+pub mod run_ledger;
+mod run_proof;
+pub mod run_runtime;
+mod runtime_cwd;
+pub mod sealed_artifact;
 pub mod session_persistence;
 pub mod skill_orchestrator;
 pub mod smart_model_routing;
@@ -43,8 +54,9 @@ pub mod tool_call_args;
 
 // Re-export primary agent types
 pub use agent_loop::{
-    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, CheapModelRouteConfig, ErrorClass,
-    RetryConfig, SmartModelRoutingConfig, TurnMetrics,
+    AgentCallbacks, AgentConfig, AgentLoop, AgentObserverEvent, AgentObserverReceiver,
+    AgentObserverSink, AgentRenderDelta, ApiMode, CheapModelRouteConfig, ErrorClass, RetryConfig,
+    SmartModelRoutingConfig, TurnMetrics,
 };
 
 // Re-export context management
@@ -92,20 +104,51 @@ pub use steer::{
     STEER_MARKER_OPEN,
 };
 
-// Re-export memory manager
+// Re-export subject-bound memory manager APIs.
 pub use memory_manager::{
-    build_memory_context_block, sanitize_context, MemoryManager, MemoryProviderPlugin,
+    build_memory_context_block, sanitize_context, MemoryExportProviderReceipt, MemoryExportReport,
+    MemoryForgetProviderReceipt, MemoryForgetReport, MemoryManager, MemoryManagerError,
+    MemoryProviderPlugin, MemoryRetentionProviderReceipt, MemoryRetentionReport,
     StreamingContextScrubber,
 };
 
-// Re-export plugin system
-pub use plugins::{Plugin, PluginManager, PluginMeta};
+// Re-export plugin diagnostic discovery.
+pub use plugins::PluginManager;
 
 // Re-export skill orchestrator
 pub use skill_orchestrator::SkillOrchestrator;
 
 // Re-export session persistence
+pub use alpha_runtime_v1::{
+    AlphaRuntimeV1BackgroundJob, AlphaRuntimeV1DispatchSummary, AlphaRuntimeV1EnqueueReceipt,
+    AlphaRuntimeV1Envelope, AlphaRuntimeV1Error, AlphaRuntimeV1EventType, AlphaRuntimeV1LoopId,
+    AlphaRuntimeV1Request, AlphaRuntimeV1Variant, ALPHA_RUNTIME_V1_ENVELOPE_SCHEMA,
+};
+pub use run_runtime::{
+    CronScheduleSource, EphemeralRunRuntimeFactory, RunInspection, RunInvocationContext,
+    RunRuntime, SessionRunSelection,
+};
 pub use session_persistence::{leading_system_prompt_for_persist, SessionPersistence};
+
+// Re-export deterministic, provider/tool-free replay evidence.
+pub use deterministic_replay::{
+    reconstruct_exact_verified_run, reconstruct_verified_run, BoundExactArtifactReader,
+    DeterministicReplayError, DeterministicReplayReport, ExactArtifactReadError,
+    ExactArtifactReader, ReplayArtifactAvailability, ReplayArtifactReference, ReplayEvidenceCount,
+    ReplayEvidenceCounters, ReplayFidelity, VerifiedRunReplayPlan,
+};
+
+// Re-export scoped detached-signature verification for replay plans.
+pub use run_proof::{
+    sign_verified_run_proof, verify_exact_run_evidence, verify_trust_policy_run_proof,
+    ExactVerifiedRunEvidence, ExactVerifiedRunEvidenceError, ExactVerifiedRunEvidenceResult,
+    RunProofEnvelope, RunProofError, RunProofResult, RunProofTrustContext, RunProofTrustDecision,
+    RunProofTrustPolicy, TrustPolicyVerifiedRunProof, RUN_PROOF_SCHEMA, RUN_PROOF_SCHEMA_VERSION,
+    RUN_PROOF_SIGNATURE_ALGORITHM,
+};
+
+// Re-export invocation-local workspace scoping for scheduled runners.
+pub use runtime_cwd::with_workspace_cwd;
 
 // Re-export context files
 pub use code_index::{CodeIndex, CodeIndexConfig, IndexStats, ReferenceHit, SymbolInfo};
@@ -135,10 +178,15 @@ pub use sub_agent_orchestrator::{
 // Re-export honcho provider
 pub use honcho_provider::HonchoProvider;
 
-// Re-export core types that consumers need
+// Re-export core types that consumers need.
 pub use hermes_core::{
-    AgentError, AgentResult, BudgetConfig, LlmProvider, Message, StreamChunk, ToolCall, ToolError,
-    ToolResult, ToolSchema, UsageStats,
+    AgentError, AgentResult, BudgetConfig, LlmProvider, MemoryAuditActor, MemoryExportArtifact,
+    MemoryExportReceipt, MemoryForgetReceipt, MemoryGovernanceOperation, MemoryPrincipalId,
+    MemoryProviderGovernanceError, MemoryReadbackReceipt, MemoryRetentionPolicy,
+    MemoryRetentionReceipt, MemorySessionId, MemorySubject, MemorySubjectDerivationKey,
+    MemorySubjectError, MemorySubjectStorageKey, MemorySurface, MemoryTeamId, MemoryTenantId,
+    MemoryVisibility, Message, StreamChunk, ToolCall, ToolError, ToolResult, ToolSchema,
+    UsageStats,
 };
 
 fn default_memory_home() -> String {
@@ -158,30 +206,27 @@ fn default_memory_home() -> String {
         .unwrap_or_else(|| ".hermes-agent-ultra".to_string())
 }
 
-/// Attach discovered external memory providers to an `AgentLoop`.
-///
-/// This keeps ContextLattice-first and multi-provider memory behavior enabled
-/// consistently across CLI, gateway, HTTP, and cron execution surfaces.
-pub fn attach_discovered_memory(mut agent: AgentLoop) -> AgentLoop {
+/// Attach discovered providers to an `AgentLoop` under an explicit immutable
+/// memory subject. The subject must come from authenticated ingress or an
+/// explicit local-owner constructor; AgentConfig is never used as identity.
+pub fn attach_discovered_memory(
+    mut agent: AgentLoop,
+    subject: MemorySubject,
+) -> Result<AgentLoop, MemoryManagerError> {
     if agent.config.skip_memory {
-        return agent;
+        return Ok(agent);
     }
-    let session_id = agent
-        .config
-        .session_id
-        .clone()
-        .unwrap_or_else(|| "session-default".to_string());
     let hermes_home = agent
         .config
         .hermes_home
         .clone()
         .unwrap_or_else(default_memory_home);
     if let Some(manager) = memory_plugins::build_initialized_memory_manager(
-        &session_id,
+        subject,
         &hermes_home,
         agent.config.memory_nudge_interval,
-    ) {
+    )? {
         agent = agent.with_memory(manager);
     }
-    agent
+    Ok(agent)
 }

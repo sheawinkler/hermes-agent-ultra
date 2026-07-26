@@ -72,7 +72,7 @@ Ultra keeps parity work separate from intentional extensions.
 - `Live session eval harness`: score real saved sessions and gate quality trends from actual usage
 - `RTK raw-mode controls`: inspect unwrapped tool payloads when debugging integrations
 - `Memory fusion`: ContextLattice + external memory providers with scoring/fusion logic
-- `One-true-harness cockpit`: `/harness` and `harness_cockpit` unify skills, proof, OIDC, replay, objectives, onboarding, and chaos probes
+- `Audited capability cockpit`: `/harness` and `harness_cockpit` expose typed production maturity for skills, proof, OIDC, replay, objectives, onboarding, and chaos without promoting catalogs or diagnostics
 - `Ultra autonomy cockpit`: `ultra_autonomy`, `/harness autonomy`, and `harness.autonomy` expose task boards, loop detection, resource-governed subagents, ContextLattice-first memory lifecycle, channel surfaces, and objective-to-board planning
 - `One-command always-on UX`: `hermes-ultra up` composes gateway service install/start/status into a single operator command
 - `Advanced sync gates`: differential parity checks, red-team/adversarial gating, elite sync gate
@@ -309,9 +309,12 @@ Skills commands support multi-registry search/install and local tap flows.
   - `claude-marketplace/...`
 - Mandatory skill security scanning runs before install and before use.
 
-Use `/harness` in the TUI or the `harness_cockpit` tool for the curated
-one-true-harness index, including Matt Pocock `teach`, `domain-modeling`,
-`grill-with-docs`, `codebase-design`, and architecture-deepening workflows.
+Use `/harness` in the TUI or the `harness_cockpit` tool for the audited
+production-completeness inventory. Matt Pocock `teach`, `domain-modeling`,
+`grill-with-docs`, `codebase-design`, and architecture-deepening entries are
+recommendations, not implemented workflows. The cockpit currently reports
+`0 complete / 12 partial / 3 facade-only` and names the missing contract for
+each item.
 Use `/harness autonomy` or the `ultra_autonomy` tool for board execution,
 loop detection, resource admission, ContextLattice-first memory lifecycle, and
 objective-to-board planning. Dashboard clients can call `harness.autonomy` via

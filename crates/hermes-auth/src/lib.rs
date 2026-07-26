@@ -1,28 +1,62 @@
 //! Unified auth module: PKCE helpers, token store, and refresh manager.
 
 use std::collections::HashMap;
+use std::fmt;
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
+use fs2::FileExt;
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex as AsyncMutex;
 use url::{form_urlencoded, Url};
 
-const TOKEN_STORE_ENVELOPE_VERSION: u8 = 1;
+/// The only on-disk credential-store envelope version accepted by this crate.
+pub const TOKEN_STORE_ENVELOPE_VERSION: u8 = 1;
+
 const TOKEN_STORE_KEY_BYTES: usize = 32;
 const TOKEN_STORE_NONCE_BYTES: usize = 12;
 const TOKEN_STORE_KEY_ENV: &str = "HERMES_TOKEN_STORE_KEY_B64";
 
 type TokenCache = HashMap<String, OAuthCredential>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+type StoreRefreshGateKey = (PathBuf, String);
+
+/// Refreshes are keyed by the credential-store path and provider, rather than
+/// a process-global provider name. Independent profiles may refresh the same
+/// provider concurrently, while managers sharing one store serialize token
+/// rotation and re-read the winner's credential.
+static STORE_REFRESH_GATES: LazyLock<Mutex<HashMap<StoreRefreshGateKey, Weak<AsyncMutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn refresh_gate_for_store(path: &Path, provider: &str) -> Arc<AsyncMutex<()>> {
+    let key = (
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        provider.to_string(),
+    );
+    let mut gates = STORE_REFRESH_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(AsyncMutex::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
+}
+
+/// A provider credential. Its `Debug` implementation intentionally never emits
+/// either token value.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OAuthCredential {
     pub provider: String,
     pub access_token: String,
@@ -30,6 +64,23 @@ pub struct OAuthCredential {
     pub token_type: String,
     pub scope: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl fmt::Debug for OAuthCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OAuthCredential")
+            .field("provider", &self.provider)
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("token_type", &self.token_type)
+            .field("scope", &self.scope)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl OAuthCredential {
@@ -41,130 +92,455 @@ impl OAuthCredential {
     }
 }
 
+/// Controls whether opening the token store may create a key or migrate a
+/// legacy plaintext file. Runtime resolution must use `ReadOnly`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenStoreOpenMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// The authenticated state observed when a token store was opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenStoreState {
+    Missing,
+    EncryptedV1,
+    LegacyPlaintextMigrated,
+}
+
+/// A non-secret, typed description of why a credential store could not load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CredentialStoreError {
+    Io { operation: &'static str },
+    InvalidKey,
+    KeyUnavailable,
+    EncryptedStoreMalformed,
+    UnsupportedEnvelopeVersion { version: u8 },
+    DecryptionFailed,
+    LegacyStoreMalformed,
+    LegacyMigrationRequired,
+    InvalidCredential,
+    ReadOnly,
+    Serialization,
+}
+
+impl CredentialStoreError {
+    /// An operator-safe remediation string which does not disclose credential
+    /// data or parsed input.
+    pub const fn remediation(&self) -> &'static str {
+        match self {
+            Self::LegacyMigrationRequired => {
+                "run `hermes auth status` or `hermes auth login <provider>` to migrate it"
+            }
+            Self::ReadOnly => "use an explicit credential-management command",
+            Self::KeyUnavailable
+            | Self::InvalidKey
+            | Self::DecryptionFailed
+            | Self::EncryptedStoreMalformed
+            | Self::UnsupportedEnvelopeVersion { .. } => {
+                "restore the correct credential-store key or run `hermes auth login <provider>`"
+            }
+            Self::LegacyStoreMalformed
+            | Self::InvalidCredential
+            | Self::Serialization
+            | Self::Io { .. } => {
+                "repair the credential store, then run `hermes auth login <provider>`"
+            }
+        }
+    }
+}
+
+impl fmt::Display for CredentialStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { operation } => {
+                write!(formatter, "credential store I/O failed while {operation}")
+            }
+            Self::InvalidKey => formatter.write_str("credential store key is invalid"),
+            Self::KeyUnavailable => formatter.write_str("credential store key is unavailable"),
+            Self::EncryptedStoreMalformed => {
+                formatter.write_str("credential store encrypted envelope is malformed")
+            }
+            Self::UnsupportedEnvelopeVersion { version } => {
+                write!(
+                    formatter,
+                    "credential store envelope version {version} is unsupported"
+                )
+            }
+            Self::DecryptionFailed => {
+                formatter.write_str("credential store could not be decrypted")
+            }
+            Self::LegacyStoreMalformed => {
+                formatter.write_str("credential store legacy plaintext format is malformed")
+            }
+            Self::LegacyMigrationRequired => {
+                formatter.write_str("credential store legacy plaintext migration is required")
+            }
+            Self::InvalidCredential => {
+                formatter.write_str("credential store contains an invalid credential")
+            }
+            Self::ReadOnly => formatter.write_str("credential store was opened read-only"),
+            Self::Serialization => formatter.write_str("credential store serialization failed"),
+        }
+    }
+}
+
+impl std::error::Error for CredentialStoreError {}
+
+impl From<CredentialStoreError> for AgentError {
+    fn from(error: CredentialStoreError) -> Self {
+        AgentError::AuthFailed(format!(
+            "credential unavailable: {error}; {}",
+            error.remediation()
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TokenStoreEnvelope {
     version: u8,
     nonce_b64: String,
     ciphertext_b64: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PkcePair {
     pub verifier: String,
     pub challenge: String,
 }
 
-pub fn generate_pkce_pair() -> PkcePair {
-    let verifier = uuid::Uuid::new_v4().to_string().replace('-', "");
+impl fmt::Debug for PkcePair {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PkcePair")
+            .field("verifier", &"<redacted>")
+            .field("challenge", &self.challenge)
+            .finish()
+    }
+}
+
+/// Number of CSPRNG bytes used by OAuth state and OIDC nonce values.
+pub const OAUTH_NONCE_BYTES: usize = 32;
+
+/// Generates an OAuth state or OIDC nonce from 256 bits of CSPRNG output.
+///
+/// The URL-safe, unpadded encoding is safe to send as an authorization-query
+/// parameter and contains no timestamp, process, or host-derived data.
+pub fn generate_oauth_nonce() -> String {
+    let mut bytes = [0_u8; OAUTH_NONCE_BYTES];
+    rand::fill(&mut bytes);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn pkce_s256_challenge(verifier: &str) -> String {
     let digest = Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+}
+
+pub fn generate_pkce_pair() -> PkcePair {
+    let verifier = generate_oauth_nonce();
+    let challenge = pkce_s256_challenge(&verifier);
     PkcePair {
         verifier,
         challenge,
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CredentialStatus {
+    Missing,
+    Current { expires_at: Option<DateTime<Utc>> },
+    Expired { expires_at: DateTime<Utc> },
+    Unusable,
+}
+
 #[derive(Clone)]
 pub struct FileTokenStore {
     path: PathBuf,
-    key: Arc<[u8; TOKEN_STORE_KEY_BYTES]>,
+    key: Option<Arc<[u8; TOKEN_STORE_KEY_BYTES]>>,
     cache: Arc<RwLock<TokenCache>>,
+    mode: TokenStoreOpenMode,
+    state: TokenStoreState,
+    write_gate: Arc<Mutex<()>>,
 }
 
 impl FileTokenStore {
-    pub async fn new(path: impl AsRef<Path>) -> Result<Self, AgentError> {
+    /// Opens a writable store for an explicit credential-management operation.
+    /// A valid legacy plaintext store is migrated before this returns.
+    pub async fn new(path: impl AsRef<Path>) -> Result<Self, CredentialStoreError> {
+        Self::open(path, TokenStoreOpenMode::ReadWrite)
+    }
+
+    /// Opens a store without creating keys, migrating plaintext, or writing
+    /// credentials. Runtime resolution must use this mode.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, CredentialStoreError> {
+        Self::open(path, TokenStoreOpenMode::ReadOnly)
+    }
+
+    /// Opens a versioned credential store in the requested mode.
+    pub fn open(
+        path: impl AsRef<Path>,
+        mode: TokenStoreOpenMode,
+    ) -> Result<Self, CredentialStoreError> {
         let path = path.as_ref().to_path_buf();
         let key_path = path.with_extension("key");
-        let key = load_or_create_store_key(&key_path).await?;
-        let (initial, migrate_legacy) = load_token_cache(&path, &key).await?;
+        let raw = match fs::read(&path) {
+            Ok(raw) => Some(raw),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => {
+                return Err(CredentialStoreError::Io {
+                    operation: "reading",
+                })
+            }
+        };
+
+        let (cache, key, state, migrate_legacy) = match raw {
+            None => {
+                let key = match mode {
+                    TokenStoreOpenMode::ReadOnly => None,
+                    TokenStoreOpenMode::ReadWrite => {
+                        Some(Arc::new(load_store_key(&key_path, true)?))
+                    }
+                };
+                (HashMap::new(), key, TokenStoreState::Missing, false)
+            }
+            Some(raw) => {
+                let parsed = serde_json::from_slice::<serde_json::Value>(&raw)
+                    .map_err(|_| CredentialStoreError::LegacyStoreMalformed)?;
+                let object = parsed
+                    .as_object()
+                    .ok_or(CredentialStoreError::LegacyStoreMalformed)?;
+                // A valid legacy cache is a map whose values are credential
+                // objects. Encrypted envelopes contain scalar metadata. This
+                // avoids misclassifying a legacy provider named `version`,
+                // `nonce_b64`, or `ciphertext_b64` as an encrypted file.
+                let looks_legacy = object.values().all(serde_json::Value::is_object);
+
+                if !looks_legacy {
+                    let envelope = serde_json::from_value::<TokenStoreEnvelope>(parsed)
+                        .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+                    let key = Arc::new(load_store_key(&key_path, false)?);
+                    let cache = decrypt_token_cache(&key, &envelope)?;
+                    validate_token_cache(&cache)
+                        .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+                    (cache, Some(key), TokenStoreState::EncryptedV1, false)
+                } else {
+                    let cache = serde_json::from_value::<TokenCache>(parsed)
+                        .map_err(|_| CredentialStoreError::LegacyStoreMalformed)?;
+                    validate_token_cache(&cache)
+                        .map_err(|_| CredentialStoreError::LegacyStoreMalformed)?;
+                    if mode == TokenStoreOpenMode::ReadOnly {
+                        return Err(CredentialStoreError::LegacyMigrationRequired);
+                    }
+                    (
+                        cache,
+                        Some(Arc::new(load_store_key(&key_path, true)?)),
+                        TokenStoreState::LegacyPlaintextMigrated,
+                        true,
+                    )
+                }
+            }
+        };
+
         let store = Self {
             path,
-            key: Arc::new(key),
-            cache: Arc::new(RwLock::new(initial)),
+            key,
+            cache: Arc::new(RwLock::new(cache)),
+            mode,
+            state,
+            write_gate: Arc::new(Mutex::new(())),
         };
         if migrate_legacy {
-            // Rewrite legacy plaintext content to encrypted envelope format.
-            store.flush().await?;
+            store.flush()?;
         }
         Ok(store)
     }
 
-    pub async fn get(&self, provider: &str) -> Option<OAuthCredential> {
-        self.cache.read().await.get(provider).cloned()
+    pub fn state(&self) -> TokenStoreState {
+        self.state
     }
 
-    pub async fn upsert(&self, credential: OAuthCredential) -> Result<(), AgentError> {
+    pub fn get_sync(&self, provider: &str) -> Option<OAuthCredential> {
         self.cache
-            .write()
-            .await
-            .insert(credential.provider.clone(), credential);
-        self.flush().await
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(provider)
+            .cloned()
     }
 
-    pub async fn remove(&self, provider: &str) -> Result<(), AgentError> {
-        self.cache.write().await.remove(provider);
-        self.flush().await
+    pub async fn get(&self, provider: &str) -> Option<OAuthCredential> {
+        self.get_sync(provider)
+    }
+
+    pub fn credential_status(&self, provider: &str, leeway_secs: i64) -> CredentialStatus {
+        match self.get_sync(provider) {
+            None => CredentialStatus::Missing,
+            Some(credential) if credential.access_token.trim().is_empty() => {
+                CredentialStatus::Unusable
+            }
+            Some(credential) if credential.is_expired(leeway_secs) => CredentialStatus::Expired {
+                expires_at: credential
+                    .expires_at
+                    .expect("expired credential always has an expiration"),
+            },
+            Some(credential) => CredentialStatus::Current {
+                expires_at: credential.expires_at,
+            },
+        }
+    }
+
+    pub async fn upsert(&self, credential: OAuthCredential) -> Result<(), CredentialStoreError> {
+        validate_credential(&credential.provider, &credential)
+            .map_err(|_| CredentialStoreError::InvalidCredential)?;
+        let _write = self
+            .write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.writable_key()?;
+        let _file_lock = acquire_store_file_lock(&self.path)?;
+
+        // Re-read while holding the path-scoped lock so another auth profile
+        // cannot erase an unrelated provider written by a different store
+        // instance between our open and this update.
+        let mut cache = self.read_persisted_cache()?;
+        cache.insert(credential.provider.clone(), credential);
+        self.persist_cache(&cache)?;
+        *self
+            .cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
+        Ok(())
+    }
+
+    pub async fn remove(&self, provider: &str) -> Result<(), CredentialStoreError> {
+        let _write = self
+            .write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.writable_key()?;
+        let _file_lock = acquire_store_file_lock(&self.path)?;
+
+        let mut cache = self.read_persisted_cache()?;
+        cache.remove(provider);
+        self.persist_cache(&cache)?;
+        *self
+            .cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
+        Ok(())
     }
 
     pub async fn list_providers(&self) -> Vec<String> {
-        let mut providers: Vec<String> = self.cache.read().await.keys().cloned().collect();
+        let mut providers: Vec<String> = self
+            .cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .cloned()
+            .collect();
         providers.sort();
         providers
     }
 
-    async fn flush(&self) -> Result<(), AgentError> {
-        let content = {
-            let cache = self.cache.read().await;
-            let envelope = encrypt_token_cache(&self.key, &cache)?;
-            serde_json::to_vec_pretty(&envelope).map_err(|e| AgentError::Config(e.to_string()))?
+    fn reload_from_disk(&self) -> Result<(), CredentialStoreError> {
+        let cache = self.read_persisted_cache()?;
+        *self
+            .cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = cache;
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<(), CredentialStoreError> {
+        let _write = self
+            .write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file_lock = acquire_store_file_lock(&self.path)?;
+        let cache = self
+            .cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        self.persist_cache(&cache)
+    }
+
+    fn writable_key(&self) -> Result<&[u8; TOKEN_STORE_KEY_BYTES], CredentialStoreError> {
+        if self.mode != TokenStoreOpenMode::ReadWrite {
+            return Err(CredentialStoreError::ReadOnly);
+        }
+        self.key.as_deref().ok_or(CredentialStoreError::ReadOnly)
+    }
+
+    fn persist_cache(&self, cache: &TokenCache) -> Result<(), CredentialStoreError> {
+        let key = self.writable_key()?;
+        let envelope = encrypt_token_cache(key, cache)?;
+        let content = serde_json::to_vec_pretty(&envelope)
+            .map_err(|_| CredentialStoreError::Serialization)?;
+        write_file_private(&self.path, &content)
+    }
+
+    fn read_persisted_cache(&self) -> Result<TokenCache, CredentialStoreError> {
+        let key = self
+            .key
+            .as_deref()
+            .ok_or(CredentialStoreError::KeyUnavailable)?;
+        let raw = match fs::read(&self.path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(_) => {
+                return Err(CredentialStoreError::Io {
+                    operation: "reading an encrypted credential file",
+                })
+            }
         };
-        write_file_private(&self.path, &content).await
+        let value = serde_json::from_slice::<serde_json::Value>(&raw)
+            .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        let object = value
+            .as_object()
+            .ok_or(CredentialStoreError::EncryptedStoreMalformed)?;
+        if object.values().all(serde_json::Value::is_object) {
+            return Err(CredentialStoreError::LegacyMigrationRequired);
+        }
+        let envelope = serde_json::from_value::<TokenStoreEnvelope>(value)
+            .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        let cache = decrypt_token_cache(key, &envelope)?;
+        validate_token_cache(&cache).map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+        Ok(cache)
     }
 }
 
-async fn load_token_cache(
-    path: &Path,
-    key: &[u8; TOKEN_STORE_KEY_BYTES],
-) -> Result<(TokenCache, bool), AgentError> {
-    if !tokio::fs::try_exists(path)
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?
+fn validate_token_cache(cache: &TokenCache) -> Result<(), ()> {
+    cache
+        .iter()
+        .try_for_each(|(provider, credential)| validate_credential(provider, credential))
+}
+
+fn validate_credential(provider: &str, credential: &OAuthCredential) -> Result<(), ()> {
+    if provider.trim().is_empty()
+        || credential.provider.trim().is_empty()
+        || credential.provider != provider
+        || credential.access_token.trim().is_empty()
+        || credential.token_type.trim().is_empty()
     {
-        return Ok((HashMap::new(), false));
+        return Err(());
     }
-    let raw = tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-    if raw.trim().is_empty() {
-        return Ok((HashMap::new(), false));
-    }
-
-    if let Ok(envelope) = serde_json::from_str::<TokenStoreEnvelope>(&raw) {
-        let cache = decrypt_token_cache(key, &envelope)?;
-        return Ok((cache, false));
-    }
-
-    let legacy: TokenCache =
-        serde_json::from_str(&raw).map_err(|e| AgentError::Config(e.to_string()))?;
-    tracing::warn!(
-        path = %path.display(),
-        "Legacy plaintext token store detected; migrating to encrypted format"
-    );
-    Ok((legacy, true))
+    Ok(())
 }
 
 fn encrypt_token_cache(
     key: &[u8; TOKEN_STORE_KEY_BYTES],
     cache: &TokenCache,
-) -> Result<TokenStoreEnvelope, AgentError> {
-    let plaintext = serde_json::to_vec(cache).map_err(|e| AgentError::Config(e.to_string()))?;
-    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+) -> Result<TokenStoreEnvelope, CredentialStoreError> {
+    let plaintext = serde_json::to_vec(cache).map_err(|_| CredentialStoreError::Serialization)?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
     let mut nonce_bytes = [0u8; TOKEN_STORE_NONCE_BYTES];
     rand::fill(&mut nonce_bytes[..]);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_ref())
-        .map_err(|_| AgentError::AuthFailed("failed to encrypt token store".into()))?;
+        .map_err(|_| CredentialStoreError::Serialization)?;
     Ok(TokenStoreEnvelope {
         version: TOKEN_STORE_ENVELOPE_VERSION,
         nonce_b64: base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
@@ -175,122 +551,152 @@ fn encrypt_token_cache(
 fn decrypt_token_cache(
     key: &[u8; TOKEN_STORE_KEY_BYTES],
     envelope: &TokenStoreEnvelope,
-) -> Result<TokenCache, AgentError> {
+) -> Result<TokenCache, CredentialStoreError> {
     if envelope.version != TOKEN_STORE_ENVELOPE_VERSION {
-        return Err(AgentError::Config(format!(
-            "unsupported token store envelope version: {}",
-            envelope.version
-        )));
+        return Err(CredentialStoreError::UnsupportedEnvelopeVersion {
+            version: envelope.version,
+        });
     }
     let nonce = base64::engine::general_purpose::STANDARD
         .decode(envelope.nonce_b64.trim())
-        .map_err(|e| AgentError::Config(format!("invalid token store nonce: {}", e)))?;
+        .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
     if nonce.len() != TOKEN_STORE_NONCE_BYTES {
-        return Err(AgentError::Config(format!(
-            "invalid token store nonce length: {}",
-            nonce.len()
-        )));
+        return Err(CredentialStoreError::EncryptedStoreMalformed);
     }
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(envelope.ciphertext_b64.trim())
-        .map_err(|e| AgentError::Config(format!("invalid token store payload: {}", e)))?;
-    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+        .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
-        .map_err(|_| AgentError::AuthFailed("failed to decrypt token store".into()))?;
-    serde_json::from_slice::<TokenCache>(&plaintext).map_err(|e| AgentError::Config(e.to_string()))
+        .map_err(|_| CredentialStoreError::DecryptionFailed)?;
+    serde_json::from_slice::<TokenCache>(&plaintext)
+        .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)
 }
 
-async fn load_or_create_store_key(path: &Path) -> Result<[u8; TOKEN_STORE_KEY_BYTES], AgentError> {
+fn load_store_key(
+    path: &Path,
+    create_if_missing: bool,
+) -> Result<[u8; TOKEN_STORE_KEY_BYTES], CredentialStoreError> {
     if let Ok(raw) = std::env::var(TOKEN_STORE_KEY_ENV) {
         return decode_store_key(raw.trim());
     }
-    if tokio::fs::try_exists(path)
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?
-    {
-        let raw = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
-        return decode_store_key(raw.trim());
+    match fs::read_to_string(path) {
+        Ok(raw) => decode_store_key(raw.trim()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !create_if_missing => {
+            Err(CredentialStoreError::KeyUnavailable)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
+            rand::fill(&mut key[..]);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+            write_file_private(path, encoded.as_bytes())?;
+            Ok(key)
+        }
+        Err(_) => Err(CredentialStoreError::Io {
+            operation: "reading the key",
+        }),
     }
-
-    let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
-    rand::fill(&mut key[..]);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
-    write_file_private(path, encoded.as_bytes()).await?;
-    Ok(key)
 }
 
-fn decode_store_key(encoded: &str) -> Result<[u8; TOKEN_STORE_KEY_BYTES], AgentError> {
+fn decode_store_key(encoded: &str) -> Result<[u8; TOKEN_STORE_KEY_BYTES], CredentialStoreError> {
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|e| AgentError::Config(format!("invalid {}: {}", TOKEN_STORE_KEY_ENV, e)))?;
+        .map_err(|_| CredentialStoreError::InvalidKey)?;
     if decoded.len() != TOKEN_STORE_KEY_BYTES {
-        return Err(AgentError::Config(format!(
-            "{} must decode to exactly {} bytes (got {})",
-            TOKEN_STORE_KEY_ENV,
-            TOKEN_STORE_KEY_BYTES,
-            decoded.len()
-        )));
+        return Err(CredentialStoreError::InvalidKey);
     }
     let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
     key.copy_from_slice(&decoded);
     Ok(key)
 }
 
-async fn write_file_private(path: &Path, content: &[u8]) -> Result<(), AgentError> {
+fn write_file_private(path: &Path, content: &[u8]) -> Result<(), CredentialStoreError> {
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
+        fs::create_dir_all(parent).map_err(|_| CredentialStoreError::Io {
+            operation: "creating the credential directory",
+        })?;
     }
     let tmp_path = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-
-    let result = async {
-        let mut file = private_create_new_options()
-            .open(&tmp_path)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
+    let result = (|| {
+        let mut file =
+            private_create_new_options()
+                .open(&tmp_path)
+                .map_err(|_| CredentialStoreError::Io {
+                    operation: "creating an encrypted credential file",
+                })?;
         file.write_all(content)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
-        file.sync_all()
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
+            .map_err(|_| CredentialStoreError::Io {
+                operation: "writing an encrypted credential file",
+            })?;
+        file.sync_all().map_err(|_| CredentialStoreError::Io {
+            operation: "syncing an encrypted credential file",
+        })?;
         drop(file);
-        set_private_permissions(&tmp_path).await?;
-        tokio::fs::rename(&tmp_path, path)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
-        set_private_permissions(path).await
-    }
-    .await;
+        set_private_permissions(&tmp_path)?;
+        fs::rename(&tmp_path, path).map_err(|_| CredentialStoreError::Io {
+            operation: "atomically replacing the credential file",
+        })?;
+        set_private_permissions(path)
+    })();
 
     if result.is_err() {
-        let _ = tokio::fs::remove_file(&tmp_path).await;
+        let _ = fs::remove_file(&tmp_path);
     }
     result
 }
 
-fn private_create_new_options() -> tokio::fs::OpenOptions {
-    let mut options = tokio::fs::OpenOptions::new();
+/// Acquire an exclusive, process-visible lock for one credential-store path.
+///
+/// Holding this lock across the read-modify-write transaction prevents two
+/// independently opened stores from losing each other's provider entries.
+fn acquire_store_file_lock(path: &Path) -> Result<fs::File, CredentialStoreError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| CredentialStoreError::Io {
+            operation: "creating the credential directory",
+        })?;
+    }
+    let lock_path = path.with_extension("lock");
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&lock_path)
+        .map_err(|_| CredentialStoreError::Io {
+            operation: "opening the credential-store lock",
+        })?;
+    set_private_permissions(&lock_path)?;
+    file.lock_exclusive()
+        .map_err(|_| CredentialStoreError::Io {
+            operation: "locking the credential store",
+        })?;
+    Ok(file)
+}
+
+fn private_create_new_options() -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
     options
 }
 
-async fn set_private_permissions(path: &Path) -> Result<(), AgentError> {
+fn set_private_permissions(path: &Path) -> Result<(), CredentialStoreError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        tokio::fs::set_permissions(path, perms)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|_| {
+            CredentialStoreError::Io {
+                operation: "setting credential-file permissions",
+            }
+        })?;
     }
     #[cfg(not(unix))]
     {
@@ -307,6 +713,14 @@ pub type RefreshHandler = Arc<
         + Send
         + Sync,
 >;
+
+/// The non-secret result of an explicit, expiry-gated refresh attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshResolution {
+    NotConfigured,
+    Current,
+    Refreshed { expires_at: Option<DateTime<Utc>> },
+}
 
 #[derive(Clone)]
 pub struct AuthManager {
@@ -325,42 +739,121 @@ impl AuthManager {
     pub async fn register_refresh_handler(&self, provider: &str, handler: RefreshHandler) {
         self.refresh_handlers
             .write()
-            .await
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(provider.to_string(), handler);
     }
 
-    pub async fn save_credential(&self, credential: OAuthCredential) -> Result<(), AgentError> {
-        self.store.upsert(credential).await
+    /// Registers the standard OAuth2 refresh transport for an explicit caller.
+    /// Registration does not make refresh automatic.
+    pub async fn register_oauth2_refresh_handler(
+        &self,
+        provider: &str,
+        endpoints: OAuth2Endpoints,
+    ) {
+        let handler: RefreshHandler = Arc::new(move |provider, refresh_token| {
+            let endpoints = endpoints.clone();
+            Box::pin(
+                async move { exchange_refresh_token(&provider, &endpoints, &refresh_token).await },
+            )
+        });
+        self.register_refresh_handler(provider, handler).await;
     }
 
+    pub async fn save_credential(&self, credential: OAuthCredential) -> Result<(), AgentError> {
+        self.store.upsert(credential).await.map_err(Into::into)
+    }
+
+    /// Reads only a usable access token. It never sends refresh traffic or
+    /// mutates the store; expired/unusable credentials fail closed.
     pub async fn get_access_token(&self, provider: &str) -> Result<Option<String>, AgentError> {
-        let Some(mut credential) = self.store.get(provider).await else {
-            return Ok(None);
-        };
-
-        if credential.is_expired(30) {
-            let Some(refresh_token) = credential.refresh_token.clone() else {
-                return Ok(None);
-            };
-            let handler = self
-                .refresh_handlers
-                .read()
-                .await
-                .get(provider)
-                .cloned()
-                .ok_or_else(|| {
-                    AgentError::AuthFailed(format!("no refresh handler for {}", provider))
-                })?;
-            credential = handler(provider.to_string(), refresh_token).await?;
-            self.store.upsert(credential.clone()).await?;
+        match self.store.credential_status(provider, 30) {
+            CredentialStatus::Missing => Ok(None),
+            CredentialStatus::Current { .. } => Ok(self
+                .store
+                .get_sync(provider)
+                .map(|credential| credential.access_token)),
+            CredentialStatus::Expired { .. } => Err(credential_unavailable(
+                provider,
+                "the stored access token is expired",
+            )),
+            CredentialStatus::Unusable => Err(credential_unavailable(
+                provider,
+                "the stored access token is unusable",
+            )),
         }
+    }
 
-        Ok(Some(credential.access_token))
+    /// Performs exactly one expiry-gated refresh for this manager/provider.
+    /// A handler is required; missing handlers are explicit failures rather
+    /// than an implicit `None` result. Successful results are durably written
+    /// through the encrypted store before being reported.
+    pub async fn refresh_expired_credential(
+        &self,
+        provider: &str,
+    ) -> Result<RefreshResolution, AgentError> {
+        let gate = refresh_gate_for_store(&self.store.path, provider);
+        let _guard = gate.lock().await;
+        self.store.reload_from_disk().map_err(AgentError::from)?;
+
+        let Some(current) = self.store.get(provider).await else {
+            return Ok(RefreshResolution::NotConfigured);
+        };
+        if current.access_token.trim().is_empty() {
+            return Err(credential_unavailable(
+                provider,
+                "the stored access token is unusable",
+            ));
+        }
+        if !current.is_expired(30) {
+            return Ok(RefreshResolution::Current);
+        }
+        let refresh_token = current
+            .refresh_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| {
+                credential_unavailable(provider, "the stored refresh token is unavailable")
+            })?
+            .to_string();
+        let handler = self
+            .refresh_handlers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(provider)
+            .cloned()
+            .ok_or_else(|| {
+                AgentError::AuthFailed(format!(
+                    "OAuth refresh handler is not configured for provider '{provider}'; run `hermes auth refresh {provider}` after configuring its OAuth endpoints"
+                ))
+            })?;
+        let refreshed = handler(provider.to_string(), refresh_token)
+            .await
+            .map_err(|_| {
+                AgentError::AuthFailed(format!(
+                    "OAuth refresh failed for provider '{provider}'; run `hermes auth login {provider}`"
+                ))
+            })?;
+        if refreshed.provider != provider {
+            return Err(AgentError::AuthFailed(format!(
+                "OAuth refresh returned an unexpected provider for '{provider}'; run `hermes auth login {provider}`"
+            )));
+        }
+        self.store.upsert(refreshed.clone()).await?;
+        Ok(RefreshResolution::Refreshed {
+            expires_at: refreshed.expires_at,
+        })
     }
 }
 
+fn credential_unavailable(provider: &str, reason: &str) -> AgentError {
+    AgentError::AuthFailed(format!(
+        "OAuth credential unavailable for provider '{provider}': {reason}; run `hermes auth refresh {provider}` or `hermes auth login {provider}`"
+    ))
+}
+
 /// OAuth2 authorization server metadata plus public client id (PKCE public client).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OAuth2Endpoints {
     pub authorize_url: String,
     pub token_url: String,
@@ -369,6 +862,24 @@ pub struct OAuth2Endpoints {
     pub scopes: Vec<String>,
     pub client_secret: Option<String>,
     pub client_auth_method: OAuth2ClientAuthMethod,
+}
+
+impl fmt::Debug for OAuth2Endpoints {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OAuth2Endpoints")
+            .field("authorize_url", &self.authorize_url)
+            .field("token_url", &self.token_url)
+            .field("client_id", &self.client_id)
+            .field("redirect_uri", &self.redirect_uri)
+            .field("scopes", &self.scopes)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("client_auth_method", &self.client_auth_method)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -401,7 +912,7 @@ pub fn build_authorization_url(
     Ok(url.into())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct TokenEndpointJson {
     access_token: String,
     #[serde(default)]
@@ -461,6 +972,17 @@ pub async fn exchange_authorization_code(
     code_verifier: &str,
 ) -> Result<OAuthCredential, AgentError> {
     let client = reqwest::Client::new();
+    exchange_authorization_code_with_client(&client, provider_id, endpoints, code, code_verifier)
+        .await
+}
+
+async fn exchange_authorization_code_with_client(
+    client: &reqwest::Client,
+    provider_id: &str,
+    endpoints: &OAuth2Endpoints,
+    code: &str,
+    code_verifier: &str,
+) -> Result<OAuthCredential, AgentError> {
     let mut pairs = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", code.to_string()),
@@ -472,33 +994,21 @@ pub async fn exchange_authorization_code(
         .post(&endpoints.token_url)
         .header("Accept", "application/json");
     let request = apply_oauth_client_auth(request, endpoints, &mut pairs);
-    let resp = request
+    let response = request
         .form(&pairs)
         .send()
         .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
+        .map_err(|_| AgentError::AuthFailed("OAuth token exchange request failed".into()))?;
+    if !response.status().is_success() {
         return Err(AgentError::AuthFailed(format!(
-            "token exchange failed: {}",
-            text
+            "OAuth token exchange failed with HTTP {}",
+            response.status().as_u16()
         )));
     }
-
-    let body: TokenEndpointJson = resp
-        .json()
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-    let expires_at = body.expires_in.map(|s| Utc::now() + Duration::seconds(s));
-    Ok(OAuthCredential {
-        provider: provider_id.to_string(),
-        access_token: body.access_token,
-        refresh_token: body.refresh_token,
-        token_type: body.token_type.unwrap_or_else(|| "Bearer".to_string()),
-        scope: body.scope,
-        expires_at,
-    })
+    let body = response.json::<TokenEndpointJson>().await.map_err(|_| {
+        AgentError::AuthFailed("OAuth token exchange response was malformed".into())
+    })?;
+    token_endpoint_credential(provider_id, body, None, "exchange")
 }
 
 /// Refresh an access token using `refresh_token` (RFC 6749, public client).
@@ -508,6 +1018,15 @@ pub async fn exchange_refresh_token(
     refresh_token: &str,
 ) -> Result<OAuthCredential, AgentError> {
     let client = reqwest::Client::new();
+    exchange_refresh_token_with_client(&client, provider_id, endpoints, refresh_token).await
+}
+
+async fn exchange_refresh_token_with_client(
+    client: &reqwest::Client,
+    provider_id: &str,
+    endpoints: &OAuth2Endpoints,
+    refresh_token: &str,
+) -> Result<OAuthCredential, AgentError> {
     let mut pairs = vec![
         ("grant_type", "refresh_token".to_string()),
         ("refresh_token", refresh_token.to_string()),
@@ -517,31 +1036,50 @@ pub async fn exchange_refresh_token(
         .post(&endpoints.token_url)
         .header("Accept", "application/json");
     let request = apply_oauth_client_auth(request, endpoints, &mut pairs);
-    let resp = request
+    let response = request
         .form(&pairs)
         .send()
         .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
+        .map_err(|_| AgentError::AuthFailed("OAuth token refresh request failed".into()))?;
+    if !response.status().is_success() {
         return Err(AgentError::AuthFailed(format!(
-            "token refresh failed: {}",
-            text
+            "OAuth token refresh failed with HTTP {}",
+            response.status().as_u16()
         )));
     }
-
-    let body: TokenEndpointJson = resp
-        .json()
+    let body = response
+        .json::<TokenEndpointJson>()
         .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-    let expires_at = body.expires_in.map(|s| Utc::now() + Duration::seconds(s));
+        .map_err(|_| AgentError::AuthFailed("OAuth token refresh response was malformed".into()))?;
+    token_endpoint_credential(provider_id, body, Some(refresh_token), "refresh")
+}
+
+fn token_endpoint_credential(
+    provider_id: &str,
+    body: TokenEndpointJson,
+    fallback_refresh_token: Option<&str>,
+    operation: &str,
+) -> Result<OAuthCredential, AgentError> {
+    if body.access_token.trim().is_empty()
+        || body
+            .token_type
+            .as_deref()
+            .is_some_and(|token_type| token_type.trim().is_empty())
+        || body.expires_in.is_some_and(|seconds| seconds <= 0)
+    {
+        return Err(AgentError::AuthFailed(format!(
+            "OAuth token {operation} response was malformed"
+        )));
+    }
+    let expires_at = body
+        .expires_in
+        .map(|seconds| Utc::now() + Duration::seconds(seconds));
     Ok(OAuthCredential {
         provider: provider_id.to_string(),
         access_token: body.access_token,
         refresh_token: body
             .refresh_token
-            .or_else(|| Some(refresh_token.to_string())),
+            .or_else(|| fallback_refresh_token.map(str::to_string)),
         token_type: body.token_type.unwrap_or_else(|| "Bearer".to_string()),
         scope: body.scope,
         expires_at,
@@ -571,6 +1109,51 @@ mod tests {
         assert!(url.contains("state=state-xyz"));
         assert!(url.contains("client_id=cid"));
         assert!(url.contains("scope=openid"));
+    }
+
+    #[test]
+    fn oauth_nonce_is_url_safe_256_bit_random_value() {
+        let first = generate_oauth_nonce();
+        let second = generate_oauth_nonce();
+
+        assert_eq!(first.len(), 43);
+        assert_eq!(second.len(), 43);
+        assert!(first
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')));
+        assert!(second
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn pkce_s256_challenge_matches_rfc7636_fixture() {
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        assert_eq!(
+            pkce_s256_challenge(verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
+
+    #[test]
+    fn credential_bearing_auth_types_redact_debug_output() {
+        let pkce = PkcePair {
+            verifier: "pkce-verifier-sentinel".to_string(),
+            challenge: "challenge".to_string(),
+        };
+        let endpoints = OAuth2Endpoints {
+            authorize_url: "https://example.com/authorize".to_string(),
+            token_url: "https://example.com/token".to_string(),
+            client_id: "client".to_string(),
+            redirect_uri: "http://127.0.0.1/callback".to_string(),
+            scopes: Vec::new(),
+            client_secret: Some("client-secret-sentinel".to_string()),
+            client_auth_method: OAuth2ClientAuthMethod::ClientSecretBasic,
+        };
+
+        assert!(!format!("{pkce:?}").contains("pkce-verifier-sentinel"));
+        assert!(!format!("{endpoints:?}").contains("client-secret-sentinel"));
     }
 
     #[test]
@@ -618,29 +1201,43 @@ mod tests {
         assert!(tokio::fs::try_exists(path.with_extension("key"))
             .await
             .unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(path.with_extension("key"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
 
         let reopened = FileTokenStore::new(&path).await.unwrap();
         let got = reopened.get("openai").await.unwrap();
         assert_eq!(got.access_token, "super-secret-token");
+        assert!(!format!("{got:?}").contains("super-secret-token"));
     }
 
     #[cfg(unix)]
-    #[tokio::test]
-    async fn private_create_new_options_creates_owner_only_temp_before_write() {
+    #[test]
+    fn private_create_new_options_creates_owner_only_temp_before_write() {
+        use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempdir().unwrap();
         let path = dir.path().join("tokens.json.tmp");
 
-        let mut file = private_create_new_options().open(&path).await.unwrap();
-        let mode = tokio::fs::metadata(&path)
-            .await
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
+        let mut file = private_create_new_options().open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
-        file.write_all(b"secret").await.unwrap();
+        file.write_all(b"secret").unwrap();
     }
 
     #[tokio::test]
@@ -667,6 +1264,415 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_plaintext_provider_named_envelope_field_migrates_unambiguously() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let mut legacy = HashMap::new();
+        legacy.insert(
+            "version".to_string(),
+            sample_credential("version", "legacy-reserved-provider-token"),
+        );
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let store = FileTokenStore::new(&path).await.unwrap();
+        assert_eq!(
+            store.get("version").await.unwrap().access_token,
+            "legacy-reserved-provider-token"
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("legacy-reserved-provider-token"));
+        assert_eq!(
+            serde_json::from_str::<TokenStoreEnvelope>(&raw)
+                .unwrap()
+                .version,
+            TOKEN_STORE_ENVELOPE_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_plaintext_requires_closed_credential_shape_and_redacts_errors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let sentinel = "legacy-sentinel-must-not-leak";
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"openai":{{"provider":"openai","access_token":"{sentinel}","token_type":"Bearer","unexpected":"reject"}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let result = FileTokenStore::new(&path).await;
+        let error = result.err().expect("invalid legacy store must fail");
+        assert_eq!(error, CredentialStoreError::LegacyStoreMalformed);
+        assert!(!error.to_string().contains(sentinel));
+        assert!(!format!("{error:?}").contains(sentinel));
+        assert!(std::fs::read_to_string(&path).unwrap().contains(sentinel));
+    }
+
+    #[tokio::test]
+    async fn encrypted_store_with_wrong_key_fails_closed_without_token_leakage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let sentinel = "encrypted-sentinel-must-not-leak";
+        let store = FileTokenStore::new(&path).await.unwrap();
+        store
+            .upsert(sample_credential("openai", sentinel))
+            .await
+            .unwrap();
+        std::fs::write(
+            path.with_extension("key"),
+            base64::engine::general_purpose::STANDARD.encode([13_u8; TOKEN_STORE_KEY_BYTES]),
+        )
+        .unwrap();
+
+        let result = FileTokenStore::new(&path).await;
+        let error = result.err().expect("wrong key must fail");
+        assert_eq!(error, CredentialStoreError::DecryptionFailed);
+        assert!(!error.to_string().contains(sentinel));
+        assert!(!format!("{error:?}").contains(sentinel));
+        assert!(!std::fs::read_to_string(&path).unwrap().contains(sentinel));
+    }
+
+    #[tokio::test]
+    async fn malformed_encrypted_store_fails_closed_with_typed_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        FileTokenStore::new(&path).await.expect("create store key");
+        std::fs::write(
+            &path,
+            br#"{"version":1,"nonce_b64":"AA==","ciphertext_b64":"not-valid-base64"}"#,
+        )
+        .unwrap();
+
+        let result = FileTokenStore::new(&path).await;
+        let error = result.err().expect("malformed encrypted store must fail");
+        assert_eq!(error, CredentialStoreError::EncryptedStoreMalformed);
+    }
+
+    #[tokio::test]
+    async fn read_only_open_never_migrates_plaintext_credentials() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let sentinel = "readonly-legacy-sentinel";
+        let legacy = serde_json::json!({
+            "openai": {
+                "provider": "openai",
+                "access_token": sentinel,
+                "refresh_token": null,
+                "token_type": "Bearer",
+                "scope": null,
+                "expires_at": null
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        let error = FileTokenStore::open_read_only(&path)
+            .err()
+            .expect("read-only legacy load must require explicit migration");
+        assert_eq!(error, CredentialStoreError::LegacyMigrationRequired);
+        assert!(std::fs::read_to_string(&path).unwrap().contains(sentinel));
+        assert!(!path.with_extension("key").exists());
+    }
+
+    #[tokio::test]
+    async fn read_only_store_rejects_writes_without_mutating_cache_or_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let writable = FileTokenStore::new(&path).await.unwrap();
+        writable
+            .upsert(sample_credential("openai", "persisted-access-value"))
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let readonly = FileTokenStore::open_read_only(&path).unwrap();
+
+        assert_eq!(
+            readonly.remove("openai").await.unwrap_err(),
+            CredentialStoreError::ReadOnly
+        );
+        assert!(readonly.get("openai").await.is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn read_only_missing_store_never_creates_a_key_or_store_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+
+        let store = FileTokenStore::open_read_only(&path).expect("read-only missing store");
+        assert_eq!(store.state(), TokenStoreState::Missing);
+        assert_eq!(
+            store.credential_status("openai", 0),
+            CredentialStatus::Missing
+        );
+        assert!(!path.exists());
+        assert!(!path.with_extension("key").exists());
+    }
+
+    #[tokio::test]
+    async fn passive_access_token_lookup_fails_closed_without_mutating_expired_store() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let access_sentinel = "expired-access-sentinel-must-not-leak";
+        let refresh_sentinel = "refresh-sentinel-must-not-leak";
+        let store = FileTokenStore::new(&path).await.unwrap();
+        store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: access_sentinel.to_string(),
+                refresh_token: Some(refresh_sentinel.to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(Utc::now() - Duration::minutes(1)),
+            })
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let manager = AuthManager::new(store);
+
+        let error = manager
+            .get_access_token("openai")
+            .await
+            .expect_err("expired token must be unavailable without an explicit refresh");
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("hermes auth refresh openai"));
+        assert!(!error.to_string().contains(access_sentinel));
+        assert!(!format!("{error:?}").contains(refresh_sentinel));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn auth_manager_refresh_requires_handler_and_redacts_credential_data() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let sentinel = "expired-access-sentinel";
+        let store = FileTokenStore::new(&path).await.unwrap();
+        store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: sentinel.to_string(),
+                refresh_token: Some("refresh-sentinel".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(Utc::now() - Duration::minutes(1)),
+            })
+            .await
+            .unwrap();
+        let manager = AuthManager::new(store);
+
+        let error = manager
+            .refresh_expired_credential("openai")
+            .await
+            .expect_err("missing handler must be explicit");
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("handler is not configured"));
+        assert!(!error.to_string().contains(sentinel));
+        assert!(!format!("{error:?}").contains(sentinel));
+    }
+
+    #[tokio::test]
+    async fn auth_manager_refreshes_expired_credential_through_oauth2_handler() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "refreshed-access-sentinel",
+                "refresh_token": "rotated-refresh-sentinel",
+                "token_type": "Bearer",
+                "expires_in": 120
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let store = FileTokenStore::new(&path).await.unwrap();
+        store
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "expired-access-sentinel".to_string(),
+                refresh_token: Some("old-refresh-sentinel".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(Utc::now() - Duration::minutes(1)),
+            })
+            .await
+            .unwrap();
+        let manager = AuthManager::new(store.clone());
+        manager
+            .register_oauth2_refresh_handler(
+                "openai",
+                OAuth2Endpoints {
+                    authorize_url: "https://unused.example/authorize".to_string(),
+                    token_url: format!("{}/token", server.uri()),
+                    client_id: "test-client".to_string(),
+                    redirect_uri: "http://127.0.0.1/unused".to_string(),
+                    scopes: Vec::new(),
+                    client_secret: None,
+                    client_auth_method: OAuth2ClientAuthMethod::default(),
+                },
+            )
+            .await;
+
+        let result = manager.refresh_expired_credential("openai").await.unwrap();
+        assert!(matches!(result, RefreshResolution::Refreshed { .. }));
+        assert_eq!(
+            store.get("openai").await.unwrap().access_token,
+            "refreshed-access-sentinel"
+        );
+        let raw = std::fs::read_to_string(path).unwrap();
+        assert!(!raw.contains("refreshed-access-sentinel"));
+        assert!(!raw.contains("old-refresh-sentinel"));
+    }
+
+    #[tokio::test]
+    async fn refreshes_are_serialized_by_store_path_and_provider() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let seed = FileTokenStore::new(&path).await.unwrap();
+        seed.upsert(OAuthCredential {
+            provider: "openai".to_string(),
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("rotating-refresh-token".to_string()),
+            token_type: "Bearer".to_string(),
+            scope: None,
+            expires_at: Some(Utc::now() - Duration::minutes(1)),
+        })
+        .await
+        .unwrap();
+
+        let first = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let second = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler: RefreshHandler = {
+            let calls = calls.clone();
+            Arc::new(move |provider, _refresh_token| {
+                let calls = calls.clone();
+                Box::pin(async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    Ok(OAuthCredential {
+                        provider,
+                        access_token: "rotated-access-token".to_string(),
+                        refresh_token: Some("next-refresh-token".to_string()),
+                        token_type: "Bearer".to_string(),
+                        scope: None,
+                        expires_at: Some(Utc::now() + Duration::minutes(5)),
+                    })
+                })
+            })
+        };
+        first
+            .register_refresh_handler("openai", handler.clone())
+            .await;
+        second.register_refresh_handler("openai", handler).await;
+
+        let (first_result, second_result) = tokio::join!(
+            first.refresh_expired_credential("openai"),
+            second.refresh_expired_credential("openai")
+        );
+        assert!(matches!(
+            first_result.unwrap(),
+            RefreshResolution::Refreshed { .. } | RefreshResolution::Current
+        ));
+        assert!(matches!(
+            second_result.unwrap(),
+            RefreshResolution::Refreshed { .. } | RefreshResolution::Current
+        ));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a shared store/provider may make only one refresh request"
+        );
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert_eq!(
+            reopened.get("openai").await.unwrap().access_token,
+            "rotated-access-token"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_reloads_a_store_opened_before_another_manager_saved_credentials() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let stale_manager = AuthManager::new(FileTokenStore::new(&path).await.unwrap());
+        let writer = FileTokenStore::new(&path).await.unwrap();
+        writer
+            .upsert(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "current-access-token".to_string(),
+                refresh_token: None,
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(Utc::now() + Duration::minutes(5)),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            stale_manager
+                .refresh_expired_credential("openai")
+                .await
+                .unwrap(),
+            RefreshResolution::Current
+        ));
+    }
+
+    #[tokio::test]
+    async fn refresh_timeout_is_typed_and_redacted() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(120))
+                    .set_body_json(serde_json::json!({
+                        "access_token": "late-response-sentinel",
+                        "expires_in": 60
+                    })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(20))
+            .build()
+            .unwrap();
+        let endpoints = OAuth2Endpoints {
+            authorize_url: "https://unused.example/authorize".to_string(),
+            token_url: format!("{}/token", server.uri()),
+            client_id: "test-client".to_string(),
+            redirect_uri: "http://127.0.0.1/unused".to_string(),
+            scopes: Vec::new(),
+            client_secret: None,
+            client_auth_method: OAuth2ClientAuthMethod::default(),
+        };
+
+        let error = exchange_refresh_token_with_client(
+            &client,
+            "openai",
+            &endpoints,
+            "timeout-refresh-sentinel",
+        )
+        .await
+        .expect_err("timeout must fail");
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("request failed"));
+        assert!(!error.to_string().contains("timeout-refresh-sentinel"));
+        assert!(!format!("{error:?}").contains("late-response-sentinel"));
+    }
+
+    #[tokio::test]
     async fn file_token_store_lists_providers_sorted() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("tokens.json");
@@ -687,5 +1693,61 @@ mod tests {
 
         let providers = store.list_providers().await;
         assert_eq!(providers, vec!["anthropic", "nous", "openai"]);
+    }
+
+    #[tokio::test]
+    async fn independently_opened_token_stores_merge_provider_updates_by_store_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let first = FileTokenStore::new(&path).await.unwrap();
+        let second = FileTokenStore::new(&path).await.unwrap();
+
+        first
+            .upsert(sample_credential("openai", "openai-token"))
+            .await
+            .unwrap();
+        second
+            .upsert(sample_credential("nous", "nous-token"))
+            .await
+            .unwrap();
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert_eq!(
+            reopened.list_providers().await,
+            vec!["nous".to_string(), "openai".to_string()]
+        );
+        assert_eq!(
+            reopened.get("openai").await.unwrap().access_token,
+            "openai-token"
+        );
+        assert_eq!(
+            reopened.get("nous").await.unwrap().access_token,
+            "nous-token"
+        );
+    }
+
+    #[tokio::test]
+    async fn independently_opened_token_store_removal_preserves_newer_other_provider() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let writer = FileTokenStore::new(&path).await.unwrap();
+        writer
+            .upsert(sample_credential("openai", "openai-token"))
+            .await
+            .unwrap();
+        let stale_remover = FileTokenStore::new(&path).await.unwrap();
+
+        writer
+            .upsert(sample_credential("nous", "nous-token"))
+            .await
+            .unwrap();
+        stale_remover.remove("openai").await.unwrap();
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        assert!(reopened.get("openai").await.is_none());
+        assert_eq!(
+            reopened.get("nous").await.unwrap().access_token,
+            "nous-token"
+        );
     }
 }

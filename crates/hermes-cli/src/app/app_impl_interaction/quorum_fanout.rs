@@ -35,7 +35,7 @@ impl App {
         Self::emit_phase_event(
             &self.stream_handle_shared,
             "quorum",
-            "multi-voter fan-out dispatch",
+            "multi-voter provider-only fan-out dispatch (tools disabled)",
             30,
         );
 
@@ -44,7 +44,7 @@ impl App {
             Self::emit_lifecycle_event(
                 &self.stream_handle_shared,
                 format!(
-                    "quorum voter {}/{} dispatch -> {}",
+                    "quorum voter {}/{} provider-only dispatch -> {}",
                     display_index,
                     voter_models.len(),
                     model
@@ -53,9 +53,6 @@ impl App {
             if self.current_model != *model {
                 self.switch_model(model);
             }
-            let force_refresh = display_index == 1 || Self::quorum_force_refresh_each_voter();
-            self.refresh_runtime_provider_credentials_if_needed(force_refresh)
-                .await;
 
             let started = Instant::now();
             let max_attempts = Self::quorum_voter_retry_limit();
@@ -65,14 +62,12 @@ impl App {
             let mut combined_turns: u32 = 0;
             let mut combined_tool_errors: usize = 0;
             let mut last_err: Option<AgentError> = None;
-            let mut toolless_fallback_used = false;
-            let voter_tools_enabled = Self::quorum_voter_tools_enabled();
 
             for pass_idx in 0..voter_passes {
                 Self::emit_lifecycle_event(
                     &self.stream_handle_shared,
                     format!(
-                        "quorum voter {}/{} pass {}/{}",
+                        "quorum voter {}/{} provider-only pass {}/{}",
                         display_index,
                         voter_models.len(),
                         pass_idx + 1,
@@ -114,11 +109,7 @@ impl App {
                 while attempts < max_attempts {
                     attempts += 1;
                     match self
-                        .run_messages_with_current_agent_tools(
-                            pass_messages.clone(),
-                            false,
-                            voter_tools_enabled,
-                        )
+                        .run_messages_with_current_agent_tools(pass_messages.clone(), false, false)
                         .await
                     {
                         Ok(result) => {
@@ -126,50 +117,6 @@ impl App {
                             break;
                         }
                         Err(err) => {
-                            if Self::is_provider_tool_payload_error(&err)
-                                && Self::quorum_toolless_provider_fallback_enabled()
-                                && voter_tools_enabled
-                                && !toolless_fallback_used
-                            {
-                                toolless_fallback_used = true;
-                                pass_errors.push(format!(
-                                    "pass {}: provider rejected tool schema on requested model; retried this voter pass without tool schemas",
-                                    pass_idx + 1
-                                ));
-                                Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
-                                    format!(
-                                        "quorum voter {}/{} provider rejected tool schema; retrying this voter pass without tool schemas",
-                                        display_index,
-                                        voter_models.len()
-                                    ),
-                                );
-                                match self
-                                    .run_messages_with_current_agent_tools(
-                                        pass_messages.clone(),
-                                        false,
-                                        false,
-                                    )
-                                    .await
-                                {
-                                    Ok(result) => {
-                                        maybe_result = Some(result);
-                                        break;
-                                    }
-                                    Err(fallback_err) => {
-                                        last_err = Some(fallback_err);
-                                        break;
-                                    }
-                                }
-                            }
-                            if Self::is_provider_auth_or_session_error(&err)
-                                && attempts < max_attempts
-                            {
-                                let refreshed = self.force_auth_refresh_after_error().await;
-                                if refreshed {
-                                    continue;
-                                }
-                            }
                             if Self::is_transient_retryable_error(&err) && attempts < max_attempts {
                                 let backoff_ms = (attempts as u64).saturating_mul(750).max(500);
                                 Self::emit_lifecycle_event(
@@ -323,15 +270,11 @@ impl App {
         Self::emit_phase_event(
             &self.stream_handle_shared,
             "synthesis",
-            "quorum synthesis from voter outputs",
+            "quorum provider-only synthesis from voter outputs (tools disabled)",
             75,
         );
         let synthesis_result = self
-            .run_messages_with_current_agent_tools(
-                synthesis_messages,
-                true,
-                Self::quorum_synthesis_tools_enabled(),
-            )
+            .run_messages_with_current_agent_tools(synthesis_messages, true, false)
             .await;
         if self.current_model != original_model {
             if let Err(err) = self.try_switch_model(&original_model) {

@@ -36,13 +36,15 @@ use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{
     build_auxiliary_client_with_main_runtime, leading_system_prompt_for_persist,
     run_oneshot_with_client, AgentConfig, AgentLoop, AuxiliaryConfig, AuxiliaryMainRuntime,
-    OneShotError, OneShotRequest,
+    MemorySubject, MemorySurface, OneShotError, OneShotRequest, RunRuntime,
 };
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
-use hermes_core::{AgentError, LlmProvider, Message, MessageRole, StreamChunk};
-use hermes_gateway::gateway::{GatewayConfig as RuntimeGatewayConfig, IncomingMessage};
+use hermes_core::{AgentError, LlmProvider, Message, ResolvedExecutionMode, StreamChunk};
+use hermes_gateway::gateway::{
+    GatewayConfig as RuntimeGatewayConfig, IncomingMessage, IncomingSender,
+};
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_provider_runtime::{
     build_provider as build_runtime_provider, select_startup_model_with_fallback,
@@ -131,20 +133,56 @@ impl PlatformAdapter for HttpPlatformAdapter {
 pub struct HttpServerState {
     pub config: Arc<GatewayConfig>,
     pub tool_registry: Arc<ToolRegistry>,
+    run_runtime: Arc<RunRuntime>,
+    #[cfg(test)]
+    execution_mode: ResolvedExecutionMode,
     gateway: Arc<Gateway>,
     outbound: ChatOutboundBuffer,
 }
 
 impl HttpServerState {
     pub async fn build(config: GatewayConfig) -> Result<Self, AgentError> {
+        // Validate every explicitly present execution-mode layer before opening
+        // the durable runtime. `RunRuntime::open` can create/migrate sessions.db,
+        // provision credential-store entries, recover runs, and initialize
+        // artifact storage.
+        let execution_mode = hermes_config::resolve_runtime_execution_mode(&config, None)?;
+        let state_root = config
+            .home_dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(hermes_config::hermes_home);
+        let run_runtime = Arc::new(
+            RunRuntime::open(&state_root)
+                .map_err(|error| AgentError::Io(format!("run-record startup failed: {error}")))?,
+        );
+        Self::build_with_run_runtime(config, run_runtime, execution_mode).await
+    }
+
+    /// Builds HTTP state around an already-opened runtime.
+    ///
+    /// The resolved mode is supplied explicitly so test callers do not consult
+    /// process-global configuration after constructing their injected runtime.
+    #[doc(hidden)]
+    pub async fn build_with_run_runtime(
+        config: GatewayConfig,
+        run_runtime: Arc<RunRuntime>,
+        execution_mode: ResolvedExecutionMode,
+    ) -> Result<Self, AgentError> {
         run_sessions_db_auto_maintenance(&config);
         let runtime_gateway_config = RuntimeGatewayConfig {
             streaming_enabled: config.streaming.enabled,
             display: config.display.clone(),
             service_tier: config.agent.normalized_service_tier(),
+            resource_limits_enabled: config.resource_limits_enabled,
             ..RuntimeGatewayConfig::default()
         };
-        let session_manager = Arc::new(SessionManager::new(config.session.clone()));
+        let session_manager = Arc::new(SessionManager::with_resource_limits(
+            config.session.clone(),
+            config.resource_limits_enabled,
+        ));
         let gateway = Arc::new(Gateway::new(
             session_manager,
             DmManager::with_ignore_behavior(),
@@ -162,18 +200,29 @@ impl HttpServerState {
         let config_arc = Arc::new(config.clone());
         let config_arc_stream = config_arc.clone();
         let agent_tools_stream = agent_tools.clone();
+        let run_runtime_for_message = run_runtime.clone();
+        let run_runtime_for_stream = run_runtime.clone();
+        let execution_mode_for_message_handler = execution_mode;
+        let execution_mode_for_stream_handler = execution_mode;
 
         gateway
             .set_message_handler_with_context(Arc::new(move |messages, ctx| {
                 let config = config_arc.clone();
                 let agent_tools = agent_tools.clone();
+                let run_runtime = run_runtime_for_message.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("dynamic"),
                         &ctx,
                     );
-                    let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                    let agent = build_agent_for_gateway_context(
+                        config.as_ref(),
+                        &ctx,
+                        agent_tools,
+                        run_runtime,
+                        execution_mode_for_message_handler,
+                    )?;
                     let result = agent
                         .run(messages, None)
                         .await
@@ -207,57 +256,65 @@ impl HttpServerState {
             .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
                 let config = config_arc_stream.clone();
                 let agent_tools = agent_tools_stream.clone();
+                let run_runtime = run_runtime_for_stream.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("dynamic"),
                         &ctx,
                     );
-                    let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                    let agent = build_agent_for_gateway_context(
+                        config.as_ref(),
+                        &ctx,
+                        agent_tools,
+                        run_runtime,
+                        execution_mode_for_stream_handler,
+                    )?;
                     let emit = on_chunk.clone();
-                    let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
-                    let ui_state_cb = ui_state.clone();
-                    let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
-                        Box::new(move |chunk: StreamChunk| {
-                            if let Some(delta) = chunk.delta {
-                                if let Some(extra) = delta.extra.as_ref() {
-                                    if let Some(control) =
-                                        extra.get("control").and_then(|v| v.as_str())
-                                    {
-                                        if control == "mute_post_response" {
-                                            let enabled = extra
-                                                .get("enabled")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false);
-                                            if let Ok(mut st) = ui_state_cb.lock() {
-                                                st.0 = enabled;
-                                            }
-                                        } else if control == "stream_break" {
-                                            if let Ok(mut st) = ui_state_cb.lock() {
-                                                st.1 = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                if let Some(text) = delta.content {
-                                    if let Ok(mut st) = ui_state_cb.lock() {
-                                        if st.0 {
-                                            return;
-                                        }
-                                        if st.1 {
-                                            emit("\n\n".to_string());
-                                            st.1 = false;
-                                        }
-                                    }
-                                    emit(text);
+                    let muted = Arc::new(Mutex::new(false));
+                    let muted_cb = muted.clone();
+                    let (observer_sink, mut observer_rx) =
+                        hermes_agent::AgentObserverSink::channel(256);
+                    let mut observer_task = tokio::spawn(async move {
+                        while let Some(event) = observer_rx.recv().await {
+                            let hermes_agent::AgentObserverEvent::RenderDelta(delta) = event else {
+                                continue;
+                            };
+                            if let Some(enabled) = delta.mute_post_response {
+                                if let Ok(mut state) = muted_cb.lock() {
+                                    *state = enabled;
                                 }
                             }
-                        });
+                            let is_muted = muted_cb.lock().map(|state| *state).unwrap_or(false);
+                            if is_muted {
+                                continue;
+                            }
+                            if let Some(text) = delta.text {
+                                if delta.break_before {
+                                    emit("\n\n".to_string());
+                                }
+                                emit(text);
+                            }
+                        }
+                    });
 
                     let result = agent
-                        .run_stream(messages, None, Some(stream_cb))
+                        .run_stream(messages, None, observer_sink.clone())
                         .await
-                        .map_err(|e| GatewayError::Platform(e.to_string()))?;
+                        .map_err(|e| GatewayError::Platform(e.to_string()));
+                    let flushed = observer_sink.flush().await;
+                    drop(observer_sink);
+                    if !flushed
+                        || tokio::time::timeout(
+                            std::time::Duration::from_millis(100),
+                            &mut observer_task,
+                        )
+                        .await
+                        .is_err()
+                    {
+                        observer_task.abort();
+                    }
+                    let result = result?;
                     let home = ctx
                         .home
                         .as_deref()
@@ -291,6 +348,9 @@ impl HttpServerState {
         Ok(Self {
             config: Arc::new(config),
             tool_registry,
+            run_runtime,
+            #[cfg(test)]
+            execution_mode,
             gateway,
             outbound,
         })
@@ -392,6 +452,8 @@ pub struct RpcResponse {
     pub error: Option<RpcErrorBody>,
 }
 
+const MAX_WS_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+
 fn max_request_body_bytes() -> usize {
     const DEFAULT: usize = 2 * 1024 * 1024;
     std::env::var("HERMES_HTTP_MAX_BODY_BYTES")
@@ -400,25 +462,44 @@ fn max_request_body_bytes() -> usize {
         .filter(|&n| n > 0)
         .unwrap_or(DEFAULT)
 }
+fn websocket_message_limit(config: &GatewayConfig) -> Option<usize> {
+    config
+        .resource_limits_enabled
+        .then_some(MAX_WS_MESSAGE_BYTES)
+}
 
 pub fn router(state: HttpServerState) -> Router {
     let security = Arc::new(security::HttpSecurity::from_env());
+    let configured_callback_path = security
+        .dashboard_auth
+        .oidc
+        .as_ref()
+        .map(|oidc| oidc.callback_path.clone())
+        .filter(|path| path != "/auth/oidc/callback");
     let rate = Arc::new(security::RateLimiter::new(security.rate_limit_per_minute));
     let sec_guard = security.clone();
     let rate_guard = rate.clone();
     let body_limit = max_request_body_bytes();
 
-    Router::new()
+    let routes = Router::new()
         .route("/health", get(health))
         .route("/metrics", get(metrics_prometheus))
         .route("/auth/status", get(dashboard_oidc::auth_status))
         .route("/auth/logout", get(dashboard_oidc::auth_logout))
         .route("/auth/oidc/login", get(dashboard_oidc::oidc_login))
         .route("/auth/oidc/callback", get(dashboard_oidc::oidc_callback))
+        .route("/auth/oidc/refresh", post(dashboard_oidc::oidc_refresh))
         .route("/v1/sessions/{session_id}/messages", post(send_message))
         .route("/v1/commands", post(exec_command))
         .route("/v1/rpc", post(exec_rpc))
-        .route("/v1/ws/{session_id}", get(ws_upgrade))
+        .route("/v1/ws/{session_id}", get(ws_upgrade));
+    let routes = if let Some(path) = configured_callback_path {
+        routes.route(&path, get(dashboard_oidc::oidc_callback))
+    } else {
+        routes
+    };
+
+    routes
         .with_state(state)
         .layer(middleware::from_fn(move |req, next| {
             let sec = sec_guard.clone();
@@ -538,7 +619,7 @@ async fn send_message(
 
     state
         .gateway
-        .route_message(&incoming)
+        .route_message_from_sender(&incoming, IncomingSender::unknown())
         .await
         .map_err(|e| HttpError {
             status: StatusCode::BAD_GATEWAY,
@@ -605,7 +686,7 @@ async fn exec_command(
 
     state
         .gateway
-        .route_message(&incoming)
+        .route_message_from_sender(&incoming, IncomingSender::unknown())
         .await
         .map_err(|e| HttpError {
             status: StatusCode::BAD_GATEWAY,
@@ -810,6 +891,10 @@ async fn ws_upgrade(
     headers: HeaderMap,
 ) -> Response {
     let session_key_override = session_key_from_headers(&headers);
+    let ws = match websocket_message_limit(&state.config) {
+        Some(limit) => ws.max_message_size(limit).max_frame_size(limit),
+        None => ws,
+    };
     ws.on_upgrade(move |socket| handle_ws(socket, state, session_id, session_key_override))
 }
 
@@ -899,7 +984,11 @@ fn parse_provider_api_mode(value: &str) -> Option<ApiMode> {
     }
 }
 
-pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
+pub fn build_agent_config(
+    config: &GatewayConfig,
+    model: &str,
+    execution_mode: ResolvedExecutionMode,
+) -> AgentConfig {
     let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
     let skip_context_files_env = std::env::var("HERMES_SKIP_CONTEXT_FILES")
         .ok()
@@ -944,6 +1033,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
             .map(str::to_string),
         skip_context_files: config.agent.skip_context_files || skip_context_files_env,
         platform: Some("http".to_string()),
+        execution_mode,
         pass_session_id: true,
         runtime_providers: config
             .llm_providers
@@ -994,18 +1084,9 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
 
 pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
-    for schema in tools.get_definitions() {
-        let name = schema.name.clone();
-        let tools_clone = tools.clone();
-        agent_registry.register(
-            name.clone(),
-            schema,
-            Arc::new(
-                move |params: Value| -> Result<String, hermes_core::ToolError> {
-                    Ok(tools_clone.dispatch(&name, params))
-                },
-            ),
-        );
+    let tools = Arc::new(tools.clone());
+    for definition in tools.runtime_definitions() {
+        agent_registry.register_runtime_tool(Arc::clone(&tools), definition);
     }
     agent_registry
 }
@@ -1041,13 +1122,17 @@ fn build_agent_for_gateway_context(
     config: &GatewayConfig,
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
-) -> AgentLoop {
+    run_runtime: Arc<RunRuntime>,
+    execution_mode: ResolvedExecutionMode,
+) -> Result<AgentLoop, GatewayError> {
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("dynamic"), ctx);
     let effective_model =
         select_startup_model_with_fallback(config, &effective_model).selected_model;
+    let memory_subject = MemorySubject::local_owner(MemorySurface::Http, ctx.session_key.clone())
+        .map_err(|err| GatewayError::Platform(err.to_string()))?;
     let provider = build_provider(config, &effective_model);
-    let mut agent_config = build_agent_config(config, &effective_model);
+    let mut agent_config = build_agent_config(config, &effective_model, execution_mode);
     if let Some(personality) = ctx.personality.clone() {
         agent_config.personality = Some(personality);
     }
@@ -1066,21 +1151,15 @@ fn build_agent_for_gateway_context(
             FsPath::new(h),
         );
     }
-    hermes_agent::attach_discovered_memory(AgentLoop::new(agent_config, agent_tools, provider))
+    hermes_agent::attach_discovered_memory(
+        AgentLoop::new(agent_config, agent_tools, provider).with_run_runtime(run_runtime),
+        memory_subject,
+    )
+    .map_err(|err| GatewayError::Platform(err.to_string()))
 }
 
 fn extract_last_assistant_reply(messages: &[Message]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find_map(|m| {
-            if m.role == MessageRole::Assistant {
-                m.content.clone()
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "(no assistant reply)".to_string())
+    hermes_gateway::platforms::helpers::extract_current_turn_gateway_reply(messages)
 }
 
 fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str>) -> String {
@@ -1102,11 +1181,67 @@ fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hermes_config::LlmProviderConfig;
+    use hermes_config::{ExecutionModeConfigValue, LlmProviderConfig, EXECUTION_MODE_ENV_KEY};
+    use hermes_core::{ExecutionMode, ExecutionModeSource};
     use hermes_provider_runtime::{
         normalize_runtime_provider_name, provider_default_base_url, ARCEE_BASE_URL,
         GEMINI_BASE_URL, GMI_BASE_URL, TENCENT_TOKENHUB_BASE_URL, XIAOMI_BASE_URL,
     };
+
+    fn execution_mode_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+            std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+        LOCK.lock().expect("execution mode env lock poisoned")
+    }
+
+    struct ExecutionModeEnvGuard {
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl ExecutionModeEnvGuard {
+        fn capture() -> Self {
+            Self {
+                original: std::env::var_os(EXECUTION_MODE_ENV_KEY),
+            }
+        }
+    }
+
+    impl Drop for ExecutionModeEnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(value) => std::env::set_var(EXECUTION_MODE_ENV_KEY, value),
+                None => std::env::remove_var(EXECUTION_MODE_ENV_KEY),
+            }
+        }
+    }
+
+    fn config_for_state_root(state_root: &std::path::Path) -> GatewayConfig {
+        GatewayConfig {
+            home_dir: Some(state_root.to_string_lossy().into_owned()),
+            ..GatewayConfig::default()
+        }
+    }
+
+    fn assert_runtime_was_not_opened(state_root: &std::path::Path) {
+        assert!(
+            !state_root.exists(),
+            "invalid mode must not create the state root: {}",
+            state_root.display()
+        );
+        assert!(
+            !state_root.join("sessions.db").exists(),
+            "invalid mode must not create or migrate sessions.db"
+        );
+    }
+
+    #[test]
+    fn websocket_buffer_limits_are_opt_in() {
+        let mut config = GatewayConfig::default();
+        assert_eq!(websocket_message_limit(&config), None);
+
+        config.resource_limits_enabled = true;
+        assert_eq!(websocket_message_limit(&config), Some(MAX_WS_MESSAGE_BYTES));
+    }
 
     #[test]
     fn gateway_provider_aliases_resolve_to_direct_provider_defaults() {
@@ -1135,7 +1270,8 @@ mod tests {
             },
         );
 
-        let agent_config = build_agent_config(&config, "openai:dynamic");
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert_eq!(
             agent_config
@@ -1160,7 +1296,8 @@ mod tests {
         let mut config = GatewayConfig::default();
         config.agent.preflight_context_compress = false;
 
-        let agent_config = build_agent_config(&config, "openai:dynamic");
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert!(!agent_config.preflight_context_compress);
     }
@@ -1179,7 +1316,8 @@ mod tests {
             ..GatewayConfig::default()
         };
 
-        let agent_config = build_agent_config(&config, "openai:dynamic");
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert_eq!(agent_config.prefill_messages.len(), 2);
         assert_eq!(
@@ -1200,7 +1338,8 @@ mod tests {
         config.delegation.base_url = Some(" https://openrouter.ai/api/v1 ".to_string());
         config.delegation.api_key = Some(" sk-or-test ".to_string());
 
-        let agent_config = build_agent_config(&config, "nous:hermes-3");
+        let agent_config =
+            build_agent_config(&config, "nous:hermes-3", ResolvedExecutionMode::default());
 
         assert_eq!(
             agent_config.delegation_model.as_deref(),
@@ -1217,6 +1356,101 @@ mod tests {
         assert_eq!(
             agent_config.delegation_api_key.as_deref(),
             Some("sk-or-test")
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_rejects_empty_and_unknown_config_modes_before_opening_runtime() {
+        let _env_lock = execution_mode_env_lock();
+        let _env_guard = ExecutionModeEnvGuard::capture();
+        std::env::remove_var(EXECUTION_MODE_ENV_KEY);
+
+        for raw in ["", "unknown_mode"] {
+            let temp_dir = tempfile::tempdir().expect("test state parent");
+            let state_root = temp_dir.path().join("state");
+            let mut config = config_for_state_root(&state_root);
+            config.execution_mode = ExecutionModeConfigValue::value(raw);
+            config.sessions.auto_prune = true;
+
+            let error = HttpServerState::build(config)
+                .await
+                .err()
+                .expect("invalid config execution mode must fail startup");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains(ExecutionModeSource::ConfigFile.as_str()),
+                "expected config-file validation for {raw:?}, got {error}"
+            );
+            assert_runtime_was_not_opened(&state_root);
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_rejects_empty_and_unknown_environment_modes_before_opening_runtime() {
+        let _env_lock = execution_mode_env_lock();
+        let _env_guard = ExecutionModeEnvGuard::capture();
+
+        for raw in ["", "unknown_mode"] {
+            let temp_dir = tempfile::tempdir().expect("test state parent");
+            let state_root = temp_dir.path().join("state");
+            std::env::set_var(EXECUTION_MODE_ENV_KEY, raw);
+
+            let mut config = config_for_state_root(&state_root);
+            config.sessions.auto_prune = true;
+            let error = HttpServerState::build(config)
+                .await
+                .err()
+                .expect("invalid environment execution mode must fail startup");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains(ExecutionModeSource::Environment.as_str()),
+                "expected environment validation for {raw:?}, got {error}"
+            );
+            assert_runtime_was_not_opened(&state_root);
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_manual_smoke_propagates_the_resolved_execution_mode() {
+        let _env_lock = execution_mode_env_lock();
+        let _env_guard = ExecutionModeEnvGuard::capture();
+        std::env::remove_var(EXECUTION_MODE_ENV_KEY);
+
+        let temp_dir = tempfile::tempdir().expect("test state parent");
+        let state_root = temp_dir.path().join("state");
+        let mut config = config_for_state_root(&state_root);
+        config.execution_mode = ExecutionModeConfigValue::value("manual");
+        let resolved = hermes_config::resolve_runtime_execution_mode(&config, None)
+            .expect("resolve explicit manual mode");
+        assert_eq!(
+            resolved,
+            ResolvedExecutionMode {
+                mode: ExecutionMode::Manual,
+                source: ExecutionModeSource::ConfigFile,
+            }
+        );
+
+        let run_runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(&state_root).expect("open test runtime"),
+        );
+        let state = HttpServerState::build_with_run_runtime(config, run_runtime, resolved)
+            .await
+            .expect("build HTTP state with manual mode");
+
+        assert!(state_root.join("sessions.db").is_file());
+        assert_eq!(state.execution_mode, resolved);
+        assert_eq!(
+            build_agent_config(
+                state.config.as_ref(),
+                "openai:dynamic",
+                state.execution_mode
+            )
+            .execution_mode,
+            resolved
         );
     }
 }

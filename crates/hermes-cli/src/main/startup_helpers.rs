@@ -22,33 +22,6 @@ fn oneshot_auth_is_refreshable(message: &str) -> bool {
         || message.contains("expired")
 }
 
-fn oneshot_auth_requires_fresh_login(err: &AgentError) -> bool {
-    let Some(message) = auth_error_message(err) else {
-        return false;
-    };
-    message.contains("token_invalidated")
-        || message.contains("authentication token has been invalidated")
-        || message.contains("invalid_grant")
-        || message.contains("refresh token")
-        || message.contains("stored nous auth state is invalid")
-        || message.contains("missing refresh token")
-}
-
-fn oneshot_oauth_provider_supports_login(provider: &str) -> bool {
-    matches!(
-        normalize_auth_provider(provider).as_str(),
-        "nous"
-            | "openai"
-            | "openai-codex"
-            | "anthropic"
-            | "qwen-oauth"
-            | "google-gemini-cli"
-    )
-}
-
-fn oneshot_login_prompt_available() -> bool {
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
-}
 
 fn infer_oauth_provider_from_error_message(message: &str) -> Option<String> {
     if message.contains("portal.nousresearch.com")
@@ -88,87 +61,6 @@ fn infer_oauth_provider_from_error_message(message: &str) -> Option<String> {
     None
 }
 
-async fn run_fresh_openai_oneshot_login(cli: &Cli, provider: &str) -> Result<(), AgentError> {
-    let provider = normalize_auth_provider(provider);
-    let token_store = FileTokenStore::new(secret_vault_path_for_cli(cli)).await?;
-    token_store.remove(&provider).await?;
-    let _ = clear_provider_auth_state(&provider)?;
-    let manager = AuthManager::new(token_store);
-    match provider.as_str() {
-        "openai" => {
-            let state = login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
-            let auth_path = save_openai_auth_state(&state)?;
-            let expires_at = state
-                .tokens
-                .expires_in
-                .filter(|secs| *secs > 0)
-                .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
-            manager
-                .save_credential(OAuthCredential {
-                    provider,
-                    access_token: state.tokens.access_token,
-                    refresh_token: state.tokens.refresh_token,
-                    token_type: "bearer".to_string(),
-                    scope: None,
-                    expires_at,
-                })
-                .await?;
-            println!("OpenAI OAuth fresh login complete; credential saved as provider 'openai'.");
-            println!("Saved OAuth state: {}", auth_path.display());
-            Ok(())
-        }
-        "openai-codex" => {
-            let state = login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?;
-            let auth_path = save_codex_auth_state(&state)?;
-            let expires_at = state
-                .tokens
-                .expires_in
-                .filter(|secs| *secs > 0)
-                .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
-            manager
-                .save_credential(OAuthCredential {
-                    provider,
-                    access_token: state.tokens.access_token,
-                    refresh_token: state.tokens.refresh_token,
-                    token_type: "bearer".to_string(),
-                    scope: None,
-                    expires_at,
-                })
-                .await?;
-            println!(
-                "OpenAI Codex OAuth fresh login complete; credential saved as provider 'openai-codex'."
-            );
-            println!("Saved OAuth state: {}", auth_path.display());
-            Ok(())
-        }
-        _ => Err(AgentError::Config(format!(
-            "fresh OpenAI one-shot login does not support provider '{}'",
-            provider
-        ))),
-    }
-}
-
-async fn run_oneshot_oauth_login_repair(
-    cli: Cli,
-    provider: &str,
-    force_fresh: bool,
-) -> Result<(), AgentError> {
-    let provider = normalize_auth_provider(provider);
-    if force_fresh && matches!(provider.as_str(), "openai" | "openai-codex") {
-        return run_fresh_openai_oneshot_login(&cli, &provider).await;
-    }
-    run_auth(
-        cli,
-        Some("login".to_string()),
-        Some(provider),
-        None,
-        None,
-        None,
-        None,
-        false,
-    )
-    .await
-}
 
 fn query_is_local_slash_command(query: &str) -> bool {
     query.trim_start().starts_with('/')
@@ -217,7 +109,33 @@ async fn handle_local_slash_query(cli: Cli, query: &str) -> Result<bool, AgentEr
     Ok(true)
 }
 
-fn oneshot_auto_verify_oauth_provider(
+/// Executes a one-shot request exactly once and only emits operator guidance
+/// after an OAuth-shaped failure. It never diagnoses, refreshes, logs in, or
+/// retries on the caller's behalf.
+async fn run_oneshot_once_with_oauth_guidance<F, Fut>(
+    one_shot: F,
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+) -> Result<(), AgentError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), AgentError>>,
+{
+    let result = one_shot().await;
+    if let Err(error) = &result {
+        if let Some(provider) =
+            oneshot_oauth_remediation_provider(error, provider_override, model_override)
+        {
+            eprintln!(
+                "OAuth authentication failed for provider '{}'; the original request was not retried. Run `hermes auth verify {}` explicitly, then retry.",
+                provider, provider
+            );
+        }
+    }
+    result
+}
+
+fn oneshot_oauth_remediation_provider(
     err: &AgentError,
     provider_override: Option<&str>,
     model_override: Option<&str>,

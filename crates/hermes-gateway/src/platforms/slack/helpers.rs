@@ -258,9 +258,47 @@ fn slack_message_is_addressed(
     slack_message_matches_mention_patterns(text, mention_patterns)
 }
 
-/// Split a message into chunks that fit within the given max length.
+const SLACK_MAX_BLOCKS: usize = 50;
+const SLACK_MAX_SECTION_TEXT: usize = 3_000;
+const SLACK_MAX_HEADER_TEXT: usize = 150;
+
+fn truncate_slack_text(text: &str, max_chars: usize) -> String {
+    let Some((end, _)) = text.char_indices().nth(max_chars) else {
+        return text.to_string();
+    };
+    text[..end].to_string()
+}
+
+fn clamp_slack_text_field(
+    text_object: &mut serde_json::Map<String, serde_json::Value>,
+    max_chars: usize,
+) {
+    let Some(serde_json::Value::String(text)) = text_object.get_mut("text") else {
+        return;
+    };
+    if text.chars().count() <= max_chars {
+        return;
+    }
+
+    if max_chars == 0 {
+        text.clear();
+        return;
+    }
+
+    let truncated = truncate_slack_text(text, max_chars.saturating_sub(1));
+    *text = format!("{}…", truncated.trim_end());
+}
+
+/// Split a message into chunks that fit within Slack's character limit.
+///
+/// Slack's documented limits are counted in Unicode scalar values, while Rust
+/// string indices are bytes. Splitting only at `char_indices` avoids panics and
+/// invalid UTF-8 when a multi-byte character crosses a chunk boundary.
 fn split_message(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
+    if max_len == 0 {
+        return Vec::new();
+    }
+    if text.chars().count() <= max_len {
         return vec![text.to_string()];
     }
 
@@ -268,16 +306,16 @@ fn split_message(text: &str, max_len: usize) -> Vec<String> {
     let mut start = 0;
 
     while start < text.len() {
-        let end = (start + max_len).min(text.len());
-
-        if end >= text.len() {
-            chunks.push(text[start..].to_string());
+        let remaining = &text[start..];
+        let Some((relative_end, _)) = remaining.char_indices().nth(max_len) else {
+            chunks.push(remaining.to_string());
             break;
-        }
-
+        };
+        let end = start + relative_end;
         let break_at = text[start..end]
             .rfind('\n')
-            .map(|pos| start + pos + 1)
+            .map(|position| start + position + 1)
+            .filter(|position| *position > start)
             .unwrap_or(end);
 
         chunks.push(text[start..break_at].to_string());
@@ -285,6 +323,123 @@ fn split_message(text: &str, max_len: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+/// Sanitize a Block Kit payload at the outbound API boundary.
+///
+/// Slack rejects the entire request when one block is malformed or exceeds a
+/// per-block limit. This preserves valid content, removes blocks Slack cannot
+/// accept, and returns `None` when callers must use their plain-text fallback.
+fn sanitize_slack_blocks(blocks: &serde_json::Value) -> Option<serde_json::Value> {
+    let blocks = blocks.as_array()?;
+    let mut sanitized = Vec::with_capacity(blocks.len().min(SLACK_MAX_BLOCKS));
+
+    for block in blocks {
+        if sanitized.len() == SLACK_MAX_BLOCKS {
+            break;
+        }
+
+        let serde_json::Value::Object(mut block) = block.clone() else {
+            continue;
+        };
+        let Some(kind) = block.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+
+        match kind {
+            "section" => {
+                let has_body = block
+                    .get("fields")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|fields| !fields.is_empty())
+                    || block.get("accessory").is_some();
+                match block.get_mut("text") {
+                    Some(serde_json::Value::Object(text)) => {
+                        let has_text = text
+                            .get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|value| !value.trim().is_empty());
+                        if !has_text && !has_body {
+                            continue;
+                        }
+                        clamp_slack_text_field(text, SLACK_MAX_SECTION_TEXT);
+                    }
+                    _ if !has_body => continue,
+                    _ => {}
+                }
+            }
+            "header" => match block.get_mut("text") {
+                Some(serde_json::Value::Object(text))
+                    if text
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| !value.trim().is_empty()) =>
+                {
+                    clamp_slack_text_field(text, SLACK_MAX_HEADER_TEXT);
+                }
+                _ => continue,
+            },
+            "context" => match block.get_mut("elements") {
+                Some(serde_json::Value::Array(elements)) if !elements.is_empty() => {
+                    for element in elements {
+                        if let serde_json::Value::Object(text) = element {
+                            clamp_slack_text_field(text, SLACK_MAX_SECTION_TEXT);
+                        }
+                    }
+                }
+                _ => continue,
+            },
+            "rich_text" | "actions" | "context_actions" => {
+                if !block
+                    .get("elements")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|elements| !elements.is_empty())
+                {
+                    continue;
+                }
+            }
+            "table" => {
+                if !block
+                    .get("rows")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|rows| !rows.is_empty())
+                {
+                    continue;
+                }
+                if let Some(serde_json::Value::Array(settings)) = block.get("column_settings") {
+                    let mut normalized: Vec<_> = settings
+                        .iter()
+                        .map(|setting| {
+                            if setting.is_object() {
+                                setting.clone()
+                            } else {
+                                serde_json::Value::Object(serde_json::Map::new())
+                            }
+                        })
+                        .collect();
+                    while normalized
+                        .last()
+                        .is_some_and(|setting| setting.as_object().is_some_and(|map| map.is_empty()))
+                    {
+                        normalized.pop();
+                    }
+                    if normalized.is_empty() {
+                        block.remove("column_settings");
+                    } else {
+                        block.insert(
+                            "column_settings".to_string(),
+                            serde_json::Value::Array(normalized),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        sanitized.push(serde_json::Value::Object(block));
+    }
+
+    (!sanitized.is_empty()).then_some(serde_json::Value::Array(sanitized))
 }
 
 fn slack_image_url_blocks(image_url: &str, caption: Option<&str>) -> (serde_json::Value, String) {

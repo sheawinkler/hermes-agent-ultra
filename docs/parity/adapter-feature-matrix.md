@@ -1,9 +1,10 @@
 # Adapter Feature Matrix
 
-Generated: `2026-07-08T09:23:41.672641+00:00`
+Generated: `2026-07-26T11:07:14.712361+00:00`
 
 | Category | Name | Feature Flag | Status |
 | --- | --- | --- | --- |
+| memory_plugin | `builtin` | `always` | rust-native |
 | memory_plugin | `byterover` | `always` | rust-native |
 | memory_plugin | `contextlattice` | `always` | rust-native |
 | memory_plugin | `hindsight` | `always` | rust-native |
@@ -35,4 +36,4 @@ Generated: `2026-07-08T09:23:41.672641+00:00`
 | platform_adapter | `weixin` | `weixin` | rust-native |
 | platform_adapter | `whatsapp` | `whatsapp` | rust-native |
 
-- Platform adapters: `21`, memory plugins: `9`.
+- Platform adapters: `21`, memory plugins: `10`.

@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
 use hermes_agent::plugins::HookType;
+use hermes_agent::run_runtime::RunRuntime;
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{AgentCallbacks, AgentLoop, InterruptController, SessionPersistence};
 pub use hermes_app_runtime::build_agent_config;
@@ -41,17 +42,10 @@ use crate::alpha_runtime::{
     objective_now_unix_ms, objective_wait_remaining_seconds, objective_wait_target,
     summarize_objective_wait_barrier, ObjectiveContract, ObjectiveWaitTarget, QuorumPolicy,
 };
-use crate::auth::{
-    login_nous_device_code, resolve_gemini_oauth_runtime_credentials,
-    resolve_nous_runtime_credentials, resolve_qwen_runtime_credentials, save_nous_auth_state,
-    NousDeviceCodeOptions, NousRuntimeCredentials, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-};
 use crate::cli::Cli;
 use crate::commands::recover_queued_background_jobs;
 use crate::model_switch::{provider_model_ids, MOA_DEFAULT_PRESET, MOA_PROVIDER};
 use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
-use crate::terminal_backend::build_terminal_backend;
 use crate::tui::StreamHandle;
 
 // Keep these includes in original item order. This is a layout-only split that

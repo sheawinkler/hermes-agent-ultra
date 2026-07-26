@@ -35,6 +35,28 @@ mod tests {
         ])
     }
 
+    #[test]
+    fn gateway_dm_grant_store_path_uses_cli_state_root() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let cli = cli_for_temp_state_root(temporary.path());
+
+        assert_eq!(
+            gateway_dm_grant_store_path(&cli),
+            hermes_state_root(&cli).join("dm-grants.json")
+        );
+    }
+
+    #[test]
+    fn gateway_dm_manager_fails_closed_when_durable_grant_store_is_invalid() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let store = temporary.path().join("dm-grants.json");
+        std::fs::write(&store, r#"{"version":99,"grants":[]}"#).expect("write invalid grant store");
+
+        assert!(
+            build_gateway_dm_manager_with_grant_store(&GatewayConfig::default(), store).is_err()
+        );
+    }
+
     fn test_nous_invoke_jwt(seconds: i64) -> String {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine as _;
@@ -51,7 +73,7 @@ mod tests {
         )
     }
 
-    async fn spawn_nous_live_probe_server(status: &str, body: &'static str) -> String {
+    async fn spawn_nous_live_probe_server(status: &str, body: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -59,6 +81,7 @@ mod tests {
             .expect("bind probe server");
         let addr = listener.local_addr().expect("probe server addr");
         let status = status.to_string();
+        let body = body.to_string();
         tokio::spawn(async move {
             if let Ok((mut stream, _peer)) = listener.accept().await {
                 let mut buf = [0_u8; 2048];
@@ -129,6 +152,21 @@ mod tests {
         assert_eq!(missing_gateway_adapter_feature("unknown-platform"), None);
     }
 
+    #[cfg(feature = "gateway-discord")]
+    #[test]
+    fn default_discord_gateway_config_requests_direct_messages() {
+        let config = build_discord_config(
+            &make_platform(true, Some("test-discord-token")),
+            None,
+            "test-discord-token".to_string(),
+        );
+        assert_ne!(
+            config.intents & (1 << 12),
+            0,
+            "the CLI default must enable Discord DIRECT_MESSAGES"
+        );
+    }
+
     #[tokio::test]
     async fn run_model_persists_default_model_to_config_yaml() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -175,6 +213,253 @@ mod tests {
         )
         .await
         .expect("auth status must be passive");
+    }
+
+    #[tokio::test]
+    async fn auth_verify_expired_credential_is_byte_stable_and_never_calls_refresh_endpoint() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _guard = env_lock();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let token_path = secret_vault_path_for_cli(&cli);
+        let pool_path = auth_pool_path_for_cli(&cli);
+        std::fs::create_dir_all(pool_path.parent().expect("pool parent")).expect("pool parent");
+        std::fs::write(
+            &pool_path,
+            r#"{"providers":{"openai":[{"id":"legacy-a","label":"legacy","auth_type":"api_key","source":"manual","access_token":"legacy-pool-verify-sentinel"}]}}"#,
+        )
+        .expect("write legacy pool");
+        let pool_before = std::fs::read(&pool_path).expect("read legacy pool");
+
+        let store = FileTokenStore::new(&token_path)
+            .await
+            .expect("token store");
+        AuthManager::new(store)
+            .save_credential(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "expired-verify-sentinel".to_string(),
+                refresh_token: Some("refresh-verify-sentinel".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            })
+            .await
+            .expect("save expired credential");
+        let before = std::fs::read(&token_path).expect("read encrypted vault");
+
+        let previous_token_url = std::env::var("HERMES_OPENAI_OAUTH_TOKEN_URL").ok();
+        std::env::set_var("HERMES_OPENAI_OAUTH_TOKEN_URL", format!("{}/token", server.uri()));
+        let result = run_auth(
+            cli,
+            Some("verify".to_string()),
+            Some("openai".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await;
+        match previous_token_url {
+            Some(value) => std::env::set_var("HERMES_OPENAI_OAUTH_TOKEN_URL", value),
+            None => std::env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL"),
+        }
+
+        assert!(matches!(result, Err(AgentError::AuthFailed(_))));
+        assert_eq!(
+            std::fs::read(&token_path).expect("read encrypted vault"),
+            before,
+            "auth verify must not rewrite an expired credential"
+        );
+        assert_eq!(
+            std::fs::read(&pool_path).expect("read legacy pool"),
+            pool_before,
+            "auth verify must not migrate auth-pool metadata"
+        );
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn auth_verify_legacy_store_requires_explicit_migration_without_rewrite() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let token_path = secret_vault_path_for_cli(&cli);
+        std::fs::create_dir_all(token_path.parent().expect("vault parent")).expect("vault parent");
+        let sentinel = "legacy-verify-sentinel-must-not-leak";
+        std::fs::write(
+            &token_path,
+            serde_json::to_vec(&serde_json::json!({
+                "openai": {
+                    "provider": "openai",
+                    "access_token": sentinel,
+                    "refresh_token": "legacy-refresh-sentinel",
+                    "token_type": "Bearer",
+                    "scope": null,
+                    "expires_at": (chrono::Utc::now() - chrono::Duration::minutes(1)).to_rfc3339(),
+                }
+            }))
+            .expect("serialize legacy store"),
+        )
+        .expect("write legacy store");
+        let before = std::fs::read(&token_path).expect("read legacy store");
+        let key_path = token_path.with_extension("key");
+        assert!(!key_path.exists(), "verify must not create a store key");
+
+        let error = run_auth(
+            cli,
+            Some("verify".to_string()),
+            Some("openai".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect_err("legacy migration must be an explicit credential-management effect");
+
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("migration is required"));
+        assert!(!error.to_string().contains(sentinel));
+        assert_eq!(
+            std::fs::read(&token_path).expect("read legacy store"),
+            before,
+            "auth verify must not migrate a legacy credential store"
+        );
+        assert!(!key_path.exists(), "verify must not create a store key");
+    }
+
+    #[tokio::test]
+    async fn legacy_auth_pool_migrates_credentials_into_encrypted_vault_and_scrubs_metadata() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let pool_path = auth_pool_path_for_cli(&cli);
+        std::fs::create_dir_all(pool_path.parent().expect("pool parent")).expect("pool parent");
+        let sentinel = "legacy-pool-sentinel-must-not-leak";
+        std::fs::write(
+            &pool_path,
+            format!(
+                r#"{{"providers":{{"openai":[{{"id":"legacy-a","label":"legacy","auth_type":"api_key","source":"manual","access_token":"{sentinel}"}}]}}}}"#
+            ),
+        )
+        .expect("legacy pool fixture");
+
+        let token_store = FileTokenStore::new(secret_vault_path_for_cli(&cli))
+            .await
+            .expect("token store");
+        let manager = AuthManager::new(token_store.clone());
+        let pool = load_auth_pool_store(&pool_path, &manager, &token_store)
+            .await
+            .expect("migrate pool");
+        let entry = &pool.providers["openai"][0];
+        assert_eq!(entry.credential_ref, "pool:openai:legacy-a");
+        assert_eq!(
+            token_store
+                .get("pool:openai:legacy-a")
+                .await
+                .expect("migrated credential")
+                .access_token,
+            sentinel
+        );
+        assert_eq!(
+            token_store
+                .get("openai")
+                .await
+                .expect("runtime credential")
+                .access_token,
+            sentinel
+        );
+
+        let metadata = std::fs::read_to_string(&pool_path).expect("scrubbed metadata");
+        let encrypted = std::fs::read_to_string(secret_vault_path_for_cli(&cli))
+            .expect("encrypted vault");
+        assert!(!metadata.contains(sentinel));
+        assert!(!metadata.contains("access_token"));
+        assert!(!metadata.contains("refresh_token"));
+        assert!(!encrypted.contains(sentinel));
+        assert!(!format!("{pool:?}").contains(sentinel));
+    }
+
+    #[tokio::test]
+    async fn auth_refresh_uses_registered_oauth_handler_and_encrypted_store() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _guard = env_lock();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "refreshed-cli-sentinel",
+                "refresh_token": "rotated-cli-refresh-sentinel",
+                "token_type": "Bearer",
+                "expires_in": 120
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let token_path = secret_vault_path_for_cli(&cli);
+        let store = FileTokenStore::new(&token_path)
+            .await
+            .expect("token store");
+        AuthManager::new(store)
+            .save_credential(OAuthCredential {
+                provider: "openai".to_string(),
+                access_token: "expired-cli-sentinel".to_string(),
+                refresh_token: Some("old-cli-refresh-sentinel".to_string()),
+                token_type: "Bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            })
+            .await
+            .expect("expired credential");
+
+        let old_url = std::env::var("HERMES_OPENAI_OAUTH_TOKEN_URL").ok();
+        let old_client_id = std::env::var("HERMES_OPENAI_OAUTH_CLIENT_ID").ok();
+        std::env::set_var("HERMES_OPENAI_OAUTH_TOKEN_URL", format!("{}/token", server.uri()));
+        std::env::set_var("HERMES_OPENAI_OAUTH_CLIENT_ID", "test-client");
+        let result = run_auth(
+            cli.clone(),
+            Some("refresh".to_string()),
+            Some("openai".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await;
+        match old_url {
+            Some(value) => std::env::set_var("HERMES_OPENAI_OAUTH_TOKEN_URL", value),
+            None => std::env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL"),
+        }
+        match old_client_id {
+            Some(value) => std::env::set_var("HERMES_OPENAI_OAUTH_CLIENT_ID", value),
+            None => std::env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID"),
+        }
+        result.expect("explicit refresh");
+
+        let reopened = FileTokenStore::new(&token_path)
+            .await
+            .expect("reopen vault");
+        let credential = reopened.get("openai").await.expect("refreshed credential");
+        assert_eq!(credential.access_token, "refreshed-cli-sentinel");
+        assert!(!format!("{credential:?}").contains("refreshed-cli-sentinel"));
+        let raw = std::fs::read_to_string(token_path).expect("encrypted store");
+        assert!(!raw.contains("refreshed-cli-sentinel"));
+        assert!(!raw.contains("expired-cli-sentinel"));
     }
 
     #[test]
@@ -319,11 +604,12 @@ mod tests {
 
     #[cfg(feature = "gateway-telegram")]
     #[test]
-    fn telegram_gateway_message_preserves_group_topic_in_chat_id() {
+    fn telegram_gateway_message_keeps_group_parent_and_topic_separate() {
         let incoming = TelegramIncomingMessage {
             chat_id: -1001,
             user_id: Some(42),
             username: Some("alice".to_string()),
+            is_bot: Some(false),
             text: Some("topic hello".to_string()),
             message_id: 77,
             is_voice: false,
@@ -349,20 +635,26 @@ mod tests {
             callback_query_id: None,
             callback_data: None,
         };
+        assert_eq!(
+            telegram_gateway_sender(&incoming),
+            GatewayIncomingSender::human()
+        );
 
         let routed = telegram_gateway_message(incoming);
-        assert_eq!(routed.chat_id, "-1001:17585");
+        assert_eq!(routed.chat_id, "-1001");
+        assert_eq!(routed.thread_id.as_deref(), Some("17585"));
         assert_eq!(routed.user_id, "42");
         assert!(!routed.is_dm);
     }
 
     #[cfg(feature = "gateway-telegram")]
     #[test]
-    fn telegram_gateway_message_preserves_private_topic_in_chat_id() {
+    fn telegram_gateway_message_keeps_private_parent_and_topic_separate() {
         let incoming = TelegramIncomingMessage {
             chat_id: 208214988,
             user_id: Some(42),
             username: Some("alice".to_string()),
+            is_bot: Some(true),
             text: Some("topic hello".to_string()),
             message_id: 77,
             is_voice: false,
@@ -388,9 +680,14 @@ mod tests {
             callback_query_id: None,
             callback_data: None,
         };
+        assert_eq!(
+            telegram_gateway_sender(&incoming),
+            GatewayIncomingSender::bot()
+        );
 
         let routed = telegram_gateway_message(incoming);
-        assert_eq!(routed.chat_id, "208214988:17585");
+        assert_eq!(routed.chat_id, "208214988");
+        assert_eq!(routed.thread_id.as_deref(), Some("17585"));
         assert_eq!(routed.user_id, "42");
         assert!(routed.is_dm);
     }
@@ -402,6 +699,7 @@ mod tests {
             chat_id: 208214988,
             user_id: Some(42),
             username: Some("alice".to_string()),
+            is_bot: Some(false),
             text: Some("root lobby".to_string()),
             message_id: 77,
             is_voice: false,
@@ -629,29 +927,29 @@ mod tests {
     }
 
     #[test]
-    fn oneshot_auto_verify_provider_detects_nous_401_errors() {
+    fn oneshot_oauth_remediation_provider_detects_nous_401_errors() {
         let err = AgentError::LlmApi(
             "API error 401 Unauthorized: https://portal.nousresearch.com".to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&err, Some("nous"), Some("nous:openai/gpt-5.5")),
+            oneshot_oauth_remediation_provider(&err, Some("nous"), Some("nous:openai/gpt-5.5")),
             Some("nous".to_string())
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&err, None, Some("nous:moonshotai/kimi-k2.6")),
+            oneshot_oauth_remediation_provider(&err, None, Some("nous:moonshotai/kimi-k2.6")),
             Some("nous".to_string())
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&err, None, None),
+            oneshot_oauth_remediation_provider(&err, None, None),
             Some("nous".to_string())
         );
     }
 
     #[test]
-    fn oneshot_auto_verify_provider_supports_core_oauth_providers() {
+    fn oneshot_oauth_remediation_provider_supports_core_oauth_providers() {
         let openai = AgentError::LlmApi("API error 401 Unauthorized: auth.openai.com".to_string());
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&openai, Some("openai"), Some("openai:gpt-5.5")),
+            oneshot_oauth_remediation_provider(&openai, Some("openai"), Some("openai:gpt-5.5")),
             Some("openai".to_string())
         );
         let openai_invalidated = AgentError::LlmApi(
@@ -659,7 +957,7 @@ mod tests {
                 .to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(
+            oneshot_oauth_remediation_provider(
                 &openai_invalidated,
                 Some("openai"),
                 Some("openai:gpt-5.5")
@@ -668,37 +966,37 @@ mod tests {
         );
         let codex = AgentError::LlmApi("API error 401 Unauthorized: chatgpt.com codex".to_string());
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&codex, None, Some("openai-codex:codex-mini")),
+            oneshot_oauth_remediation_provider(&codex, None, Some("openai-codex:codex-mini")),
             Some("openai-codex".to_string())
         );
         let anthropic = AgentError::LlmApi(
             "API error 401 Unauthorized: console.anthropic.com token expired".to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&anthropic, Some("claude"), None),
+            oneshot_oauth_remediation_provider(&anthropic, Some("claude"), None),
             Some("anthropic".to_string())
         );
         let gemini = AgentError::LlmApi(
             "API error 401 Unauthorized: oauth2.googleapis.com invalid_grant".to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&gemini, Some("gemini-cli"), None),
+            oneshot_oauth_remediation_provider(&gemini, Some("gemini-cli"), None),
             Some("google-gemini-cli".to_string())
         );
         let qwen = AgentError::LlmApi(
             "API error 401 Unauthorized: chat.qwen.ai token expired".to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(&qwen, Some("qwen-cli"), None),
+            oneshot_oauth_remediation_provider(&qwen, Some("qwen-cli"), None),
             Some("qwen-oauth".to_string())
         );
     }
 
     #[test]
-    fn oneshot_auto_verify_provider_ignores_non_oauth_or_non_auth_errors() {
+    fn oneshot_oauth_remediation_provider_ignores_non_oauth_or_non_auth_errors() {
         let not_auth = AgentError::LlmApi("API error 404 Not Found".to_string());
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(
+            oneshot_oauth_remediation_provider(
                 &not_auth,
                 Some("nous"),
                 Some("nous:openai/gpt-5.5")
@@ -710,7 +1008,7 @@ mod tests {
             "API error 401 Unauthorized: provider openrouter token expired".to_string(),
         );
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(
+            oneshot_oauth_remediation_provider(
                 &other_provider,
                 Some("openrouter"),
                 Some("openrouter:openai/gpt-4o")
@@ -720,7 +1018,7 @@ mod tests {
 
         let missing_signal = AgentError::LlmApi("API error 500 Internal Server Error".to_string());
         assert_eq!(
-            oneshot_auto_verify_oauth_provider(
+            oneshot_oauth_remediation_provider(
                 &missing_signal,
                 Some("openai"),
                 Some("openai:gpt-5.5")
@@ -739,34 +1037,34 @@ mod tests {
         assert!(!oneshot_auth_is_refreshable("api error 404 not found"));
     }
 
-    #[test]
-    fn oneshot_auth_requires_fresh_login_for_invalidated_tokens() {
-        let invalidated = AgentError::LlmApi(
-            "API error 401 Unauthorized: token_invalidated authentication token has been invalidated"
-                .to_string(),
+    #[tokio::test]
+    async fn oneshot_oauth_failure_returns_original_error_without_retry_or_verify() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        const ORIGINAL_ERROR: &str = "API error 401 Unauthorized: portal.nousresearch.com";
+        let provider_calls = Arc::new(AtomicUsize::new(0));
+        let original_request_calls = Arc::clone(&provider_calls);
+        let error = run_oneshot_once_with_oauth_guidance(
+            move || async move {
+                original_request_calls.fetch_add(1, Ordering::SeqCst);
+                Err(AgentError::LlmApi(ORIGINAL_ERROR.to_string()))
+            },
+            Some("nous"),
+            Some("nous:openai/gpt-5.5"),
+        )
+        .await
+        .expect_err("the original provider error must be returned");
+
+        assert!(
+            matches!(error, AgentError::LlmApi(message) if message == ORIGINAL_ERROR),
+            "one-shot remediation must preserve the original typed error"
         );
-        assert!(oneshot_auth_requires_fresh_login(&invalidated));
-
-        let refreshable = AgentError::LlmApi("API error 401 Unauthorized".to_string());
-        assert!(!oneshot_auth_requires_fresh_login(&refreshable));
-    }
-
-    #[test]
-    fn oneshot_oauth_login_repair_supports_promptable_providers() {
-        for provider in [
-            "nous",
-            "openai",
-            "openai-codex",
-            "anthropic",
-            "qwen-oauth",
-            "google-gemini-cli",
-        ] {
-            assert!(
-                oneshot_oauth_provider_supports_login(provider),
-                "{provider} should support one-shot login repair"
-            );
-        }
-        assert!(!oneshot_oauth_provider_supports_login("openrouter"));
+        assert_eq!(
+            provider_calls.load(Ordering::SeqCst),
+            1,
+            "a failed one-shot must not retry, verify, or make another provider call"
+        );
     }
 
     #[test]

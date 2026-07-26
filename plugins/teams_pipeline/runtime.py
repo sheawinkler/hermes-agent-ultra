@@ -6,11 +6,21 @@ import logging
 from typing import Any
 
 from gateway.config import Platform
-from plugins.teams_pipeline.pipeline import TeamsMeetingPipeline
+from plugins.teams_pipeline.pipeline import LinearWriter, NotionWriter, TeamsMeetingPipeline
 from plugins.teams_pipeline.store import TeamsPipelineStore, resolve_teams_pipeline_store_path
 from plugins.teams_pipeline.subscriptions import build_graph_client
 
 logger = logging.getLogger(__name__)
+
+
+class TeamsPipelineRuntimeError(RuntimeError):
+    """Raised when enabled Teams pipeline delivery cannot be constructed."""
+
+
+def _load_teams_summary_writer():
+    from plugins.platforms.teams.adapter import TeamsSummaryWriter
+
+    return TeamsSummaryWriter
 
 
 def _teams_delivery_is_configured(teams_extra: dict[str, Any], teams_delivery: dict[str, Any]) -> bool:
@@ -76,21 +86,29 @@ def build_pipeline_runtime(gateway: Any) -> TeamsMeetingPipeline:
     teams_sender = None
     teams_config = gateway.config.platforms.get(Platform("teams"))
     pipeline_config = build_pipeline_runtime_config(gateway.config)
+    notion_config = pipeline_config.get("notion")
+    linear_config = pipeline_config.get("linear")
+    notion_writer = NotionWriter() if isinstance(notion_config, dict) and notion_config.get("enabled") else None
+    linear_writer = LinearWriter() if isinstance(linear_config, dict) and linear_config.get("enabled") else None
     teams_delivery = dict(pipeline_config.get("teams_delivery") or {})
-    if teams_config and teams_config.enabled and teams_delivery.get("enabled"):
-        try:
-            from plugins.platforms.teams.adapter import TeamsSummaryWriter
-        except ImportError:
-            logger.debug(
-                "TeamsSummaryWriter unavailable; Teams outbound delivery remains disabled until the adapter layer is present."
+    if teams_delivery.get("enabled"):
+        if teams_config is None or not teams_config.enabled:
+            raise TeamsPipelineRuntimeError(
+                "Teams delivery is enabled but the Teams platform is not enabled."
             )
-        else:
-            teams_sender = TeamsSummaryWriter(platform_config=teams_config)
+        try:
+            teams_sender = _load_teams_summary_writer()(platform_config=teams_config)
+        except ImportError as exc:
+            raise TeamsPipelineRuntimeError(
+                "Teams delivery is enabled but TeamsSummaryWriter is unavailable."
+            ) from exc
 
     return TeamsMeetingPipeline(
         graph_client=build_graph_client(),
         store=TeamsPipelineStore(resolve_teams_pipeline_store_path()),
         config=pipeline_config,
+        notion_writer=notion_writer,
+        linear_writer=linear_writer,
         teams_sender=teams_sender,
     )
 
@@ -110,21 +128,8 @@ def bind_gateway_runtime(gateway: Any) -> bool:
     except Exception as exc:
         error_message = str(exc)
         gateway._teams_pipeline_runtime_error = error_message
-        logger.warning(
-            "Teams pipeline runtime unavailable: %s. Installing a drop-scheduler "
-            "so Graph notifications ack cleanly without piling up unbound.",
-            error_message,
-        )
-
-        async def _drop(notification: dict[str, Any], event: Any) -> None:
-            logger.debug(
-                "Dropping Graph notification because runtime is unavailable: id=%s resource=%s",
-                notification.get("id"),
-                notification.get("resource"),
-            )
-
-        adapter.set_notification_scheduler(_drop)
-        return False
+        logger.error("Teams pipeline runtime startup failed: %s", error_message)
+        raise
 
     async def _schedule(notification: dict[str, Any], event: Any) -> None:
         await runtime.run_notification(notification)

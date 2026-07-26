@@ -8,7 +8,6 @@
 //! runs the agent with a restricted tool set that excludes the cronjob tool.
 
 use std::collections::HashSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -16,13 +15,16 @@ use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
 
 use hermes_agent::agent_loop::ToolRegistry;
-use hermes_agent::skill_orchestrator::parse_frontmatter;
-use hermes_agent::{AgentConfig, AgentLoop};
-use hermes_config::{load_config, load_prefill_messages, GatewayConfig};
+use hermes_agent::{with_workspace_cwd, AgentConfig, AgentLoop, RunInvocationContext, RunRuntime};
+use hermes_config::{load_prefill_messages, GatewayConfig};
 use hermes_core::{
-    subprocess::CommandNoWindowExt, AgentResult, LlmProvider, Message, Skill, ToolSchema,
+    subprocess::CommandNoWindowExt, AgentResult, LlmProvider, Message, ResolvedExecutionMode,
+    ToolSchema,
 };
-use hermes_skills::SkillGuard;
+use hermes_environments::ExecutionContainmentContext;
+use hermes_tools::skill_utils::{
+    load_verified_skill_by_selector, render_skill_provenance_tag, SkillTrustRuntime,
+};
 use hermes_tools::{ToolRegistry as ToolsetRegistry, ToolsetManager};
 use regex::Regex;
 use tokio::process::Command;
@@ -76,28 +78,6 @@ struct ScriptRun {
     stdout: String,
     stderr: String,
     code: String,
-}
-
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvVarGuard {
-    fn set(key: &'static str, value: &Path) -> Self {
-        let previous = std::env::var_os(key);
-        std::env::set_var(key, value);
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(previous) => std::env::set_var(self.key, previous),
-            None => std::env::remove_var(self.key),
-        }
-    }
 }
 
 fn trim_script_output(text: &str) -> String {
@@ -334,124 +314,60 @@ fn build_script_augmented_prompt(prompt: &str, run: &ScriptRun) -> String {
     }
 }
 
-fn normalize_skill_selector(raw: &str) -> String {
+fn normalize_cron_skill_selector(raw: &str) -> String {
     raw.trim()
         .trim_start_matches('/')
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else if c == '_' || c == '-' || c.is_whitespace() {
-                '-'
-            } else {
-                '\0'
-            }
-        })
-        .filter(|c| *c != '\0')
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-fn find_skill_file(skills_dir: &Path, identifier: &str) -> Option<PathBuf> {
-    let selector = normalize_skill_selector(identifier);
-    if selector.is_empty() {
-        return None;
-    }
-
-    for candidate in [
-        skills_dir.join(identifier).join("SKILL.md"),
-        skills_dir.join(&selector).join("SKILL.md"),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    let mut stack = vec![skills_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let entries = fs::read_dir(&dir).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.starts_with('.'))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            if path.is_dir() {
-                let skill_file = path.join("SKILL.md");
-                if skill_file.is_file() {
-                    let parent_match = path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(|name| normalize_skill_selector(name) == selector)
-                        .unwrap_or(false);
-                    if parent_match {
-                        return Some(skill_file);
-                    }
-                    if let Ok(content) = fs::read_to_string(&skill_file) {
-                        let (frontmatter, _) = parse_frontmatter(&content);
-                        if frontmatter
-                            .name
-                            .as_deref()
-                            .map(|name| normalize_skill_selector(name) == selector)
-                            .unwrap_or(false)
-                        {
-                            return Some(skill_file);
-                        }
-                    }
-                }
-                stack.push(path);
-            }
-        }
-    }
-    None
+        .replace(['_', ' '], "-")
+        .to_ascii_lowercase()
 }
 
 fn build_cron_skill_prompt(identifiers: &[String]) -> Result<Option<String>, CronError> {
-    let skills_dir = hermes_config::skills_dir();
+    let trust = SkillTrustRuntime::fail_closed().map_err(|error| {
+        CronError::InvalidJob(format!("skill trust initialization failed: {error}"))
+    })?;
+    build_cron_skill_prompt_with_trust(&hermes_config::skills_dir(), identifiers, &trust)
+}
+
+fn build_cron_skill_prompt_with_trust(
+    skills_dir: &Path,
+    identifiers: &[String],
+    trust: &SkillTrustRuntime,
+) -> Result<Option<String>, CronError> {
     let mut parts = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     for identifier in identifiers {
         let trimmed = identifier.trim();
-        if trimmed.is_empty() || !seen.insert(normalize_skill_selector(trimmed)) {
+        let selector = normalize_cron_skill_selector(trimmed);
+        if trimmed.is_empty() || selector.is_empty() || !seen.insert(selector) {
             continue;
         }
 
-        let Some(path) = find_skill_file(&skills_dir, trimmed) else {
-            parts.push(format!("[Skill '{}' could not be found.]", trimmed));
-            continue;
-        };
-        let content = fs::read_to_string(&path).map_err(|e| {
-            CronError::InvalidJob(format!("failed to load cron skill {}: {e}", path.display()))
-        })?;
-        let (frontmatter, body) = parse_frontmatter(&content);
-        let name = frontmatter.name.unwrap_or_else(|| trimmed.to_string());
-        let probe = Skill {
-            name: name.clone(),
-            content: body.to_string(),
-            category: Some("cron".to_string()),
-            description: None,
-        };
-        SkillGuard::default()
-            .scan_security_only(&probe)
-            .map_err(|e| CronError::InvalidJob(format!("blocked cron skill '{name}': {e}")))?;
-        if let Some(rule) = detect_cron_prompt_injection(body) {
+        let skill = load_verified_skill_by_selector(&[skills_dir.to_path_buf()], trimmed, trust)
+            .map_err(|error| {
+                CronError::InvalidJob(format!(
+                    "blocked cron skill '{}': trust verification failed: {}",
+                    trimmed, error
+                ))
+            })?
+            .ok_or_else(|| {
+                CronError::InvalidJob(format!(
+                    "blocked cron skill '{}': no admitted v2 package was found",
+                    trimmed
+                ))
+            })?;
+        if let Some(rule) = detect_cron_prompt_injection(&skill.body) {
             return Err(CronError::InvalidJob(format!(
-                "blocked cron skill '{name}' by security scanner ({rule})"
+                "blocked cron skill '{}' by security scanner ({rule})",
+                skill.name
             )));
         }
 
         parts.push(format!(
-            "[SYSTEM: The scheduled cron job preloaded the \"{}\" skill. Treat its instructions as active guidance for this run.]\n\n{}",
-            name,
-            body.trim()
+            "[SYSTEM: The scheduled cron job preloaded the \"{}\" skill. Treat its instructions as active guidance for this run.]\n{}\n\n{}",
+            skill.name,
+            render_skill_provenance_tag(skill.provenance()),
+            skill.body.trim()
         ));
     }
 
@@ -472,14 +388,67 @@ pub struct CronRunner {
     llm_provider: Arc<dyn LlmProvider>,
     /// Tool registry providing available tools.
     tool_registry: Arc<ToolRegistry>,
+    /// Shared production run-record services for each scheduled invocation.
+    run_runtime: Arc<RunRuntime>,
+    /// Process-scoped execution posture resolved once at startup.
+    execution_mode: ResolvedExecutionMode,
+    /// Exact backend containment admission shared with this runner's tools.
+    execution_containment: Arc<ExecutionContainmentContext>,
+    /// Prefill messages captured from the startup configuration.
+    prefill_messages: Vec<Message>,
+    /// Cron tool policy captured from the startup configuration.
+    cron_tool_names: HashSet<String>,
 }
 
 impl CronRunner {
-    /// Create a new cron runner.
-    pub fn new(llm_provider: Arc<dyn LlmProvider>, tool_registry: Arc<ToolRegistry>) -> Self {
-        Self {
+    /// Create a new cron runner from process-scoped startup state.
+    ///
+    /// The caller must supply the exact containment admission already bound to
+    /// the agent tool registry. Configuration-derived prefill and tool policy
+    /// are snapshotted here.
+    pub fn new(
+        llm_provider: Arc<dyn LlmProvider>,
+        tool_registry: Arc<ToolRegistry>,
+        run_runtime: Arc<RunRuntime>,
+        execution_mode: ResolvedExecutionMode,
+        execution_containment: Arc<ExecutionContainmentContext>,
+        config: &GatewayConfig,
+    ) -> Result<Self, hermes_core::AgentError> {
+        if execution_containment.mode() != execution_mode {
+            return Err(hermes_core::AgentError::Config(
+                "cron containment context does not match the resolved execution mode".to_string(),
+            ));
+        }
+        if !Arc::ptr_eq(
+            &tool_registry.execution_containment_context(),
+            &execution_containment,
+        ) {
+            return Err(hermes_core::AgentError::Config(
+                "cron tool registry and runner do not share the same containment context"
+                    .to_string(),
+            ));
+        }
+
+        let live_names = tool_registry.names().into_iter().collect();
+        let cron_tool_names = resolve_cron_platform_tool_names(config, &live_names);
+        let prefill_messages = load_prefill_messages(config);
+        Ok(Self {
             llm_provider,
             tool_registry,
+            run_runtime,
+            execution_mode,
+            execution_containment,
+            prefill_messages,
+            cron_tool_names,
+        })
+    }
+
+    fn base_agent_config(&self) -> AgentConfig {
+        AgentConfig {
+            execution_mode: self.execution_mode,
+            prefill_messages: self.prefill_messages.clone(),
+            platform: Some("cron".to_string()),
+            ..AgentConfig::default()
         }
     }
 
@@ -491,6 +460,17 @@ impl CronRunner {
     /// The agent is run with a restricted tool set that excludes the
     /// `cronjob` tool to prevent recursive scheduling.
     pub async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
+        let context =
+            RunInvocationContext::cron_manual(&job.id, chrono::Utc::now().timestamp_millis())
+                .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+        self.run_job_with_context(job, context).await
+    }
+
+    pub async fn run_job_with_context(
+        &self,
+        job: &CronJob,
+        run_context: RunInvocationContext,
+    ) -> Result<AgentResult, CronError> {
         tracing::info!(
             "Running cron job '{}' ({})",
             job.name.as_deref().unwrap_or(&job.id),
@@ -510,6 +490,14 @@ impl CronRunner {
                 )));
             }
         }
+        // Trust failures must stop a scheduled job before a script, provider,
+        // tool, or delivery effect can begin. `build_messages` repeats this
+        // check immediately before prompt injection to close the race with any
+        // script execution.
+        if let Some(skills) = job.skills.as_ref().filter(|skills| !skills.is_empty()) {
+            let _ = build_cron_skill_prompt(skills)?;
+        }
+
         if job.no_agent {
             return self.run_script_only_job(job).await;
         }
@@ -526,24 +514,9 @@ impl CronRunner {
             runnable_job.script = None;
         }
 
-        let _terminal_cwd = workdir
-            .as_deref()
-            .map(|workdir| EnvVarGuard::set("TERMINAL_CWD", workdir));
-
-        // Build agent config from job settings
-        let mut config = AgentConfig::default();
-        let runtime_config = match load_config(None) {
-            Ok(config) => config,
-            Err(err) => {
-                tracing::warn!(
-                    "Cron runtime config load failed for job '{}'; prefill disabled: {}",
-                    job.id,
-                    err
-                );
-                GatewayConfig::default()
-            }
-        };
-        config.prefill_messages = load_prefill_messages(&runtime_config);
+        // Build agent config from job settings. The process resolves execution
+        // mode exactly once; jobs must not silently re-read a different mode.
+        let mut config = self.base_agent_config();
         // Scheduled/background runs should avoid user/workspace context injection
         // so job trajectories stay deterministic and non-user-specific. Per-job
         // workdir intentionally re-enables workspace context for that directory.
@@ -561,23 +534,25 @@ impl CronRunner {
             runnable_job.prompt
         ));
 
-        // Build tool list from `hermes tools` cron-platform config, with
-        // recursive/messaging tools denied even if a broad toolset includes them.
+        // Use the cron tool policy captured at runner construction. Scheduled
+        // jobs must not reload configuration or resolve a new execution mode.
         let tools = self.filtered_tool_schemas();
 
-        // Create a fresh agent loop
         let agent_loop = AgentLoop::new(
             config,
             self.tool_registry.clone(),
             self.llm_provider.clone(),
-        );
+        )
+        .with_run_runtime(self.run_runtime.clone())
+        .with_execution_containment_context(Arc::clone(&self.execution_containment))
+        .map_err(CronError::Agent)?
+        .with_run_context(run_context);
 
         // Build initial messages
         let messages = self.build_messages(&runnable_job)?;
 
         // Run the agent loop
-        let result = agent_loop
-            .run(messages, Some(tools))
+        let result = with_workspace_cwd(workdir, agent_loop.run(messages, Some(tools)))
             .await
             .map_err(CronError::Agent)?;
 
@@ -692,38 +667,18 @@ impl CronRunner {
         Ok(messages)
     }
 
-    /// Filter cron tools through the same platform-toolset config used by
-    /// gateway/CLI surfaces. Falls back to legacy all-tools-minus-denylist if
-    /// user config cannot be loaded.
+    /// Filter cron tools through the policy captured from the startup config.
     fn filtered_tool_schemas(&self) -> Vec<ToolSchema> {
-        match load_config(None) {
-            Ok(config) => self.filtered_tool_schemas_for_config(&config),
-            Err(err) => {
-                tracing::warn!(
-                    "Cron platform toolset resolution failed, falling back to legacy tool filter: {err}"
-                );
-                self.legacy_filtered_tool_schemas()
-            }
-        }
+        self.filter_tool_schemas(&self.cron_tool_names)
     }
 
-    fn filtered_tool_schemas_for_config(&self, config: &GatewayConfig) -> Vec<ToolSchema> {
-        let live_names: HashSet<String> = self.tool_registry.names().into_iter().collect();
-        let allowed = resolve_cron_platform_tool_names(config, &live_names);
-        self.filter_tool_schemas(Some(&allowed))
-    }
-
-    fn legacy_filtered_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.filter_tool_schemas(None)
-    }
-
-    fn filter_tool_schemas(&self, allowed: Option<&HashSet<String>>) -> Vec<ToolSchema> {
+    fn filter_tool_schemas(&self, allowed: &HashSet<String>) -> Vec<ToolSchema> {
         self.tool_registry
             .schemas()
             .into_iter()
             .filter(|schema| {
                 !CRON_HARD_DISABLED_TOOLS.contains(&schema.name.as_str())
-                    && allowed.is_none_or(|names| names.contains(&schema.name))
+                    && allowed.contains(&schema.name)
             })
             .collect()
     }
@@ -857,7 +812,6 @@ fn canonical_cron_toolset_token(token: &str) -> String {
             "mixture_of_agents".to_string()
         }
         "browser-use" | "browser_use" => "browser".to_string(),
-        "voice-mode" | "voice_mode" => "voice".to_string(),
         "hermes_cli" => "hermes-cli".to_string(),
         "hermes_api_server" => "hermes-api-server".to_string(),
         "hermes_cron" => CRON_DEFAULT_TOOLSET.to_string(),
@@ -934,10 +888,61 @@ fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::job::CronJob;
-    use hermes_core::ToolError;
-    use std::sync::Mutex;
+    use hermes_core::{Skill, ToolError};
+    use std::ffi::OsString;
+
+    fn manual_test_containment(
+        execution_mode: ResolvedExecutionMode,
+    ) -> Arc<ExecutionContainmentContext> {
+        Arc::new(
+            ExecutionContainmentContext::manual(execution_mode)
+                .expect("manual test mode must admit host-local containment"),
+        )
+    }
+
+    fn new_manual_test_runner(
+        llm_provider: Arc<dyn LlmProvider>,
+        tool_registry: Arc<ToolRegistry>,
+        run_runtime: Arc<RunRuntime>,
+        config: &GatewayConfig,
+    ) -> CronRunner {
+        let execution_mode = ResolvedExecutionMode::default();
+        let execution_containment = manual_test_containment(execution_mode);
+        tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+        CronRunner::new(
+            llm_provider,
+            tool_registry,
+            run_runtime,
+            execution_mode,
+            execution_containment,
+            config,
+        )
+        .expect("manual test runner")
+    }
+    use hermes_skills::{
+        canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
+        LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
+        SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
+        SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
+        SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
+        SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+    };
+    use parking_lot::Mutex;
+    use std::collections::BTreeMap;
 
     static TEST_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    static TEST_RUNTIME_ROOTS: LazyLock<Mutex<Vec<tempfile::TempDir>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    fn test_run_runtime() -> Arc<RunRuntime> {
+        let root = tempfile::tempdir().expect("runtime tempdir");
+        let runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(root.path()).expect("ephemeral run runtime"),
+        );
+        TEST_RUNTIME_ROOTS.lock().push(root);
+        runtime
+    }
 
     fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         tokio::runtime::Builder::new_current_thread()
@@ -947,9 +952,223 @@ mod tests {
             .block_on(future)
     }
 
+    fn install_attested_local_skill(skills_root: &Path, name: &str, content: &str) {
+        let store = FileSkillStore::new(skills_root.to_path_buf());
+        block_on(store.save(&Skill {
+            name: name.to_string(),
+            content: content.to_string(),
+            category: None,
+            description: Some("cron test skill".to_string()),
+        }))
+        .unwrap();
+        let digest = canonical_bundle_digest(&skills_root.join(name)).unwrap();
+        store
+            .attest_local_skill(
+                name,
+                LocalOwnerAttestation::new(
+                    "test-owner",
+                    format!("cron-attestation-{name}"),
+                    digest,
+                    "2026-07-20T00:00:00Z",
+                ),
+            )
+            .unwrap();
+    }
+
+    fn install_signed_remote_skill(skills_root: &Path) -> (SkillTrustRuntime, SkillSigningKey) {
+        let name = "signed-skill";
+        let package_root = skills_root.join(name);
+        fs::create_dir_all(&package_root).unwrap();
+        fs::write(
+            package_root.join("SKILL.md"),
+            "---\nname: signed-skill\ndescription: Signed fixture\n---\n# Signed\n\n1. Follow verified instructions",
+        )
+        .unwrap();
+        let signer = SkillSigningKey::from_seed([37; 32]);
+        let identity = SkillPackageIdentityV2::new(
+            name,
+            "1.0.0",
+            "https://registry.example/signed-skill",
+            "publisher.example",
+            "0123456789abcdef0123456789abcdef01234567",
+            canonical_bundle_digest(&package_root).unwrap(),
+            "2026-07-20T00:00:00Z",
+        );
+        let mut manifest = SkillPackageManifestV2::new(
+            SkillPackageSource::Remote,
+            identity,
+            SkillPackageProof::RemoteSignature(SkillSignature::ed25519("test-key", "")),
+            full_skill_scan(&package_root),
+            SkillCompatibility::default(),
+            SkillPermissions::default(),
+            Vec::new(),
+        );
+        signer.sign_manifest(&mut manifest, "test-key").unwrap();
+        store_lock(
+            skills_root,
+            &SkillLockV2 {
+                schema_version: SKILL_LOCK_SCHEMA_VERSION,
+                packages: vec![SkillLockEntryV2 {
+                    install_path: name.to_string(),
+                    manifest,
+                    quarantine: None,
+                }],
+            },
+        )
+        .unwrap();
+        let verifier = SkillTrustVerifier::new(
+            SkillTrustKeyring::new(vec![signer.trusted_key("test-key", true)]).unwrap(),
+            SkillTrustPolicy::default(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        (SkillTrustRuntime::new(verifier), signer)
+    }
+
+    fn revoke_signed_remote_skill(skills_root: &Path, signer: &SkillSigningKey) {
+        let mut revocations = SignedSkillRevocationList {
+            schema_version: SKILL_REVOCATION_SCHEMA_VERSION,
+            issued_at: "2026-07-20T00:00:00Z".to_string(),
+            signature: None,
+            revoked: vec![SkillRevocation {
+                name: Some("signed-skill".to_string()),
+                publisher_id: None,
+                immutable_source_revision: None,
+                content_digest: None,
+                key_id: None,
+                reason: "fixture revocation".to_string(),
+                revoked_at: "2026-07-20T00:00:00Z".to_string(),
+            }],
+        };
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
+        store_revocations(skills_root, &revocations).unwrap();
+    }
+
+    #[test]
+    fn cron_runner_keeps_startup_mode_after_environment_and_config_changes() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let home = tempfile::tempdir().expect("config tempdir");
+        fs::write(
+            home.path().join("config.yaml"),
+            "execution_mode: reviewed\n",
+        )
+        .expect("write startup config");
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+        let _ignore_user_config = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
+        let _environment = EnvGuard::set("HERMES_EXECUTION_MODE", "reviewed");
+        let expected = ResolvedExecutionMode {
+            mode: hermes_core::ExecutionMode::Manual,
+            source: hermes_core::ExecutionModeSource::Cli,
+        };
+        let startup_config = hermes_config::load_config(None).expect("load startup config");
+        let runtime_root = tempfile::tempdir().expect("runtime tempdir");
+        let run_runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(runtime_root.path())
+                .expect("ephemeral run runtime"),
+        );
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let execution_containment = manual_test_containment(expected);
+        tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+        let runner = CronRunner::new(
+            Arc::new(MockLlmProvider),
+            tool_registry,
+            Arc::clone(&run_runtime),
+            expected,
+            execution_containment,
+            &startup_config,
+        )
+        .expect("manual cron runner");
+
+        fs::write(home.path().join("config.yaml"), "execution_mode: manual\n")
+            .expect("rewrite config after construction");
+        std::env::set_var("HERMES_EXECUTION_MODE", "manual");
+
+        assert_eq!(runner.base_agent_config().execution_mode, expected);
+        block_on(runner.run_job(&CronJob::new("* * * * *", "prove mode snapshot")))
+            .expect("cron run");
+        let recorded_mode = run_runtime
+            .recent_runs(1)
+            .expect("recent cron run")
+            .into_iter()
+            .next()
+            .expect("cron run record")
+            .header
+            .execution_mode;
+        assert_eq!(recorded_mode, expected);
+    }
+
+    #[test]
+    fn cron_runner_copies_ci_cli_mode_and_source_into_agent_config() {
+        let expected = ResolvedExecutionMode {
+            mode: hermes_core::ExecutionMode::Ci,
+            source: hermes_core::ExecutionModeSource::Cli,
+        };
+        // This isolates AgentConfig propagation; closed-mode admission is
+        // exercised separately because CI requires a certified backend.
+        let runner = CronRunner {
+            llm_provider: Arc::new(MockLlmProvider),
+            tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: expected,
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
+        };
+
+        assert_eq!(runner.base_agent_config().execution_mode, expected);
+    }
+
+    #[test]
+    fn cron_runner_rejects_a_containment_context_for_a_different_resolved_mode() {
+        let expected = ResolvedExecutionMode {
+            mode: hermes_core::ExecutionMode::Ci,
+            source: hermes_core::ExecutionModeSource::Cli,
+        };
+        let registry = Arc::new(ToolRegistry::new());
+        let containment = manual_test_containment(ResolvedExecutionMode::default());
+        registry.set_execution_containment_context(Arc::clone(&containment));
+
+        let error = CronRunner::new(
+            Arc::new(MockLlmProvider),
+            registry,
+            test_run_runtime(),
+            expected,
+            containment,
+            &GatewayConfig::default(),
+        )
+        .err()
+        .expect("closed cron mode must reject a manual containment context");
+
+        assert!(error.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn cron_runner_rejects_a_registry_with_a_different_containment_context() {
+        let execution_mode = ResolvedExecutionMode::default();
+        let registry = Arc::new(ToolRegistry::new());
+        let registry_context = manual_test_containment(execution_mode);
+        let runner_context = manual_test_containment(execution_mode);
+        registry.set_execution_containment_context(registry_context);
+
+        let error = CronRunner::new(
+            Arc::new(MockLlmProvider),
+            registry,
+            test_run_runtime(),
+            execution_mode,
+            runner_context,
+            &GatewayConfig::default(),
+        )
+        .err()
+        .expect("cron runner must require the registry's exact containment context");
+
+        assert!(error.to_string().contains("do not share"));
+    }
+
     #[test]
     fn test_filtered_tool_schemas_excludes_cronjob() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _ignore_user_config = EnvGuard::set("HERMES_IGNORE_USER_CONFIG", "1");
         // Create a minimal tool registry with a cronjob tool
         let mut registry = ToolRegistry::new();
@@ -959,6 +1178,11 @@ mod tests {
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(registry),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::from([String::from("terminal")]),
         };
 
         let schemas = runner.filtered_tool_schemas();
@@ -969,7 +1193,7 @@ mod tests {
 
     #[test]
     fn test_filtered_tool_schemas_default_cron_omits_default_off_and_interactive_tools() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
         let _ignore_user_config = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
@@ -987,10 +1211,12 @@ mod tests {
             register_test_tool(&mut registry, name);
         }
 
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(registry),
-        };
+        let runner = new_manual_test_runner(
+            Arc::new(MockLlmProvider),
+            Arc::new(registry),
+            test_run_runtime(),
+            &GatewayConfig::default(),
+        );
 
         let names = schema_name_set(runner.filtered_tool_schemas());
         assert!(names.contains("terminal"));
@@ -1010,8 +1236,8 @@ mod tests {
     }
 
     #[test]
-    fn test_filtered_tool_schemas_honors_cron_platform_config_and_tool_toggles() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+    fn test_filtered_tool_schemas_snapshots_cron_platform_config_and_tool_toggles() {
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         std::fs::write(
             home.path().join("config.yaml"),
@@ -1044,11 +1270,19 @@ tools_config:
             register_test_tool(&mut registry, name);
         }
 
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(registry),
-        };
+        let config = hermes_config::load_config(None).expect("load cron tool config");
+        let runner = new_manual_test_runner(
+            Arc::new(MockLlmProvider),
+            Arc::new(registry),
+            test_run_runtime(),
+            &config,
+        );
 
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "platform_toolsets:\n  cron:\n    - web_extract\n",
+        )
+        .unwrap();
         let names = schema_name_set(runner.filtered_tool_schemas());
         assert!(names.contains("terminal"));
         assert!(names.contains("process_registry"));
@@ -1093,18 +1327,39 @@ tools_config:
 
     #[test]
     fn test_build_messages_with_skills() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let home = tempfile::tempdir().unwrap();
+        let skills_root = home.path().join("skills");
+        install_attested_local_skill(
+            &skills_root,
+            "web-search",
+            "# Web search\n\n1. Search verified sources",
+        );
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
         let mut job = CronJob::new("0 9 * * *", "Say hello");
-        job.skills = Some(vec!["web_search".to_string(), "terminal".to_string()]);
-
+        job.skills = Some(vec!["web_search".to_string()]);
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
 
         let messages = runner.build_messages(&job).expect("messages");
-        // Should have skill context + prompt message
         assert_eq!(messages.len(), 2);
-        assert!(messages[0].content.as_ref().unwrap().contains("web_search"));
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("Search verified sources"));
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("<skill_provenance"));
         assert_eq!(messages[1].content.as_deref(), Some("Say hello"));
     }
 
@@ -1116,6 +1371,11 @@ tools_config:
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
 
         let messages = runner.build_messages(&job).expect("messages");
@@ -1140,7 +1400,7 @@ tools_config:
                 _model: Option<&str>,
                 _extra_body: Option<&serde_json::Value>,
             ) -> Result<hermes_core::LlmResponse, hermes_core::AgentError> {
-                *self.seen.lock().expect("seen messages lock") = messages.to_vec();
+                *self.seen.lock() = messages.to_vec();
                 Ok(hermes_core::LlmResponse {
                     message: Message::assistant("cron done"),
                     usage: None,
@@ -1165,7 +1425,7 @@ tools_config:
             }
         }
 
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         fs::write(
             home.path().join("config.yaml"),
@@ -1182,14 +1442,17 @@ tools_config:
         let _prefill_env = EnvGuard::remove("HERMES_PREFILL_MESSAGES_FILE");
 
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let runner = CronRunner {
-            llm_provider: Arc::new(CapturingLlmProvider { seen: seen.clone() }),
-            tool_registry: Arc::new(ToolRegistry::new()),
-        };
+        let config = hermes_config::load_config(None).expect("load prefill config");
+        let runner = new_manual_test_runner(
+            Arc::new(CapturingLlmProvider { seen: seen.clone() }),
+            Arc::new(ToolRegistry::new()),
+            test_run_runtime(),
+            &config,
+        );
         let job = CronJob::new("0 9 * * *", "cron prompt");
 
         let result = block_on(runner.run_job(&job)).expect("cron run");
-        let seen_messages = seen.lock().expect("seen messages lock");
+        let seen_messages = seen.lock();
         assert!(seen_messages
             .iter()
             .any(|m| m.content.as_deref() == Some("cron prefill system")));
@@ -1267,6 +1530,11 @@ tools_config:
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(registry),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
 
         let mut job = CronJob::new("* * * * *", "unused");
@@ -1284,7 +1552,7 @@ tools_config:
 
     #[test]
     fn test_no_agent_script_path_runs_relative_to_hermes_scripts() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         let scripts = home.path().join("scripts");
         std::fs::create_dir_all(&scripts).unwrap();
@@ -1294,6 +1562,11 @@ tools_config:
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
         let mut job = CronJob::new("* * * * *", "unused");
         job.no_agent = true;
@@ -1311,7 +1584,7 @@ tools_config:
 
     #[test]
     fn test_no_agent_script_path_blocks_traversal() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(home.path().join("scripts")).unwrap();
         let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
@@ -1319,6 +1592,11 @@ tools_config:
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
         let mut job = CronJob::new("* * * * *", "unused");
         job.no_agent = true;
@@ -1333,6 +1611,11 @@ tools_config:
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
             tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
         };
         let mut job = CronJob::new("* * * * *", "Report status.");
         job.script = Some("echo script-data".to_string());
@@ -1349,7 +1632,7 @@ tools_config:
 
     #[test]
     fn test_build_cron_skill_prompt_blocks_injected_skill_body() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().unwrap();
         let skills = home.path().join("skills").join("evil-skill");
         std::fs::create_dir_all(&skills).unwrap();
@@ -1362,6 +1645,82 @@ tools_config:
 
         let err = build_cron_skill_prompt(&["evil-skill".to_string()]).expect_err("blocked");
         assert!(err.to_string().contains("blocked cron skill"));
+    }
+
+    #[test]
+    fn test_build_cron_skill_prompt_loads_attested_local_without_effect_capability() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let home = tempfile::tempdir().unwrap();
+        let skills_root = home.path().join("skills");
+        install_attested_local_skill(
+            &skills_root,
+            "cron-guide",
+            "# Cron guide\n\n1. Check the scheduled task",
+        );
+        let trust = SkillTrustRuntime::fail_closed().unwrap();
+        let prompt =
+            build_cron_skill_prompt_with_trust(&skills_root, &["cron-guide".to_string()], &trust)
+                .unwrap()
+                .unwrap();
+        assert!(prompt.contains("Check the scheduled task"));
+        assert!(prompt.contains("source=\"local_authored\""));
+        assert!(prompt.contains("effects_allowed=\"false\""));
+    }
+
+    #[test]
+    fn signed_cron_skill_loads_then_revocation_blocks_prompt_construction() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let home = tempfile::tempdir().unwrap();
+        let skills_root = home.path().join("skills");
+        let (trust, signer) = install_signed_remote_skill(&skills_root);
+        let prompt =
+            build_cron_skill_prompt_with_trust(&skills_root, &["signed-skill".to_string()], &trust)
+                .unwrap()
+                .unwrap();
+        assert!(prompt.contains("Follow verified instructions"));
+        assert!(prompt.contains("key_id=\"test-key\""));
+
+        revoke_signed_remote_skill(&skills_root, &signer);
+        let error =
+            build_cron_skill_prompt_with_trust(&skills_root, &["signed-skill".to_string()], &trust)
+                .expect_err("revoked package must not reach a cron prompt");
+        assert!(error.to_string().contains("blocked cron skill"));
+    }
+
+    #[test]
+    fn test_tampered_cron_skill_blocks_before_no_agent_script_effect() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let home = tempfile::tempdir().unwrap();
+        let skills_root = home.path().join("skills");
+        install_attested_local_skill(
+            &skills_root,
+            "cron-guide",
+            "# Cron guide\n\n1. Check the scheduled task",
+        );
+        std::fs::write(
+            skills_root.join("cron-guide").join("SKILL.md"),
+            "# Cron guide\n\n1. Tampered content",
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+        let marker = home.path().join("script-ran");
+        let runner = CronRunner {
+            llm_provider: Arc::new(MockLlmProvider),
+            tool_registry: Arc::new(ToolRegistry::new()),
+            run_runtime: test_run_runtime(),
+            execution_mode: ResolvedExecutionMode::default(),
+            execution_containment: manual_test_containment(ResolvedExecutionMode::default()),
+            prefill_messages: Vec::new(),
+            cron_tool_names: HashSet::new(),
+        };
+        let mut job = CronJob::new("* * * * *", "Run only after trust verification");
+        job.skills = Some(vec!["cron-guide".to_string()]);
+        job.no_agent = true;
+        job.script = Some(format!("printf ran > {}", marker.display()));
+
+        let error = block_on(runner.run_job(&job)).expect_err("tampered skill must block");
+        assert!(error.to_string().contains("blocked cron skill"));
+        assert!(!marker.exists());
     }
 
     struct EnvGuard {

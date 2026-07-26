@@ -424,6 +424,9 @@ fn apply_discord_env(config: &mut GatewayConfig) {
     if let Some(v) = env_nonempty("DISCORD_APPLICATION_ID") {
         set_extra(discord, "application_id", json!(v));
     }
+    if let Some(v) = env_nonempty("DISCORD_PROXY") {
+        set_extra(discord, "proxy", json!(v));
+    }
     if let Some(v) = env_nonempty("DISCORD_ALLOW_BOTS") {
         set_extra(discord, "allow_bots", json!(v));
     }
@@ -817,8 +820,8 @@ mod tests {
     #[test]
     fn json_array_or_csv_splits_mixed_newline_and_csv_fallback() {
         assert_eq!(
-            json_array_or_csv("chompy\\b\n@hermes, sigma"),
-            vec!["chompy\\b", "@hermes", "sigma"]
+            json_array_or_csv("chompy\\b\n@hermes, sentinel"),
+            vec!["chompy\\b", "@hermes", "sentinel"]
         );
         assert_eq!(
             json_array_or_csv(r#""wake one,wake two""#),
@@ -836,7 +839,7 @@ mod tests {
             std::env::set_var("SLACK_REACTIONS", "0");
             std::env::set_var("SLACK_REQUIRE_MENTION", "yes");
             std::env::set_var("SLACK_BOT_USER_ID", "UBOT");
-            std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sigma");
+            std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sentinel");
             std::env::set_var("SLACK_ALLOWED_USERS", "U1, U2");
         }
 
@@ -872,7 +875,7 @@ mod tests {
                     .iter()
                     .filter_map(|item| item.as_str())
                     .collect::<Vec<_>>()),
-            Some(vec!["chompy\\b", "@hermes", "sigma"])
+            Some(vec!["chompy\\b", "@hermes", "sentinel"])
         );
 
         unsafe {
@@ -932,6 +935,7 @@ mod tests {
             std::env::set_var("DISCORD_FREE_RESPONSE_CHANNELS", "444,555");
             std::env::set_var("DISCORD_AUTO_THREAD", "false");
             std::env::set_var("DISCORD_THREAD_REQUIRE_MENTION", "yes");
+            std::env::set_var("DISCORD_PROXY", "socks5://discord-proxy:1080");
         }
         let mut cfg = GatewayConfig::default();
         apply_python_named_platform_env(&mut cfg);
@@ -942,6 +946,10 @@ mod tests {
         assert_eq!(
             discord.extra.get("application_id").and_then(|v| v.as_str()),
             Some("app-123")
+        );
+        assert_eq!(
+            discord.extra.get("proxy").and_then(|v| v.as_str()),
+            Some("socks5://discord-proxy:1080")
         );
         assert_eq!(
             discord.extra.get("allow_bots").and_then(|v| v.as_str()),
@@ -1011,6 +1019,7 @@ mod tests {
             std::env::remove_var("DISCORD_BOT_TOKEN");
             std::env::remove_var("DISCORD_APPLICATION_ID");
             std::env::remove_var("DISCORD_ALLOW_BOTS");
+            std::env::remove_var("DISCORD_PROXY");
             std::env::remove_var("DISCORD_ALLOWED_USERS");
             std::env::remove_var("DISCORD_ALLOWED_ROLES");
             std::env::remove_var("DISCORD_ALLOWED_CHANNELS");

@@ -504,7 +504,6 @@ impl App {
             }
         }
         candidates.push(self.state_root.join("quorum").join("AGENTS.md"));
-        candidates.push(PathBuf::from(QUORUM_AGENT_CONTRACT_DEFAULT_PATH));
         for path in candidates {
             let Ok(content) = std::fs::read_to_string(&path) else {
                 continue;
@@ -515,7 +514,15 @@ impl App {
             }
             return Some((path, trimmed.to_string()));
         }
-        None
+        let embedded = QUORUM_AGENT_CONTRACT_EMBEDDED.trim();
+        if embedded.is_empty() {
+            None
+        } else {
+            Some((
+                PathBuf::from(QUORUM_AGENT_CONTRACT_EMBEDDED_PATH),
+                embedded.to_string(),
+            ))
+        }
     }
 
     fn build_quorum_voter_prompt(pass_index: usize, total_passes: usize, model: &str) -> String {
@@ -768,5 +775,4 @@ impl App {
             std::env::set_var("HERMES_MAX_DELEGATE_DEPTH", "4");
         }
     }
-
 }

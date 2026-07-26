@@ -8,8 +8,36 @@ impl TelegramAdapter {
         parse_mode: Option<&str>,
         reply_to_message_id: Option<i64>,
     ) -> Result<Vec<i64>, GatewayError> {
-        self.send_text_inner(chat_id, text, parse_mode, reply_to_message_id, None, None)
-            .await
+        self.send_text_inner(
+            chat_id,
+            text,
+            parse_mode,
+            reply_to_message_id,
+            None,
+            None,
+            true,
+        )
+        .await
+    }
+
+    async fn send_text_with_thread_policy(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<&str>,
+        message_thread_id: Option<i64>,
+        allow_thread_fallback: bool,
+    ) -> Result<Vec<i64>, GatewayError> {
+        self.send_text_inner(
+            chat_id,
+            text,
+            parse_mode,
+            None,
+            None,
+            message_thread_id,
+            allow_thread_fallback,
+        )
+        .await
     }
 
     /// Send a text message with an inline keyboard attached.
@@ -29,6 +57,7 @@ impl TelegramAdapter {
             reply_to_message_id,
             Some(keyboard),
             message_thread_id,
+            true,
         )
         .await
     }
@@ -41,12 +70,19 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         keyboard: Option<InlineKeyboardMarkup>,
         message_thread_id: Option<i64>,
+        allow_thread_fallback: bool,
     ) -> Result<Vec<i64>, GatewayError> {
         let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
         let message_thread_id = message_thread_id.or(inferred_thread_id);
         if self.should_attempt_rich_text(text, keyboard.as_ref()) {
             if let Some(message_id) = self
-                .try_send_rich_text(chat_id, text, reply_to_message_id, message_thread_id)
+                .try_send_rich_text(
+                    chat_id,
+                    text,
+                    reply_to_message_id,
+                    message_thread_id,
+                    allow_thread_fallback,
+                )
                 .await?
             {
                 return Ok(vec![message_id]);
@@ -90,7 +126,7 @@ impl TelegramAdapter {
             }
 
             let resp: TelegramResponse<SentMessage> = self
-                .send_json_with_thread_fallback("sendMessage", body)
+                .send_json_with_thread_policy("sendMessage", body, allow_thread_fallback)
                 .await?;
 
             if let Some(msg) = resp.result {
@@ -112,10 +148,11 @@ impl TelegramAdapter {
         text: &str,
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
+        allow_thread_fallback: bool,
     ) -> Result<Option<i64>, GatewayError> {
         let body = self.rich_message_body(chat_id, text, reply_to_message_id, message_thread_id);
         let resp: TelegramResponse<SentMessage> = match self
-            .send_json_with_thread_fallback("sendRichMessage", body)
+            .send_json_with_thread_policy("sendRichMessage", body, allow_thread_fallback)
             .await
         {
             Ok(resp) => resp,
@@ -222,7 +259,16 @@ impl TelegramAdapter {
     async fn send_json_with_thread_fallback<T: serde::de::DeserializeOwned>(
         &self,
         method: &str,
+        body: serde_json::Value,
+    ) -> Result<TelegramResponse<T>, GatewayError> {
+        self.send_json_with_thread_policy(method, body, true).await
+    }
+
+    async fn send_json_with_thread_policy<T: serde::de::DeserializeOwned>(
+        &self,
+        method: &str,
         mut body: serde_json::Value,
+        allow_thread_fallback: bool,
     ) -> Result<TelegramResponse<T>, GatewayError> {
         let url = format!("{}/{}", self.api_base, method);
         match self.post_json(&url, &body).await {
@@ -234,7 +280,8 @@ impl TelegramAdapter {
                     .as_deref()
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("{method} failed"));
-                if Self::thread_or_reply_missing(&description)
+                if allow_thread_fallback
+                    && Self::thread_or_reply_missing(&description)
                     && Self::strip_thread_fields_for_fallback(&mut body)
                 {
                     self.prune_stale_dm_topic_binding_target(stale_topic_target);
@@ -249,7 +296,9 @@ impl TelegramAdapter {
                 }
                 Err(Self::telegram_response_error(method, &resp))
             }
-            Err(err) if Self::gateway_error_thread_or_reply_missing(&err) => {
+            Err(err)
+                if allow_thread_fallback
+                    && Self::gateway_error_thread_or_reply_missing(&err) => {
                 let stale_topic_target = Self::thread_fallback_target_from_body(&body);
                 if Self::strip_thread_fields_for_fallback(&mut body) {
                     self.prune_stale_dm_topic_binding_target(stale_topic_target);

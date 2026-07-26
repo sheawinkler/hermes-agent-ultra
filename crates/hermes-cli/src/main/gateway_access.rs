@@ -39,7 +39,7 @@ impl ActiveSessionControl for GatewayAgentBusyControl {
 
     fn steer(&self, message: &str) -> bool {
         self.interrupt
-            .interrupt(Some(hermes_agent::format_steer_marker(message)));
+            .steer(hermes_agent::format_steer_marker(message));
         true
     }
 }
@@ -103,7 +103,17 @@ fn build_agent_for_gateway_context(
     config: &hermes_config::GatewayConfig,
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
-) -> AgentLoop {
+    run_runtime: Arc<RunRuntime>,
+    execution_mode: hermes_core::ResolvedExecutionMode,
+) -> Result<AgentLoop, hermes_gateway::GatewayError> {
+    // Validate authenticated ingress identity before selecting a provider or
+    // constructing an AgentLoop. GatewayRuntimeContext owns the only accepted
+    // conversion; AgentConfig.session_id is not identity.
+    let memory_subject = ctx
+        .memory_subject()
+        .map_err(|_| hermes_gateway::GatewayError::Auth(
+            "invalid authenticated memory subject".to_string(),
+        ))?;
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-5.5"), ctx);
     let effective_model = select_startup_model_with_fallback_and_auth_resolver(
@@ -113,7 +123,7 @@ fn build_agent_for_gateway_context(
     )
     .selected_model;
     let provider = build_provider(config, &effective_model);
-    let mut agent_config = build_agent_config(config, &effective_model);
+    let mut agent_config = build_agent_config(config, &effective_model, execution_mode);
     if let Some(personality) = ctx.personality.clone() {
         agent_config.personality = Some(personality);
     }
@@ -141,6 +151,7 @@ fn build_agent_for_gateway_context(
         );
         agent_config.extra_body = Some(serde_json::Value::Object(extra));
     }
+    // This remains runtime metadata only; memory is already bound above.
     if !ctx.session_key.trim().is_empty() {
         agent_config.session_id = Some(ctx.session_key.clone());
     }
@@ -156,21 +167,148 @@ fn build_agent_for_gateway_context(
             Path::new(h),
         );
     }
-    hermes_agent::attach_discovered_memory(AgentLoop::new(agent_config, agent_tools, provider))
+    hermes_agent::attach_discovered_memory(
+        AgentLoop::new(agent_config, agent_tools, provider).with_run_runtime(run_runtime),
+        memory_subject,
+    )
+    .map_err(|_| {
+        hermes_gateway::GatewayError::Auth("memory initialization unavailable".to_string())
+    })
+}
+
+/// Translate the manager's opaque report without exposing subject keys,
+/// record counts, provider payloads, or provider error text to gateway users.
+fn gateway_memory_forget_response(
+    result: Result<MemoryForgetReport, MemoryManagerError>,
+) -> GatewayMemoryForgetResponse {
+    match result {
+        Ok(report) => gateway_memory_forget_response_from_report(report, true),
+        Err(MemoryManagerError::ForgetIncomplete { report }) => {
+            gateway_memory_forget_response_from_report(*report, false)
+        }
+        Err(MemoryManagerError::AuditStore) => GatewayMemoryForgetResponse {
+            erased: false,
+            providers: Vec::new(),
+            remediation: Some(GatewayMemoryForgetRemediation::Retry),
+        },
+        Err(_) => GatewayMemoryForgetResponse {
+            erased: false,
+            providers: Vec::new(),
+            remediation: Some(GatewayMemoryForgetRemediation::Reconfigure),
+        },
+    }
+}
+
+fn gateway_memory_forget_response_from_report(
+    report: MemoryForgetReport,
+    manager_returned_success: bool,
+) -> GatewayMemoryForgetResponse {
+    let erased = manager_returned_success && report.is_erased();
+    let providers = report
+        .providers
+        .into_iter()
+        .map(|provider| {
+            let readback_absent = provider
+                .readback
+                .as_ref()
+                .is_some_and(hermes_core::MemoryReadbackReceipt::is_absent);
+            let error = provider.error;
+            let state = if error.is_none() && provider.forget.is_some() && readback_absent {
+                GatewayMemoryForgetProviderState::VerifiedAbsent
+            } else {
+                GatewayMemoryForgetProviderState::Incomplete {
+                    error,
+                    readback_absent,
+                }
+            };
+            GatewayMemoryForgetProviderStatus {
+                provider: provider.provider,
+                state,
+            }
+        })
+        .collect::<Vec<_>>();
+    let remediation = (!erased).then(|| {
+        if providers.iter().any(|provider| {
+            matches!(
+                &provider.state,
+                GatewayMemoryForgetProviderState::Incomplete {
+                    error: Some(hermes_core::MemoryProviderGovernanceError::Unsupported { .. }),
+                    ..
+                }
+            )
+        }) {
+            GatewayMemoryForgetRemediation::Reconfigure
+        } else {
+            GatewayMemoryForgetRemediation::Retry
+        }
+    });
+    GatewayMemoryForgetResponse {
+        erased,
+        providers,
+        remediation,
+    }
+}
+
+/// Translate a transactionally committed export into gateway-local artifact
+/// metadata. The artifact reference remains internal to the gateway so chat
+/// receives only the subsequent single-use download reference and digest/count
+/// metadata.
+fn gateway_memory_export_response(
+    result: Result<MemoryExportReport, MemoryManagerError>,
+) -> GatewayMemoryExportResponse {
+    match result {
+        Ok(report) => gateway_memory_export_response_from_report(report, true),
+        Err(MemoryManagerError::ExportIncomplete { report }) => {
+            gateway_memory_export_response_from_report(*report, false)
+        }
+        Err(MemoryManagerError::AuditStore | MemoryManagerError::ExportArtifact) => {
+            GatewayMemoryExportResponse {
+                artifact: None,
+                remediation: Some(GatewayMemoryExportRemediation::Retry),
+            }
+        }
+        Err(_) => GatewayMemoryExportResponse {
+            artifact: None,
+            remediation: Some(GatewayMemoryExportRemediation::Reconfigure),
+        },
+    }
+}
+
+fn gateway_memory_export_response_from_report(
+    report: MemoryExportReport,
+    manager_returned_success: bool,
+) -> GatewayMemoryExportResponse {
+    let unsupported = report.providers.iter().any(|provider| {
+        matches!(
+            provider.error.as_ref(),
+            Some(hermes_core::MemoryProviderGovernanceError::Unsupported { .. })
+        )
+    });
+    let artifact = (manager_returned_success && report.is_complete())
+        .then(|| report.artifact)
+        .flatten()
+        .map(|artifact| GatewayMemoryExportArtifact {
+            artifact_ref: artifact.artifact_ref,
+            manifest_digest: artifact.manifest_digest,
+            record_count: artifact.record_count,
+            page_count: artifact.page_count,
+            provider_count: artifact.provider_count,
+        });
+    let remediation = artifact.is_none().then(|| {
+        if unsupported {
+            GatewayMemoryExportRemediation::Reconfigure
+        } else {
+            GatewayMemoryExportRemediation::Retry
+        }
+    });
+    GatewayMemoryExportResponse {
+        artifact,
+        remediation,
+    }
 }
 
 fn extract_last_assistant_reply(messages: &[hermes_core::Message]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find_map(|m| {
-            if m.role == MessageRole::Assistant {
-                m.content.clone()
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "(no assistant reply)".to_string())
+    hermes_gateway::platforms::helpers::extract_current_turn_gateway_reply(messages)
 }
 
 fn truncate_hook_tool_result(result: &str) -> String {
@@ -786,10 +924,33 @@ fn build_gateway_dm_manager(config: &hermes_config::GatewayConfig) -> DmManager 
     build_gateway_dm_manager_with_lookup(config, |key| std::env::var(key).ok())
 }
 
+fn build_gateway_dm_manager_with_grant_store(
+    config: &hermes_config::GatewayConfig,
+    grant_store_path: PathBuf,
+) -> Result<DmManager, AgentError> {
+    build_gateway_dm_manager_with_lookup_and_grant_store(
+        config,
+        |key| std::env::var(key).ok(),
+        Some(grant_store_path),
+    )
+}
+
 fn build_gateway_dm_manager_with_lookup<F>(
     config: &hermes_config::GatewayConfig,
-    mut lookup: F,
+    lookup: F,
 ) -> DmManager
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    build_gateway_dm_manager_with_lookup_and_grant_store(config, lookup, None)
+        .expect("an in-memory DM manager cannot fail to load")
+}
+
+fn build_gateway_dm_manager_with_lookup_and_grant_store<F>(
+    config: &hermes_config::GatewayConfig,
+    mut lookup: F,
+    grant_store_path: Option<PathBuf>,
+) -> Result<DmManager, AgentError>
 where
     F: FnMut(&str) -> Option<String>,
 {
@@ -798,7 +959,7 @@ where
         global_users.insert("*".to_string());
     }
     let has_global_allowlist = !global_users.is_empty();
-    let mut dm_manager = DmManager::new(
+    let mut dm_manager = DmManager::new_with_grant_store(
         global_users,
         HashSet::new(),
         if has_global_allowlist {
@@ -806,7 +967,9 @@ where
         } else {
             UnauthorizedDmBehavior::Pair
         },
-    );
+        grant_store_path,
+    )
+    .map_err(|error| AgentError::Config(format!("DM grant store: {error}")))?;
     let hermes_home_dir = config
         .home_dir
         .as_deref()
@@ -814,38 +977,38 @@ where
         .unwrap_or_else(hermes_home);
     for (platform, platform_cfg) in config.platforms.iter().filter(|(_, p)| p.enabled) {
         let platform = canonical_gateway_platform(platform);
-        let mut has_platform_allowlist = false;
+        let mut has_platform_dm_allowlist = false;
         for user in &platform_cfg.allowed_users {
             let trimmed = user.trim();
             if !trimmed.is_empty() {
-                has_platform_allowlist = true;
+                has_platform_dm_allowlist = true;
                 dm_manager.authorize_user_for_platform(&platform, trimmed.to_string());
             }
         }
         for admin in &platform_cfg.admin_users {
             let trimmed = admin.trim();
             if !trimmed.is_empty() {
-                has_platform_allowlist = true;
+                has_platform_dm_allowlist = true;
                 dm_manager.add_admin_for_platform(&platform, trimmed.to_string());
             }
         }
         for key in GATEWAY_CONFIG_DIRECT_USER_ALLOWLIST_EXTRA_KEYS {
             for user in extra_string_set(platform_cfg, key) {
-                has_platform_allowlist = true;
+                has_platform_dm_allowlist = true;
                 dm_manager.authorize_user_for_platform(&platform, user);
             }
         }
         if gateway_platform_config_allows_all_users(platform_cfg) {
-            has_platform_allowlist = true;
+            has_platform_dm_allowlist = true;
             dm_manager.authorize_user_for_platform(&platform, "*");
         }
         if let Some(env) = platform_gateway_auth_env(&platform) {
             for user in env_list_from_lookup(&mut lookup, env.allowed_users) {
-                has_platform_allowlist = true;
+                has_platform_dm_allowlist = true;
                 dm_manager.authorize_user_for_platform(&platform, user);
             }
             if env_truthy_from_lookup(&mut lookup, env.allow_all_users) {
-                has_platform_allowlist = true;
+                has_platform_dm_allowlist = true;
                 dm_manager.authorize_user_for_platform(&platform, "*");
             }
             if let Some(group_users_env) = env.group_allowed_users {
@@ -854,17 +1017,14 @@ where
                     env_list_from_lookup(&mut lookup, group_users_env),
                 );
                 for user in users {
-                    has_platform_allowlist = true;
                     dm_manager.authorize_group_user_for_platform(&platform, user);
                 }
                 for chat in chats {
-                    has_platform_allowlist = true;
                     dm_manager.authorize_group_chat_for_platform(&platform, chat);
                 }
             }
             if let Some(group_chats_env) = env.group_allowed_chats {
                 for chat in env_list_from_lookup(&mut lookup, group_chats_env) {
-                    has_platform_allowlist = true;
                     dm_manager.authorize_group_chat_for_platform(&platform, chat);
                 }
             }
@@ -876,16 +1036,13 @@ where
         let (group_users, legacy_group_chats) =
             split_group_authorization_values(&platform, config_group_values);
         for user in group_users {
-            has_platform_allowlist = true;
             dm_manager.authorize_group_user_for_platform(&platform, user);
         }
         for chat in legacy_group_chats {
-            has_platform_allowlist = true;
             dm_manager.authorize_group_chat_for_platform(&platform, chat);
         }
         for key in GATEWAY_CONFIG_GROUP_CHAT_ALLOWLIST_EXTRA_KEYS {
             for chat in extra_string_set(platform_cfg, key) {
-                has_platform_allowlist = true;
                 dm_manager.authorize_group_chat_for_platform(&platform, chat);
             }
         }
@@ -896,12 +1053,18 @@ where
             explicit_platform_unauthorized_dm_behavior(&platform, platform_cfg, &mut lookup)
         {
             dm_manager.set_platform_unauthorized_behavior(&platform, behavior);
-        } else if has_platform_allowlist {
+        } else if has_platform_dm_allowlist {
             dm_manager
                 .set_platform_unauthorized_behavior(&platform, UnauthorizedDmBehavior::Ignore);
         }
     }
-    dm_manager
+    Ok(dm_manager)
+}
+
+/// Durable DM grants belong to the CLI's canonical shared state root, never
+/// the runtime gateway config or an agent-home fallback.
+fn gateway_dm_grant_store_path(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli).join("dm-grants.json")
 }
 
 const GATEWAY_USER_ALLOWLIST_ENV_VARS: &[&str] = &[
@@ -1115,17 +1278,11 @@ where
             authorized_group_chats.extend(extra_string_set(platform_cfg, key));
         }
 
-        let group_mode = parse_group_access_mode(
-            platform_cfg,
-            !authorized_group_chats.is_empty()
-                || !allowed_users.is_empty()
-                || !admin_users.is_empty(),
-        );
-        let has_allowlist = !allowed_users.is_empty() || !admin_users.is_empty();
-        let slash_requires_allowlist = extra_bool_loose(platform_cfg, "slash_requires_allowlist")
-            .or_else(|| extra_bool_loose(platform_cfg, "require_allowlist_for_slash"))
-            .unwrap_or_else(|| platform == "discord" && has_allowlist);
-
+        let allowed_roles = if platform == "discord" {
+            extra_string_set(platform_cfg, "allowed_roles")
+        } else {
+            HashSet::new()
+        };
         let mut allowed_channels = extra_string_set(platform_cfg, "allowed_channels");
         if platform == "telegram" {
             allowed_channels.extend(extra_string_set(platform_cfg, "allowed_chats"));
@@ -1141,11 +1298,39 @@ where
             ignored_channels.extend(extra_string_set(platform_cfg, "ignored_threads"));
         }
 
+        let has_identity_allowlist =
+            !allowed_users.is_empty() || !admin_users.is_empty() || !allowed_roles.is_empty();
+        let group_mode = if platform == "discord" {
+            explicit_group_access_mode(platform_cfg).unwrap_or_else(|| {
+                // A configured channel allowlist is an explicit channel-only
+                // authorization policy. Otherwise Discord inbound must fail
+                // closed until an identity/group/open policy is configured.
+                if !has_identity_allowlist
+                    && !allowed_channels.is_empty()
+                    && authorized_group_chats.is_empty()
+                {
+                    GroupAccessMode::Open
+                } else {
+                    GroupAccessMode::Allowlist
+                }
+            })
+        } else {
+            parse_group_access_mode(
+                platform_cfg,
+                !authorized_group_chats.is_empty()
+                    || !allowed_users.is_empty()
+                    || !admin_users.is_empty(),
+            )
+        };
+        let slash_requires_allowlist = extra_bool_loose(platform_cfg, "slash_requires_allowlist")
+            .or_else(|| extra_bool_loose(platform_cfg, "require_allowlist_for_slash"))
+            .unwrap_or_else(|| platform == "discord" && has_identity_allowlist);
         policies.insert(
             platform.clone(),
             PlatformAccessPolicy {
                 allowed_users,
                 admin_users,
+                allowed_roles,
                 allowed_channels,
                 authorized_group_chats,
                 ignored_channels,

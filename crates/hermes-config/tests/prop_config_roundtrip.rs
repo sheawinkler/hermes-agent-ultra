@@ -7,10 +7,10 @@
 use std::collections::HashMap;
 
 use hermes_config::{
-    AgentLoopBehaviorConfig, ApprovalConfig, DailyReset, GatewayConfig, IdleReset, PlatformConfig,
-    ProfileConfig, SecurityConfig, SessionConfig, SessionResetPolicy, SessionsMaintenanceConfig,
-    SkillsSettings, SmartModelRoutingConfig, StreamingConfig, TerminalConfig, ToolOutputConfig,
-    ToolsSettings, UnauthorizedDmBehavior,
+    AgentLoopBehaviorConfig, ApprovalConfig, DailyReset, ExecutionModeConfigValue, GatewayConfig,
+    IdleReset, PlatformConfig, ProfileConfig, SecurityConfig, SessionConfig, SessionResetPolicy,
+    SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig, StreamingConfig,
+    TerminalConfig, ToolOutputConfig, ToolsSettings, UnauthorizedDmBehavior,
 };
 use hermes_core::BudgetConfig;
 use serde::{de::DeserializeOwned, Serialize};
@@ -155,10 +155,12 @@ fn gateway_config(
         model_switch: Default::default(),
         personality: personality.map(str::to_string),
         max_turns,
+        execution_mode: ExecutionModeConfigValue::Absent,
         system_prompt: None,
         prefill_messages_file: None,
         tools: vec!["bash".into(), "read".into()],
         budget: BudgetConfig::default(),
+        resource_limits_enabled: false,
         tool_output: ToolOutputConfig::default(),
         platforms: HashMap::new(),
         platform_toolsets: hermes_config::config::default_platform_toolsets(),

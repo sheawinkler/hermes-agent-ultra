@@ -1,14 +1,20 @@
-//! Honcho dialectic user modeling plugin.
+//! Subject-bound compatibility wrapper for the Honcho dialectic API.
 //!
-//! Implements the `MemoryProviderPlugin` trait for Honcho, providing
-//! dialectic user modeling via the Honcho API.
-//!
-//! This module is behind the `honcho` feature flag.
+//! The registered Honcho provider lives in `memory_plugins::honcho`; this
+//! public wrapper remains available for direct SDK use.  It never accepts a
+//! caller-selected user, peer, or session identifier: all remote paths and
+//! metadata derive from the authenticated `MemorySubjectStorageKey` bound at
+//! initialization.
 
+use std::sync::Arc;
+
+use hermes_core::{AgentError, MemorySubject, MemorySubjectStorageKey, MemoryVisibility};
+use hermes_intelligence::redact_sensitive_text;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::memory_manager::MemoryProviderPlugin;
-use hermes_core::AgentError;
 
 /// Honcho API base URL.
 const DEFAULT_HONCHO_BASE_URL: &str = "https://api.honcho.dev/v1";
@@ -35,96 +41,186 @@ fn default_true() -> bool {
     true
 }
 
+fn visibility_label(visibility: MemoryVisibility) -> &'static str {
+    match visibility {
+        MemoryVisibility::Private => "private",
+        MemoryVisibility::Team => "team",
+    }
+}
+
+fn path_segment(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+/// Remote metadata containing only the opaque subject partition, never raw
+/// authenticated identifiers.
+fn subject_scope(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> serde_json::Value {
+    let key = filter.as_str();
+    json!({
+        "subject_key": key,
+        "tenant_id": key,
+        "principal_id": key,
+        "team_id": subject.team_id().map(|_| key),
+        "session_id": key,
+        "surface": subject.surface().as_str(),
+        "visibility": visibility_label(subject.visibility()),
+    })
+}
+
+fn subject_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
+    let key = filter.as_str().to_string();
+    vec![
+        ("subject_key", key.clone()),
+        ("tenant_id", key.clone()),
+        ("principal_id", key.clone()),
+        (
+            "team_id",
+            subject.team_id().map(|_| key.clone()).unwrap_or_default(),
+        ),
+        ("session_id", key),
+        ("surface", subject.surface().as_str().to_string()),
+        (
+            "visibility",
+            visibility_label(subject.visibility()).to_string(),
+        ),
+    ]
+}
+
 /// Honcho dialectic user modeling provider.
 ///
-/// Connects to the Honcho API for:
-/// - Syncing conversation turns for user modeling
-/// - Prefetching user context (dialectic insights)
-/// - Storing and retrieving user metamemory
+/// Direct SDK methods require the same subject/filter pair as the plugin trait.
+/// A caller cannot supply a free user or session id.
+#[derive(Clone)]
 pub struct HonchoProvider {
     config: HonchoConfig,
     client: reqwest::Client,
     base_url: String,
-    /// Cached user context from last prefetch.
-    cached_context: tokio::sync::RwLock<Option<String>>,
+    /// Cached context is accessible only through a matching bound subject.
+    cached_context: Arc<RwLock<Option<String>>>,
+    bound_subject: Arc<Mutex<Option<MemorySubject>>>,
+    bound_filter: Arc<Mutex<Option<MemorySubjectStorageKey>>>,
 }
 
 impl HonchoProvider {
-    /// Create a new Honcho provider with the given configuration.
+    /// Create an unbound provider. Call `MemoryProviderPlugin::initialize`
+    /// with the authenticated subject before making a request.
     pub fn new(config: HonchoConfig) -> Self {
         let base_url = config
             .base_url
             .clone()
-            .unwrap_or_else(|| DEFAULT_HONCHO_BASE_URL.to_string());
+            .unwrap_or_else(|| DEFAULT_HONCHO_BASE_URL.to_string())
+            .trim_end_matches('/')
+            .to_string();
 
         Self {
             config,
             client: reqwest::Client::new(),
             base_url,
-            cached_context: tokio::sync::RwLock::new(None),
+            cached_context: Arc::new(RwLock::new(None)),
+            bound_subject: Arc::new(Mutex::new(None)),
+            bound_filter: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Sync a conversation turn to Honcho for user modeling.
-    pub async fn sync_turn(
+    fn require_bound(
         &self,
-        user_id: &str,
-        session_id: &str,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<(), AgentError> {
+        if self.bound_subject.lock().as_ref() != Some(subject)
+            || self.bound_filter.lock().as_ref() != Some(filter)
+        {
+            return Err(AgentError::Io(
+                "Honcho request subject does not match initialized subject".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn user_session_url(&self, filter: &MemorySubjectStorageKey) -> String {
+        format!(
+            "{}/apps/{}/users/{}/sessions/{}/messages",
+            self.base_url,
+            path_segment(&self.config.app_id),
+            path_segment(filter.as_str()),
+            path_segment(filter.as_str()),
+        )
+    }
+
+    fn metamemories_url(&self, filter: &MemorySubjectStorageKey) -> String {
+        format!(
+            "{}/apps/{}/users/{}/metamemories",
+            self.base_url,
+            path_segment(&self.config.app_id),
+            path_segment(filter.as_str()),
+        )
+    }
+
+    /// Sync one turn to Honcho in the authenticated subject partition.
+    pub async fn sync_message(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
         role: &str,
         content: &str,
     ) -> Result<(), AgentError> {
-        if !self.config.auto_sync {
+        self.require_bound(subject, filter)?;
+        if !self.config.auto_sync || content.trim().is_empty() {
             return Ok(());
         }
 
-        let url = format!(
-            "{}/apps/{}/users/{}/sessions/{}/messages",
-            self.base_url, self.config.app_id, user_id, session_id
-        );
-
-        let body = serde_json::json!({
+        let body = json!({
             "role": role,
-            "content": content,
+            "content": redact_sensitive_text(content.trim()),
+            "subject": subject_scope(subject, filter),
         });
-
-        let resp = self
+        let response = self
             .client
-            .post(&url)
+            .post(self.user_session_url(filter))
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .json(&body)
             .send()
             .await
-            .map_err(|e| AgentError::Io(format!("Honcho sync failed: {}", e)))?;
+            .map_err(|error| AgentError::Io(format!("Honcho sync failed: {error}")))?;
 
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            tracing::warn!("Honcho sync error: {}", text);
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(AgentError::Io(format!(
+                "Honcho sync returned {}",
+                response.status()
+            )))
         }
-
-        Ok(())
     }
 
-    /// Prefetch user context (dialectic insights) from Honcho.
-    pub async fn prefetch_context(&self, user_id: &str) -> Result<Option<String>, AgentError> {
+    /// Prefetch subject-scoped dialectic context from Honcho.
+    pub async fn prefetch_context(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<Option<String>, AgentError> {
+        self.require_bound(subject, filter)?;
         if !self.config.prefetch {
             return Ok(None);
         }
 
-        let url = format!(
-            "{}/apps/{}/users/{}/metamemories",
-            self.base_url, self.config.app_id, user_id
-        );
-
-        let resp = self
+        let response = self
             .client
-            .get(&url)
+            .get(self.metamemories_url(filter))
+            .query(&subject_query(subject, filter))
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .send()
             .await
-            .map_err(|e| AgentError::Io(format!("Honcho prefetch failed: {}", e)))?;
+            .map_err(|error| AgentError::Io(format!("Honcho prefetch failed: {error}")))?;
 
-        if !resp.status().is_success() {
-            return Ok(None);
+        if !response.status().is_success() {
+            return Err(AgentError::Io(format!(
+                "Honcho prefetch returned {}",
+                response.status()
+            )));
         }
 
         #[derive(Deserialize)]
@@ -133,22 +229,32 @@ impl HonchoProvider {
             content: Option<String>,
         }
 
-        let data: MetamemoryResponse = resp
+        let data: MetamemoryResponse = response
             .json()
             .await
-            .map_err(|e| AgentError::Io(format!("Honcho parse failed: {}", e)))?;
-
-        if let Some(ref content) = data.content {
-            let mut cache = self.cached_context.write().await;
-            *cache = Some(content.clone());
+            .map_err(|error| AgentError::Io(format!("Honcho parse failed: {error}")))?;
+        if let Some(content) = data.content.as_deref() {
+            *self.cached_context.write() = Some(redact_sensitive_text(content));
         }
-
-        Ok(data.content)
+        Ok(data.content.map(|content| redact_sensitive_text(&content)))
     }
 
-    /// Get the cached user context (from last prefetch).
-    pub async fn get_cached_context(&self) -> Option<String> {
-        self.cached_context.read().await.clone()
+    /// Get cached context only when the caller presents the bound subject.
+    pub fn cached_context(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+    ) -> Result<Option<String>, AgentError> {
+        self.require_bound(subject, filter)?;
+        Ok(self.cached_context.read().clone())
+    }
+
+    fn spawn_background<F>(&self, task: F)
+    where
+        F: FnOnce(HonchoProvider) + Send + 'static,
+    {
+        let provider = self.clone();
+        std::thread::spawn(move || task(provider));
     }
 }
 
@@ -157,64 +263,188 @@ impl MemoryProviderPlugin for HonchoProvider {
         "honcho"
     }
 
-    fn prefetch(&self, query: &str, session_id: &str) -> String {
-        let _ = (query, session_id);
-        // Synchronous prefetch returns cached context if available.
-        // Actual async prefetch should be called separately via prefetch_context().
-        String::new()
+    fn is_available(&self) -> bool {
+        !self.config.api_key.trim().is_empty()
     }
 
-    fn sync_turn(&self, user_content: &str, assistant_content: &str, session_id: &str) {
-        let _ = (user_content, assistant_content, session_id);
-        // Synchronous sync is a no-op; use the async sync_turn method directly.
+    fn initialize(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _hermes_home: &str,
+    ) -> Result<(), String> {
+        *self.bound_subject.lock() = Some(subject.clone());
+        *self.bound_filter.lock() = Some(filter.clone());
+        *self.cached_context.write() = None;
+        Ok(())
+    }
+
+    fn system_prompt_block(&self) -> String {
+        if self.bound_filter.lock().is_some() {
+            "# Honcho Memory\nActive only in the authenticated memory subject partition."
+                .to_string()
+        } else {
+            String::new()
+        }
+    }
+
+    fn prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _query: &str,
+    ) -> String {
+        self.cached_context(subject, filter)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    fn queue_prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        _query: &str,
+    ) {
+        if self.require_bound(subject, filter).is_err() || !self.config.prefetch {
+            return;
+        }
+        let subject = subject.clone();
+        let filter = filter.clone();
+        self.spawn_background(move |provider| {
+            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!(error = %redact_sensitive_text(&error.to_string()), "unable to start Honcho prefetch runtime");
+                    return;
+                }
+            };
+            if let Err(error) = runtime.block_on(provider.prefetch_context(&subject, &filter)) {
+                tracing::warn!(error = %redact_sensitive_text(&error.to_string()), "subject-scoped Honcho prefetch failed");
+            }
+        });
+    }
+
+    fn sync_turn(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        user_content: &str,
+        assistant_content: &str,
+    ) {
+        if self.require_bound(subject, filter).is_err() || !self.config.auto_sync {
+            return;
+        }
+        let user = redact_sensitive_text(user_content.trim());
+        let assistant = redact_sensitive_text(assistant_content.trim());
+        if user.is_empty() || assistant.is_empty() {
+            return;
+        }
+        let subject = subject.clone();
+        let filter = filter.clone();
+        self.spawn_background(move |provider| {
+            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!(error = %redact_sensitive_text(&error.to_string()), "unable to start Honcho sync runtime");
+                    return;
+                }
+            };
+            for (role, content) in [("user", user), ("assistant", assistant)] {
+                if let Err(error) = runtime.block_on(provider.sync_message(&subject, &filter, role, &content)) {
+                    tracing::warn!(error = %redact_sensitive_text(&error.to_string()), "subject-scoped Honcho turn sync failed");
+                    break;
+                }
+            }
+        });
+    }
+
+    fn shutdown(&self) {
+        *self.bound_subject.lock() = None;
+        *self.bound_filter.lock() = None;
+        *self.cached_context.write() = None;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::{
+        MemoryPrincipalId, MemorySessionId, MemorySubjectDerivationKey, MemorySurface,
+        MemoryTenantId,
+    };
+
+    fn subject(principal: &str) -> (MemorySubject, MemorySubjectStorageKey) {
+        let subject = MemorySubject::new(
+            MemoryTenantId::new("tenant-a").expect("tenant"),
+            MemoryPrincipalId::new(principal).expect("principal"),
+            None,
+            MemorySessionId::new("session-a").expect("session"),
+            MemorySurface::Gateway,
+            MemoryVisibility::Private,
+        )
+        .expect("subject");
+        let filter = subject.storage_key(&MemorySubjectDerivationKey::from_bytes([11; 32]));
+        (subject, filter)
+    }
+
+    fn config() -> HonchoConfig {
+        HonchoConfig {
+            api_key: "test-key".to_string(),
+            app_id: "test-app".to_string(),
+            base_url: None,
+            auto_sync: true,
+            prefetch: true,
+        }
+    }
 
     #[test]
-    fn test_honcho_config_defaults() {
+    fn honcho_config_defaults() {
         let config: HonchoConfig = serde_json::from_str(
             r#"{
             "api_key": "test-key",
             "app_id": "test-app"
         }"#,
         )
-        .unwrap();
-
+        .expect("config");
         assert!(config.auto_sync);
         assert!(config.prefetch);
         assert!(config.base_url.is_none());
     }
 
     #[test]
-    fn test_honcho_provider_creation() {
-        let config = HonchoConfig {
-            api_key: "test-key".to_string(),
-            app_id: "test-app".to_string(),
-            base_url: None,
-            auto_sync: true,
-            prefetch: true,
-        };
+    fn initialization_binds_the_opaque_subject_partition() {
+        let (alice, alice_filter) = subject("alice");
+        let (bob, bob_filter) = subject("bob");
+        let provider = HonchoProvider::new(config());
+        provider
+            .initialize(&alice, &alice_filter, "/unused")
+            .expect("initialize");
 
-        let provider = HonchoProvider::new(config);
-        assert_eq!(provider.base_url, DEFAULT_HONCHO_BASE_URL);
-        assert_eq!(provider.name(), "honcho");
+        assert!(provider
+            .cached_context(&alice, &alice_filter)
+            .expect("alice")
+            .is_none());
+        assert!(provider.cached_context(&bob, &bob_filter).is_err());
+        assert_eq!(provider.prefetch(&bob, &alice_filter, "ignored"), "");
+        assert_ne!(alice_filter, bob_filter);
     }
 
     #[test]
-    fn test_honcho_custom_base_url() {
-        let config = HonchoConfig {
-            api_key: "key".to_string(),
-            app_id: "app".to_string(),
-            base_url: Some("https://custom.honcho.dev".to_string()),
-            auto_sync: false,
-            prefetch: false,
-        };
+    fn subject_scope_never_contains_raw_authenticated_ids() {
+        let (alice, filter) = subject("alice");
+        let scope = subject_scope(&alice, &filter).to_string();
+        assert!(scope.contains(filter.as_str()));
+        assert!(!scope.contains("alice"));
+        assert!(!scope.contains("tenant-a"));
+    }
 
-        let provider = HonchoProvider::new(config);
+    #[test]
+    fn custom_base_url_is_normalized() {
+        let provider = HonchoProvider::new(HonchoConfig {
+            base_url: Some("https://custom.honcho.dev/".to_string()),
+            ..config()
+        });
         assert_eq!(provider.base_url, "https://custom.honcho.dev");
     }
 }

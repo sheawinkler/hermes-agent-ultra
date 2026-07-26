@@ -48,8 +48,8 @@ A local override is resolved when the workspace passes without the override:
 
 ```bash
 cargo audit --deny warnings
-CARGO_TARGET_DIR=/Volumes/wd_black/cargo-targets cargo check --all-targets --all-features
-CARGO_TARGET_DIR=/Volumes/wd_black/cargo-targets cargo test --workspace --all-features --no-fail-fast -j 1
+CARGO_TARGET_DIR="${TMPDIR:-/tmp}/hermes-cargo-targets" cargo check --all-targets --all-features
+CARGO_TARGET_DIR="${TMPDIR:-/tmp}/hermes-cargo-targets" cargo test --workspace --all-features --no-fail-fast -j 1
 ```
 
 If those pass, delete the matching crate directory and patch file in this folder.

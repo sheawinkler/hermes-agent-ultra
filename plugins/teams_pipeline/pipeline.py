@@ -62,6 +62,13 @@ class TeamsPipelineRetryableError(TeamsPipelineError):
 class TeamsPipelineSinkError(TeamsPipelineError):
     """Raised when an output sink fails."""
 
+class TeamsPipelineSinkNoEffectError(TeamsPipelineSinkError):
+    """Raised only when a sink conclusively made no external effect."""
+
+    conclusive_no_effect = True
+
+
+
 
 class TeamsPipelineArtifactNotFoundError(TeamsPipelineRetryableError):
     """Raised when meeting artifacts are not yet available."""
@@ -121,12 +128,12 @@ class NotionWriter:
         existing_record: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         if not self.api_key:
-            raise TeamsPipelineSinkError("NOTION_API_KEY is not configured.")
+            raise TeamsPipelineSinkNoEffectError("NOTION_API_KEY is not configured.")
 
         database_id = str(config.get("database_id") or config.get("databaseId") or "").strip()
         page_id = (existing_record or {}).get("page_id")
         if not database_id and not page_id:
-            raise TeamsPipelineSinkError("Notion sink requires database_id or an existing page_id.")
+            raise TeamsPipelineSinkNoEffectError("Notion sink requires database_id or an existing page_id.")
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -217,7 +224,7 @@ class LinearWriter:
         existing_record: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         if not self.api_key:
-            raise TeamsPipelineSinkError("LINEAR_API_KEY is not configured.")
+            raise TeamsPipelineSinkNoEffectError("LINEAR_API_KEY is not configured.")
 
         headers = {"Authorization": self.api_key, "Content-Type": "application/json"}
         team_id = str(config.get("team_id") or config.get("teamId") or "").strip()
@@ -243,7 +250,9 @@ class LinearWriter:
                 )
             else:
                 if not team_id:
-                    raise TeamsPipelineSinkError("Linear sink requires team_id when creating a new issue.")
+                    raise TeamsPipelineSinkNoEffectError(
+                        "Linear sink requires team_id when creating a new issue."
+                    )
                 response = await client.post(
                     self.API_URL,
                     headers=headers,
@@ -293,37 +302,46 @@ class TeamsMeetingPipeline:
         self.teams_sender = teams_sender
 
     def create_job_from_notification(self, notification: dict[str, Any]) -> TeamsMeetingPipelineJob:
-        event_id = TeamsPipelineStore.build_notification_receipt_key(notification)
-        self.store.record_notification_receipt(event_id, notification)
+        identity = TeamsPipelineStore.normalize_notification_identity(notification)
+        event_id = TeamsPipelineStore.build_notification_receipt_key_from_identity(identity)
+        receipt_recorded = self.store.record_notification_receipt(
+            event_id, {"notification_identity": identity}
+        )
         existing_job = self._find_job_by_dedupe_key(event_id)
         if existing_job is not None:
             return existing_job
-        resource_data = notification.get("resourceData") or {}
-        meeting_id = (
-            resource_data.get("id")
-            or notification.get("meetingId")
-            or _extract_meeting_id_from_resource(str(notification.get("resource") or ""))
-            or notification.get("resource")
-            or event_id
+        if not receipt_recorded:
+            receipt_job = self._job_from_notification_receipt(
+                event_id, self.store.get_notification_receipt(event_id)
+            )
+            if receipt_job is not None:
+                return receipt_job
+
+        resource_data = notification.get("resourceData") or notification.get("resource_data") or {}
+        call_record_id = (
+            identity["artifact_id"]
+            if identity["artifact_type"] == "call_record"
+            else str(resource_data.get("callRecordId") or resource_data.get("call_record_id") or "").strip()
         )
+        metadata: dict[str, Any] = {"notification_identity": identity}
+        if call_record_id:
+            metadata["call_record_id"] = call_record_id
         job = TeamsMeetingPipelineJob(
             job_id=f"teams-job-{uuid.uuid4().hex[:12]}",
             event_id=event_id,
-            source_event_type=str(notification.get("changeType") or "graph.notification"),
+            source_event_type=identity["change_type"],
             dedupe_key=event_id,
             status="received",
             meeting_ref=TeamsMeetingRef(
-                meeting_id=str(meeting_id),
-                tenant_id=resource_data.get("tenantId") or notification.get("tenantId"),
-                metadata={
-                    "notification": dict(notification),
-                    "join_web_url": resource_data.get("joinWebUrl"),
-                    "call_record_id": resource_data.get("callRecordId") or notification.get("callRecordId"),
-                },
+                meeting_id=identity["meeting_id"],
+                tenant_id=identity["tenant_id"] or None,
+                metadata=metadata,
             ),
         )
-        self.store.upsert_job(job.job_id, job.to_dict())
-        return job
+        stored = self.store.upsert_job(job.job_id, job.to_dict())
+        persisted = TeamsMeetingPipelineJob.from_dict(stored)
+        self._record_job_receipt(persisted)
+        return persisted
 
     async def run_notification(self, notification: dict[str, Any]) -> TeamsMeetingPipelineJob:
         job = self.create_job_from_notification(notification)
@@ -341,7 +359,7 @@ class TeamsMeetingPipeline:
 
         try:
             job = self._persist_job(job, status="resolving_meeting")
-            notification = meeting_ref.metadata.get("notification") if isinstance(meeting_ref.metadata, dict) else {}
+            call_record_id = (meeting_ref.metadata or {}).get("call_record_id")
             resolved_meeting = await resolve_meeting_reference(
                 self.graph_client,
                 meeting_id=meeting_ref.meeting_id,
@@ -385,7 +403,6 @@ class TeamsMeetingPipeline:
             else:
                 job = self._persist_job(job, selected_artifact_strategy="transcript_first")
 
-            call_record_id = notification.get("callRecordId") or (meeting_ref.metadata or {}).get("call_record_id")
             call_record = await enrich_meeting_with_call_record(
                 self.graph_client,
                 resolved_meeting,
@@ -443,11 +460,72 @@ class TeamsMeetingPipeline:
             return TeamsMeetingPipelineJob.from_dict(payload)
         return None
 
+    @staticmethod
+    def _job_from_notification_receipt(
+        event_id: str, receipt: dict[str, Any] | None
+    ) -> TeamsMeetingPipelineJob | None:
+        if not isinstance(receipt, dict):
+            return None
+        status = str(receipt.get("status") or "").strip()
+        job_id = str(receipt.get("job_id") or "").strip()
+        meeting_id = str(receipt.get("meeting_id") or "").strip()
+        source_event_type = str(
+            receipt.get("source_event_type") or receipt.get("change_type") or ""
+        ).strip()
+        if status not in TERMINAL_PIPELINE_STATES or not job_id or not meeting_id or not source_event_type:
+            return None
+        metadata = {
+            "notification_identity": {
+                key: str(receipt.get(key) or "")
+                for key in (
+                    "tenant_id",
+                    "subscription_id",
+                    "change_type",
+                    "resource",
+                    "meeting_id",
+                    "artifact_type",
+                    "artifact_id",
+                )
+            }
+        }
+        if receipt.get("artifact_type") == "call_record" and receipt.get("artifact_id"):
+            metadata["call_record_id"] = str(receipt["artifact_id"])
+        return TeamsMeetingPipelineJob(
+            job_id=job_id,
+            event_id=event_id,
+            source_event_type=source_event_type,
+            dedupe_key=event_id,
+            status=status,
+            meeting_ref=TeamsMeetingRef(
+                meeting_id=meeting_id,
+                tenant_id=str(receipt.get("tenant_id") or "").strip() or None,
+                metadata=metadata,
+            ),
+        )
+
+    def _record_job_receipt(self, job: TeamsMeetingPipelineJob) -> None:
+        meeting_ref = job.meeting_ref
+        if meeting_ref is None:
+            return
+        identity = (meeting_ref.metadata or {}).get("notification_identity") or {}
+        self.store.update_notification_receipt(
+            job.event_id,
+            job_id=job.job_id,
+            status=job.status,
+            source_event_type=job.source_event_type,
+            meeting_id=meeting_ref.meeting_id,
+            tenant_id=meeting_ref.tenant_id,
+            artifact_type=identity.get("artifact_type") if isinstance(identity, dict) else None,
+            artifact_id=identity.get("artifact_id") if isinstance(identity, dict) else None,
+        )
+
     def _persist_job(self, job: TeamsMeetingPipelineJob, **updates: Any) -> TeamsMeetingPipelineJob:
         payload = job.to_dict()
         payload.update(updates)
         stored = self.store.upsert_job(job.job_id, payload)
-        return TeamsMeetingPipelineJob.from_dict(stored)
+        persisted = TeamsMeetingPipelineJob.from_dict(stored)
+        self._record_job_receipt(persisted)
+        return persisted
 
     async def _transcribe_recording(
         self,
@@ -559,27 +637,116 @@ class TeamsMeetingPipeline:
     async def _write_sinks(self, job: TeamsMeetingPipelineJob, payload: TeamsMeetingSummaryPayload) -> None:
         if self.config.notion and self.config.notion.get("enabled") and self.notion_writer:
             job = self._persist_job(job, status="writing_notion")
-            sink_key = f"notion:{payload.meeting_ref.meeting_id}"
-            existing = self.store.get_sink_record(sink_key)
-            result = await self.notion_writer.write_summary(payload, self.config.notion, existing)
-            self.store.upsert_sink_record(sink_key, result)
+            await self._write_sink_once(
+                job,
+                "notion",
+                lambda existing: self.notion_writer.write_summary(payload, self.config.notion or {}, existing),
+            )
 
         if self.config.linear and self.config.linear.get("enabled") and self.linear_writer:
             job = self._persist_job(job, status="writing_linear")
-            sink_key = f"linear:{payload.meeting_ref.meeting_id}"
-            existing = self.store.get_sink_record(sink_key)
-            result = await self.linear_writer.write_summary(payload, self.config.linear, existing)
-            self.store.upsert_sink_record(sink_key, result)
+            await self._write_sink_once(
+                job,
+                "linear",
+                lambda existing: self.linear_writer.write_summary(payload, self.config.linear or {}, existing),
+            )
 
         if self.config.teams_delivery and self.config.teams_delivery.get("enabled") and self.teams_sender:
             job = self._persist_job(job, status="sending_teams")
-            sink_key = f"teams:{payload.meeting_ref.meeting_id}"
-            existing = self.store.get_sink_record(sink_key)
-            if hasattr(self.teams_sender, "write_summary"):
-                result = await self.teams_sender.write_summary(payload, self.config.teams_delivery, existing)
-            else:
-                result = await self.teams_sender(payload, self.config.teams_delivery, existing)
-            self.store.upsert_sink_record(sink_key, result)
+
+            async def write_teams(existing: Optional[dict[str, Any]]) -> dict[str, Any]:
+                if hasattr(self.teams_sender, "write_summary"):
+                    return await self.teams_sender.write_summary(
+                        payload, self.config.teams_delivery or {}, existing
+                    )
+                return await self.teams_sender(payload, self.config.teams_delivery or {}, existing)
+
+            await self._write_sink_once(job, "teams", write_teams)
+
+    @staticmethod
+    def _is_conclusive_no_effect_error(exc: Exception) -> bool:
+        return isinstance(exc, TeamsPipelineSinkNoEffectError) or bool(
+            getattr(exc, "conclusive_no_effect", False)
+        )
+
+    @staticmethod
+    def _build_sink_effect_key(sink_name: str, job: TeamsMeetingPipelineJob) -> str:
+        meeting_ref = job.meeting_ref
+        if meeting_ref is None:
+            raise TeamsPipelineSinkError("Cannot write a sink without a meeting reference.")
+        scope = {
+            "tenant_id": str(meeting_ref.tenant_id or "").strip().lower(),
+            "meeting_id": meeting_ref.meeting_id.strip(),
+        }
+        return f"{sink_name}:{json.dumps(scope, sort_keys=True, separators=(',', ':'))}"
+
+    async def _write_sink_once(
+        self,
+        job: TeamsMeetingPipelineJob,
+        sink_name: str,
+        write: Callable[[Optional[dict[str, Any]]], Awaitable[dict[str, Any]]],
+    ) -> None:
+        sink_key = self._build_sink_effect_key(sink_name, job)
+        reservation = self.store.reserve_effect_started(
+            sink_key,
+            job_id=job.job_id,
+            event_id=job.event_id,
+            sink=sink_name,
+        )
+        existing = reservation.record
+        if reservation.blocked:
+            raise TeamsPipelineSinkError(
+                f"{sink_name} effect is actively locked by another worker; refusing a duplicate."
+            )
+        if not reservation.reserved:
+            effect_status = reservation.effect_status
+            if effect_status in {"", "completed"}:
+                return
+            if effect_status == "outcome_unknown":
+                raise TeamsPipelineSinkError(
+                    f"{sink_name} outcome is unknown; refusing an unverified duplicate."
+                )
+            raise TeamsPipelineSinkError(
+                f"{sink_name} effect state {effect_status or 'unknown'} blocks a duplicate."
+            )
+
+        try:
+            try:
+                result = await write(existing)
+                if not isinstance(result, dict):
+                    raise TeamsPipelineSinkError(f"{sink_name} writer returned a non-object receipt.")
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                effect_status = (
+                    "effect_not_started"
+                    if isinstance(exc, Exception) and self._is_conclusive_no_effect_error(exc)
+                    else "outcome_unknown"
+                )
+                self.store.upsert_sink_record(
+                    sink_key,
+                    {
+                        "effect_status": effect_status,
+                        "job_id": job.job_id,
+                        "event_id": job.event_id,
+                        "sink": sink_name,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise
+
+            self.store.upsert_sink_record(
+                sink_key,
+                {
+                    **result,
+                    "effect_status": "completed",
+                    "job_id": job.job_id,
+                    "event_id": job.event_id,
+                    "sink": sink_name,
+                },
+            )
+        finally:
+            reservation.release()
 
 
 def _collect_call_metrics(artifacts: list[MeetingArtifact]) -> dict[str, Any]:
@@ -603,17 +770,6 @@ def _collect_participants(meeting_ref: TeamsMeetingRef) -> list[str]:
     return result
 
 
-def _extract_meeting_id_from_resource(resource: str) -> str | None:
-    if not resource:
-        return None
-    parts = [part for part in resource.split("/") if part]
-    if not parts:
-        return None
-    if "onlineMeetings" in parts:
-        index = parts.index("onlineMeetings")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    return parts[-1]
 
 
 def _build_summary_prompt(

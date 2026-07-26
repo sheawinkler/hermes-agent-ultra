@@ -22,6 +22,9 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::BasePlatformAdapter;
+mod filters;
+
+use filters::{RoutePayloadDecision, WebhookRouteProcessor};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -40,6 +43,8 @@ pub struct WebhookConfig {
     pub rate_limit: u32,
     #[serde(default = "default_webhook_max_body_bytes")]
     pub max_body_bytes: usize,
+    #[serde(default = "filters::default_script_timeout_seconds")]
+    pub script_timeout_seconds: u64,
     #[serde(default)]
     pub routes: BTreeMap<String, WebhookRouteConfig>,
 }
@@ -66,6 +71,10 @@ pub struct WebhookRouteConfig {
     pub idempotency_header: Option<String>,
     #[serde(default)]
     pub rate_limit: Option<u32>,
+    #[serde(default)]
+    pub filters: serde_json::Value,
+    #[serde(default)]
+    pub script: Option<String>,
 }
 
 const INSECURE_NO_AUTH: &str = "INSECURE_NO_AUTH";
@@ -597,6 +606,35 @@ async fn handle_route_payload(
         write_json_response(writer, 202, r#"{"status":"ignored"}"#).await?;
         return Ok(());
     }
+    let processor = WebhookRouteProcessor::for_config(config.script_timeout_seconds);
+    let payload = match processor
+        .apply(
+            &route.filters,
+            route.script.as_deref(),
+            payload,
+            &event_type,
+            headers,
+        )
+        .await
+    {
+        RoutePayloadDecision::Continue(payload) => payload,
+        RoutePayloadDecision::IgnoredFilter => {
+            let body = format!(
+                r#"{{"status":"ignored","reason":"filter","route":{}}}"#,
+                serde_json::to_string(route_name).unwrap_or_else(|_| r#""""#.to_string())
+            );
+            write_json_response(writer, 200, &body).await?;
+            return Ok(());
+        }
+        RoutePayloadDecision::IgnoredScript => {
+            let body = format!(
+                r#"{{"status":"ignored","reason":"script","route":{}}}"#,
+                serde_json::to_string(route_name).unwrap_or_else(|_| r#""""#.to_string())
+            );
+            write_json_response(writer, 200, &body).await?;
+            return Ok(());
+        }
+    };
 
     if let Some(delivery_id) = delivery_id(headers, route) {
         let key = format!("{route_name}:{delivery_id}");
@@ -946,6 +984,7 @@ mod tests {
             secret: INSECURE_NO_AUTH.to_string(),
             rate_limit: default_webhook_rate_limit(),
             max_body_bytes: default_webhook_max_body_bytes(),
+            script_timeout_seconds: filters::DEFAULT_SCRIPT_TIMEOUT_SECONDS,
             routes: BTreeMap::new(),
         };
         let err = WebhookAdapter::validate_auth_safety(&config).unwrap_err();
@@ -962,6 +1001,7 @@ mod tests {
             secret: INSECURE_NO_AUTH.to_string(),
             rate_limit: default_webhook_rate_limit(),
             max_body_bytes: default_webhook_max_body_bytes(),
+            script_timeout_seconds: filters::DEFAULT_SCRIPT_TIMEOUT_SECONDS,
             routes: BTreeMap::new(),
         };
         WebhookAdapter::validate_auth_safety(&config).unwrap();
@@ -1062,6 +1102,7 @@ mod tests {
             secret: "global-secret".into(),
             rate_limit: 30,
             max_body_bytes: default_webhook_max_body_bytes(),
+            script_timeout_seconds: filters::DEFAULT_SCRIPT_TIMEOUT_SECONDS,
             routes,
         };
         let body = br#"{"pull_request":{"title":"Rust parity"},"chat_id":"chat-1"}"#;

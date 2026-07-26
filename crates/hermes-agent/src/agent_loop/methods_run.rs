@@ -10,47 +10,58 @@ impl AgentLoop {
         messages: Vec<Message>,
         tools: Option<Vec<ToolSchema>>,
     ) -> Result<AgentResult, AgentError> {
+        let preflight = self.validate_governed_callbacks();
+        let prepared = if preflight.is_ok() {
+            self.prepare_run_input(messages, tools).await?
+        } else {
+            self.prepare_policy_blocked_run_input(messages)
+        };
+        let active_run = self.start_active_run_record(&prepared)?;
+        let mut finalizer = RunFinalizationGuard::new(active_run.clone());
+        let result = match preflight {
+            Ok(()) => {
+                tokio::select! {
+                    biased;
+                    () = self.interrupt.fatal_cancelled() => Err(
+                        self.interrupt.take_fatal_error().unwrap_or(
+                            AgentError::Interrupted { message: None },
+                        ),
+                    ),
+                    result = std::panic::AssertUnwindSafe(
+                        self.run_inner(prepared, Some(active_run.clone())),
+                    ).catch_unwind() => {
+                        if let Some(error) = self.interrupt.take_fatal_error() {
+                            Err(error)
+                        } else {
+                            match result {
+                                Ok(result) => result,
+                                Err(_) => Err(AgentError::ToolExecution(
+                                    "agent run panicked".to_string(),
+                                )),
+                            }
+                        }
+                    },
+                }
+            }
+            Err(error) => Err(error),
+        };
+        finalizer.record_terminal_reason(terminal_reason_for_result(&result));
+        self.complete_active_run_record(&active_run, &result).await?;
+        finalizer.disarm();
+        result
+    }
+
+    async fn run_inner(
+        &self,
+        prepared: PreparedRunInput,
+        active_run: Option<Arc<ActiveRun>>,
+    ) -> Result<AgentResult, AgentError> {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
-        let session_id = self.config.session_id.as_deref().unwrap_or("");
-        let mut messages = messages;
-        for msg in messages.iter_mut() {
-            if let Some(ref mut c) = msg.content {
-                *c = sanitize_surrogates(c).into_owned();
-            }
-        }
-        strip_budget_warnings_from_messages(&mut messages);
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let context_length = get_model_context_length(&self.config.model);
-        for msg in messages.iter_mut() {
-            if msg.role != MessageRole::User {
-                continue;
-            }
-            let Some(content) = msg.content.clone() else {
-                continue;
-            };
-            let result =
-                preprocess_context_references_async(&content, &cwd, context_length, None).await;
-            if result.expanded && result.message != content {
-                msg.content = Some(result.message);
-            }
-        }
-
-        let task_hint = messages
-            .iter()
-            .rev()
-            .find(|m| matches!(m.role, hermes_core::MessageRole::User))
-            .and_then(|m| m.content.clone())
-            .unwrap_or_default();
-
-        // Determine which tools to expose
-        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let (messages, tool_schemas, task_hint, system_content, restored_system) =
+            prepared.into_execution()?;
         let (advertised_tool_names, advertised_tool_names_display) =
             advertised_tool_name_index(&tool_schemas);
-
-        // Build and inject system prompt (or reuse SQLite-cached prompt for session continuity)
-        let (system_content, restored_system) =
-            self.resolve_initial_system_prompt(&task_hint, &tool_schemas);
         ctx.add_message(Message::system(&system_content));
 
         let mut session_started_hooks_fired = false;
@@ -133,7 +144,7 @@ impl AgentLoop {
             .last()
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
-        let mem_ctx_raw = self.memory_prefetch(&first_user, session_id);
+        let mem_ctx_raw = self.memory_prefetch(&first_user);
         if !mem_ctx_raw.is_empty() {
             ctx.add_message(Message::system(&mem_ctx_raw));
         }
@@ -141,19 +152,7 @@ impl AgentLoop {
         if self.config.preflight_context_compress {
             self.preflight_context_compress_with_status(&mut ctx);
         }
-        let replay = ReplayRecorder::for_session(&self.config, session_id);
         let max_turns_limit = effective_max_turns(self.config.max_turns);
-        replay.record(
-            "session_start",
-            serde_json::json!({
-                "session_id": session_id,
-                "mode": "run",
-                "model": self.config.model,
-                "max_turns": self.config.max_turns,
-                "max_turns_effective": max_turns_limit,
-                "max_turns_unlimited": max_turns_limit.is_none(),
-            }),
-        );
 
         let mut total_turns: u32 = 0;
         let mut _total_api_time_ms: u64 = 0;
@@ -164,8 +163,8 @@ impl AgentLoop {
         let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
         let mut invalid_tool_retries: u32 = 0;
-        let mut invalid_json_retries: u32 = 0;
         let mut last_content_with_tools: Option<String> = None;
+        let mut dropped_tool_call_retries: u32 = 0;
         let mut context_pressure_warned_at: f64 = 0.0;
         let mut context_pressure_last_warn_at: Option<Instant> = None;
         let mut context_pressure_last_warn_percent: f64 = 0.0;
@@ -184,17 +183,8 @@ impl AgentLoop {
         let governor_window_limit = governor_window_size();
 
         loop {
-            if self.interrupt.take_interrupt_graceful().is_some() {
-                return Ok(self.graceful_interrupt_result(
-                    &ctx,
-                    total_turns,
-                    &tool_errors,
-                    accumulated_usage.clone(),
-                    session_cost_usd,
-                    session_started_hooks_fired,
-                    persist_user_idx,
-                    prefill_range.clone(),
-                ));
+            if let Some(error) = self.interrupt.take_fatal_error() {
+                return Err(error);
             }
 
             if let Some(max_turns) = max_turns_limit {
@@ -203,19 +193,13 @@ impl AgentLoop {
                         "Max turns ({}) exceeded, requesting final summary",
                         max_turns
                     );
-                    let summary_msg = self.handle_max_iterations(&mut ctx).await?;
+                    let summary_msg = self
+                        .handle_max_iterations(&mut ctx, active_run.as_ref())
+                        .await?;
                     if let Some(msg) = summary_msg {
                         ctx.add_message(msg);
                     }
                     self.memory_on_session_end(ctx.get_messages());
-                    replay.record(
-                        "session_end",
-                        serde_json::json!({
-                            "reason": "max_turns",
-                            "total_turns": total_turns,
-                            "session_cost_usd": session_cost_usd,
-                        }),
-                    );
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(
                             &ctx,
@@ -236,8 +220,6 @@ impl AgentLoop {
             total_turns += 1;
             tracing::debug!("Agent turn {}", total_turns);
 
-            // Refresh oauth-backed runtime credentials before routing/provider selection.
-            self.refresh_oauth_store_tokens_if_needed().await;
 
             // Skill nudge counter — Python `run_agent.py`: increment at the start of each inner API iteration.
             if self.config.skill_creation_nudge_interval > 0
@@ -263,9 +245,7 @@ impl AgentLoop {
 
             // Memory sync at flush interval
             if total_turns % self.config.memory_flush_interval == 0 && total_turns > 0 {
-                let msgs = ctx.get_messages();
-                let (u, a) = extract_last_user_assistant(msgs);
-                self.memory_sync(&u, &a, session_id, msgs);
+                self.memory_sync(ctx.get_messages());
             }
 
             // --- Pre-LLM hook ---
@@ -308,6 +288,13 @@ impl AgentLoop {
                     )));
                 }
             }
+            let effective_provider =
+                self.effective_provider_for_model_call(active_model, turn_runtime_route.as_ref());
+            self.resolve_governed_oauth_before_model_call(
+                active_run.as_ref(),
+                &effective_provider,
+            )
+            .await?;
             tracing::debug!(
                 turn = total_turns,
                 model = active_model,
@@ -317,20 +304,6 @@ impl AgentLoop {
                 governor_avg_tool_error_rate = turn_governor_runtime.avg_tool_error_rate,
                 governor_consecutive_error_turns = turn_governor_runtime.consecutive_error_turns,
                 "turn governor snapshot"
-            );
-            replay.record(
-                "turn_start",
-                serde_json::json!({
-                    "turn": total_turns,
-                    "model": active_model,
-                    "pressure": llm_governor.pressure,
-                    "max_tokens": llm_governor.max_tokens,
-                    "latency_degraded": llm_governor.latency_degraded,
-                    "error_degraded": llm_governor.error_degraded,
-                    "avg_llm_latency_ms": turn_governor_runtime.avg_llm_latency_ms,
-                    "avg_tool_error_rate": turn_governor_runtime.avg_tool_error_rate,
-                    "consecutive_error_turns": turn_governor_runtime.consecutive_error_turns,
-                }),
             );
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
@@ -351,17 +324,8 @@ impl AgentLoop {
             let mut inner_thinking = 0u32;
             let mut turn_usage_acc: Option<UsageStats> = None;
             let mut response = loop {
-                if self.interrupt.take_interrupt_graceful().is_some() {
-                    return Ok(self.graceful_interrupt_result(
-                        &ctx,
-                        total_turns,
-                        &tool_errors,
-                        accumulated_usage.clone(),
-                        session_cost_usd,
-                        session_started_hooks_fired,
-                        persist_user_idx,
-                        prefill_range.clone(),
-                    ));
+                if let Some(error) = self.interrupt.take_fatal_error() {
+                    return Err(error);
                 }
                 let r = match self
                     .call_llm_with_retry(
@@ -369,6 +333,7 @@ impl AgentLoop {
                         &tool_schemas,
                         turn_runtime_route.as_ref(),
                         llm_governor.max_tokens,
+                        active_run.as_ref(),
                     )
                     .await
                 {
@@ -489,21 +454,6 @@ impl AgentLoop {
                 );
             });
             drop(llm_span);
-            replay.record(
-                "llm_response",
-                serde_json::json!({
-                    "turn": total_turns,
-                    "model": response.model,
-                    "finish_reason": response.finish_reason,
-                    "api_time_ms": api_elapsed,
-                    "tool_call_count": response_tool_call_count,
-                    "has_visible_text": Self::assistant_visible_text(&response.message),
-                    "route_learning": self.route_learning_snapshot(
-                        turn_runtime_route.as_ref(),
-                        Some(response.model.as_str()),
-                    ),
-                }),
-            );
 
             // --- Post-LLM hook ---
             let post_ctx = serde_json::json!({
@@ -595,15 +545,39 @@ impl AgentLoop {
                     .filter(|s| !s.is_empty());
             }
 
-            // Step complete callback
-            if let Some(ref cb) = self.callbacks.on_step_complete {
-                cb(total_turns);
-            }
+            // Best-effort progress observation.
+            self.callbacks.emit_step_complete(total_turns);
 
             // If no tool calls, the agent is done
             let tool_calls = if !parsed_tool_calls.is_empty() {
                 parsed_tool_calls
             } else {
+                let dropped_tool_call_mismatch =
+                    response.finish_reason.as_deref() == Some("tool_calls")
+                        && assistant_msg.tool_calls.as_ref().map_or(true, Vec::is_empty);
+                if dropped_tool_call_mismatch
+                    && dropped_tool_call_retries < DROPPED_TOOL_CALL_MAX_RETRIES
+                {
+                    dropped_tool_call_retries = dropped_tool_call_retries.saturating_add(1);
+                    tracing::warn!(
+                        retry = dropped_tool_call_retries,
+                        max_retries = DROPPED_TOOL_CALL_MAX_RETRIES,
+                        model = %response.model,
+                        "Provider declared tool_calls but returned an empty tool-call array; re-prompting"
+                    );
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Model signaled a tool call but sent none — re-prompting ({}/{})",
+                            dropped_tool_call_retries, DROPPED_TOOL_CALL_MAX_RETRIES
+                        ),
+                    );
+                    ctx.add_message(Message::user(DROPPED_TOOL_CALL_NUDGE));
+                    continue;
+                }
+                if !dropped_tool_call_mismatch {
+                    dropped_tool_call_retries = 0;
+                }
                 if !tool_schemas.is_empty()
                     && codex_ack_continuations < 2
                     && looks_like_codex_intermediate_ack(
@@ -792,31 +766,17 @@ impl AgentLoop {
                         continue;
                     }
                 }
+                Self::strip_dropped_tool_call_scaffolding(ctx.get_messages_mut());
                 tracing::debug!("No tool calls in response, finishing naturally");
-                if let Err(err) = self.append_objective_runtime_ledger(
-                    ctx.get_messages(),
-                    assistant_msg.content.as_deref().unwrap_or_default(),
-                    total_turns,
-                ) {
-                    self.emit_status(
-                        "lifecycle",
-                        &format!("Objective runtime ledger append skipped: {}", err),
-                    );
-                }
                 // Final memory sync
-                let msgs = ctx.get_messages();
-                let (u, a) = extract_last_user_assistant(msgs);
-                self.memory_sync(&u, &a, session_id, msgs);
-                self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
-                self.memory_on_session_end(ctx.get_messages());
-                replay.record(
-                    "session_end",
-                    serde_json::json!({
-                        "reason": "finished_naturally",
-                        "total_turns": total_turns,
-                        "session_cost_usd": session_cost_usd,
-                    }),
+                self.memory_sync(ctx.get_messages());
+                self.spawn_background_review(
+                    total_turns,
+                    &ctx,
+                    review_memory_at_end,
+                    active_run.as_ref().map(|run| run.run_id()),
                 );
+                self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
                     messages: self.messages_for_persisted_result(
                         &ctx,
@@ -834,6 +794,8 @@ impl AgentLoop {
             };
 
             codex_ack_continuations = 0;
+            dropped_tool_call_retries = 0;
+            Self::strip_dropped_tool_call_scaffolding(ctx.get_messages_mut());
 
             // Deduplicate tool calls
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);
@@ -940,54 +902,25 @@ impl AgentLoop {
             }
             invalid_tool_retries = 0;
 
-            let mut invalid_json_args: Vec<(String, String)> = Vec::new();
-            for tc in &mut tool_calls {
-                if let Err(e) = Self::normalize_tool_call_arguments(tc) {
-                    invalid_json_args.push((tc.function.name.clone(), e));
-                }
-            }
+            let (valid_tool_calls, invalid_json_args) =
+                Self::partition_valid_tool_call_arguments(tool_calls);
+            tool_calls = valid_tool_calls;
             if !invalid_json_args.is_empty() {
-                invalid_json_retries = invalid_json_retries.saturating_add(1);
-                if invalid_json_retries < self.config.invalid_tool_json_max_retries {
-                    self.emit_status(
-                        "lifecycle",
-                        &format!(
-                            "Invalid tool JSON arguments — retrying ({}/{})",
-                            invalid_json_retries, self.config.invalid_tool_json_max_retries
-                        ),
-                    );
-                    let _ = ctx.get_messages_mut().pop();
-                    continue;
-                }
                 self.emit_status(
                     "lifecycle",
-                    &format!(
-                        "Max invalid JSON retries reached ({}); returning tool errors",
-                        self.config.invalid_tool_json_max_retries
-                    ),
+                    "Rejected malformed tool arguments without dispatching those calls",
                 );
-                invalid_json_retries = 0;
-                for tc in &tool_calls {
-                    let content = if let Some((_, err)) = invalid_json_args
-                        .iter()
-                        .find(|(name, _)| name == &tc.function.name)
-                    {
-                        format!(
-                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
-                                err
-                            )
-                    } else {
-                        "Skipped: other tool call in this response had invalid JSON.".to_string()
-                    };
+                for (tc, error) in invalid_json_args {
                     ctx.add_message(Self::named_tool_result_message(
-                        tc.id.clone(),
-                        tc.function.name.clone(),
-                        content,
+                        tc.id,
+                        tc.function.name,
+                        format!("Error: Invalid tool arguments. {error}"),
                     ));
                 }
+            }
+            if tool_calls.is_empty() {
                 continue;
             }
-            invalid_json_retries = 0;
             self.apply_tool_request_middleware_to_calls(&mut tool_calls, total_turns);
 
             for tc in &tool_calls {
@@ -1013,11 +946,9 @@ impl AgentLoop {
                 });
                 self.invoke_hook(HookType::PreToolCall, &tc_ctx);
 
-                if let Some(ref cb) = self.callbacks.on_tool_start {
-                    let args: Value =
-                        serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
-                    cb(&tc.function.name, &args);
-                }
+                let args: Value =
+                    serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
+                self.callbacks.emit_tool_start(&tc.function.name, &args);
             }
 
             // --- Execute tool calls in parallel ---
@@ -1060,9 +991,10 @@ impl AgentLoop {
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
+                    active_run.clone(),
                     &mut tool_errors,
                 )
-                .await;
+                .await?;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
@@ -1099,17 +1031,6 @@ impl AgentLoop {
                 );
             });
             drop(tool_span);
-            replay.record(
-                "tool_batch",
-                serde_json::json!({
-                    "turn": total_turns,
-                    "tool_count": tool_calls.len(),
-                    "tool_concurrency": tool_governor.tool_concurrency,
-                    "tool_time_ms": tool_elapsed,
-                    "errors": turn_tool_error_count,
-                    "error_rate": turn_tool_error_rate,
-                }),
-            );
             update_repo_review_budget_state_from_results(
                 &mut repo_review_budget_state,
                 ctx.get_messages(),
@@ -1140,9 +1061,8 @@ impl AgentLoop {
                 });
                 self.invoke_hook(HookType::PostToolCall, &tc_ctx);
 
-                if let Some(ref cb) = self.callbacks.on_tool_complete {
-                    cb(&tc.function.name, &res.content);
-                }
+                self.callbacks
+                    .emit_tool_complete(&tc.function.name, &res.content);
             }
 
             self.notify_memory_writes(&tool_calls, &results);
@@ -1170,15 +1090,6 @@ impl AgentLoop {
             let lsp_note = self.lsp_context_note(&tool_calls, &results);
 
             for result in results {
-                replay.record(
-                    "tool_result",
-                    serde_json::json!({
-                        "turn": total_turns,
-                        "tool_call_id": result.tool_call_id,
-                        "is_error": result.is_error,
-                        "content_preview": result.content.chars().take(240).collect::<String>(),
-                    }),
-                );
                 ctx.add_message(Self::tool_result_message_from_execution(
                     &result,
                     &tool_calls,
@@ -1211,19 +1122,11 @@ impl AgentLoop {
                     tool_calls.len()
                 );
                 self.emit_status("lifecycle", &guard_message);
-                replay.record(
-                    "tool_loop_guard",
-                    serde_json::json!({
-                        "turn": total_turns,
-                        "consecutive_error_turns": governor_consecutive_error_turns,
-                        "failed_calls": turn_tool_error_count,
-                        "total_calls": tool_calls.len(),
-                    }),
-                );
                 if let Some(summary) = self
                     .handle_tool_loop_guard_summary(
                         &mut ctx,
                         governor_consecutive_error_turns,
+                        active_run.as_ref(),
                         turn_tool_error_count,
                         tool_calls.len(),
                     )

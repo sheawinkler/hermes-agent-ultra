@@ -55,7 +55,7 @@ Type `/` in the CLI to open the autocomplete menu. Built-in commands are case-in
 | `/reasoning` | Manage reasoning effort and display (usage: /reasoning [level\|show\|hide]) |
 | `/skin` | Show or change the display skin/theme |
 | `/statusbar` (alias: `/sb`) | Toggle the context/model status bar on or off |
-| `/voice [on\|off\|tts\|status]` | Toggle CLI voice mode and spoken playback. Recording uses `voice.record_key` (default: `Ctrl+B`). |
+| `/voice` | Fixed status only — reports that no separate interactive voice engine is active. Does **not** inspect TTS/STT config, enable mic capture, spoken auto-replies, or Discord VC. See [Voice Mode](/docs/user-guide/features/voice-mode). |
 | `/yolo` | Toggle YOLO mode — skip all dangerous command approval prompts. |
 | `/footer [on\|off\|status]` | Toggle the gateway runtime-metadata footer on final replies (shows model, tool counts, timing). |
 | `/busy [queue\|steer\|interrupt\|status]` | CLI-only: control what pressing Enter does while Hermes is working — queue the new message, steer mid-turn, or interrupt immediately. |
@@ -191,7 +191,7 @@ The messaging gateway supports the following built-in commands inside Telegram, 
 | `/usage` | Show token usage, estimated cost breakdown (input/output), context window state, session duration, and — when available from the active provider — an **Account limits** section with remaining quota / credits pulled live from the provider's API. |
 | `/insights [days]` | Show usage analytics. |
 | `/reasoning [level\|show\|hide]` | Change reasoning effort or toggle reasoning display. |
-| `/voice [on\|off\|tts\|join\|channel\|leave\|status]` | Control spoken replies in chat. `join`/`channel`/`leave` manage Discord voice-channel mode. |
+| `/voice` | Fixed status only — reports that no separate interactive voice engine is active. Does **not** inspect provider config, toggle spoken replies, or join Discord voice channels. |
 | `/rollback [number]` | List or restore filesystem checkpoints. |
 | `/background <prompt>` | Run a prompt in a separate background session. Results are delivered back to the same chat when the task finishes. See [Messaging Background Sessions](/docs/user-guide/messaging/#background-sessions). |
 | `/queue <prompt>` (alias: `/q`) | Queue a prompt for the next turn without interrupting the current one. |
@@ -217,4 +217,4 @@ The messaging gateway supports the following built-in commands inside Telegram, 
 - `/verbose` is **CLI-only by default**, but can be enabled for messaging platforms by setting `display.tool_progress_command: true` in `config.yaml`. When enabled, it cycles the `display.tool_progress` mode and saves to config.
 - `/sethome`, `/update`, `/restart`, `/approve`, `/deny`, `/topic`, and `/commands` are **messaging-only** commands.
 - `/status`, `/background`, `/queue`, `/steer`, `/voice`, `/reload-mcp`, `/reload-skills`, `/rollback`, `/debug`, `/fast`, `/footer`, `/curator`, `/kanban`, `/sessions`, and `/yolo` work in **both** the CLI and the messaging gateway.
-- `/voice join`, `/voice channel`, and `/voice leave` are only meaningful on Discord.
+- `/voice` is fixed status-only on every surface (no separate interactive voice engine); it does not inspect TTS/STT configuration. Interactive mic mode and Discord VC controls are not shipped.

@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main
 
 For the fully explicit manual steps, supported extras, and current limitations, see the [Termux guide](../getting-started/termux.md).
 
-Important caveat: the full `.[all]` extra is not currently available on Android because the `voice` extra depends on `faster-whisper` → `ctranslate2`, and `ctranslate2` does not publish Android wheels. Use the tested `.[termux]` extra instead.
+Important caveat: prefer the tested `.[termux]` extra on Android. Older docs mentioned a Python `voice` extra pulling `faster-whisper`; the Rust runtime does **not** ship local faster-whisper STT — use the HTTP `transcription` tool when you need speech-to-text.
 
 ### Is my data sent anywhere?
 
@@ -484,7 +484,7 @@ For reliable auto-start, use Windows Task Scheduler to launch WSL + the gateway 
 
 #### macOS: Node.js / ffmpeg / other tools not found by gateway
 
-**Cause:** launchd services inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't include Homebrew, nvm, cargo, or other user-installed tool directories. This commonly breaks the WhatsApp bridge (`node not found`) or voice transcription (`ffmpeg not found`).
+**Cause:** launchd services inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't include Homebrew, nvm, cargo, or other user-installed tool directories. This commonly breaks the WhatsApp bridge (`node not found`) or tools that shell out to `ffmpeg` (for example voice-compatible TTS conversion).
 
 **Solution:** The gateway captures your shell PATH when you run `hermes gateway install`. If you installed tools after setting up the gateway, re-run the install to capture the updated PATH:
 

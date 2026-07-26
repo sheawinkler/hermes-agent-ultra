@@ -16,17 +16,30 @@
 //! The output JSON includes `transport: "managed" | "direct"` for
 //! observability.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+
+use hermes_config::ValidatedExternalMediaUpload;
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
 
 use hermes_config::managed_gateway::{
     resolve_managed_tool_gateway, resolve_openai_audio_api_key, ManagedToolGatewayConfig,
     ResolveOptions,
 };
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+
+use crate::tts_audio::{read_bounded_error, read_bounded_response};
 
 pub struct TranscriptionHandler;
 
@@ -42,6 +55,11 @@ const MISTRAL_STT_MODELS: &[&str] = &[
     "voxtral-mini-2602",
 ];
 
+const MAX_TRANSCRIPTION_AUDIO_BYTES: u64 = 96 * 1024 * 1024;
+const OPENAI_GROQ_TRANSCRIPTION_MAX_AUDIO_BYTES: u64 = 25 * 1024 * 1024;
+const MAX_TRANSCRIPTION_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const TRANSCRIPTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptionEndpoint {
     pub endpoint: String,
@@ -53,22 +71,217 @@ pub(crate) struct TranscriptionEndpoint {
     pub send_response_format: bool,
 }
 
-fn audio_extension_format(path: &str) -> &'static str {
+fn audio_extension_format(path: &str) -> Option<&'static str> {
     Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase())
         .as_deref()
-        .map(|e| match e {
-            "wav" => "wav",
-            "mp3" => "mp3",
-            "m4a" => "mp4",
-            "webm" => "webm",
-            "ogg" | "oga" => "ogg",
-            "flac" => "flac",
-            _ => "wav",
+        .and_then(|e| match e {
+            "wav" => Some("wav"),
+            "mp3" => Some("mp3"),
+            "m4a" => Some("mp4"),
+            "webm" => Some("webm"),
+            "ogg" | "oga" => Some("ogg"),
+            "flac" => Some("flac"),
+            _ => None,
         })
-        .unwrap_or("wav")
+}
+
+#[cfg(unix)]
+fn open_validated_upload(upload: &ValidatedExternalMediaUpload) -> std::io::Result<std::fs::File> {
+    use std::path::Component;
+
+    fn component_c_string(component: &std::ffi::OsStr) -> std::io::Result<CString> {
+        CString::new(component.as_bytes())
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    }
+
+    let relative = upload
+        .canonical_path
+        .strip_prefix(&upload.canonical_root)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+    let filesystem_root = CString::new("/").expect("static filesystem root has no NUL");
+    let root_fd = unsafe {
+        libc::open(
+            filesystem_root.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if root_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut directory = unsafe { std::fs::File::from_raw_fd(root_fd) };
+    for component in upload.canonical_root.components() {
+        let name = match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        };
+        let name = component_c_string(name)?;
+        let fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        directory = unsafe { std::fs::File::from_raw_fd(fd) };
+    }
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        };
+        let name = component_c_string(name)?;
+        let is_file = components.peek().is_none();
+        let flags = if is_file {
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK
+        } else {
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW
+        };
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let opened = unsafe { std::fs::File::from_raw_fd(fd) };
+        if is_file {
+            if !opened.metadata()?.is_file() {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+            }
+            return Ok(opened);
+        }
+        directory = opened;
+    }
+    Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+}
+
+#[cfg(windows)]
+fn open_validated_upload(upload: &ValidatedExternalMediaUpload) -> std::io::Result<std::fs::File> {
+    use std::mem::size_of;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileAttributeTagInfo, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+
+    fn comparable_windows_path(path: &Path) -> String {
+        let value = path.to_string_lossy();
+        let value = value
+            .strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!(r"\\{rest}"))
+            .or_else(|| value.strip_prefix(r"\\?\").map(str::to_owned))
+            .unwrap_or_else(|| value.into_owned());
+        value.to_lowercase()
+    }
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&upload.canonical_path)?;
+    let handle = file.as_raw_handle();
+    let mut attributes = FILE_ATTRIBUTE_TAG_INFO {
+        FileAttributes: 0,
+        ReparseTag: 0,
+    };
+    let info_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileAttributeTagInfo,
+            (&mut attributes as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+            size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    };
+    if info_ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    }
+
+    let required = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, 0) };
+    if required == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut final_path = vec![0_u16; required as usize];
+    let written =
+        unsafe { GetFinalPathNameByHandleW(handle, final_path.as_mut_ptr(), required, 0) };
+    if written == 0 || written >= required {
+        return Err(std::io::Error::last_os_error());
+    }
+    let final_path = PathBuf::from(String::from_utf16_lossy(&final_path[..written as usize]));
+    if comparable_windows_path(&final_path) != comparable_windows_path(&upload.canonical_path)
+        || !file.metadata()?.is_file()
+    {
+        return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    }
+    Ok(file)
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn open_validated_upload(_upload: &ValidatedExternalMediaUpload) -> std::io::Result<std::fs::File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "secure external media upload is unavailable on this platform",
+    ))
+}
+
+fn transcription_audio_byte_limit(provider: &str) -> u64 {
+    let provider_limit = match provider {
+        "openai" | "groq" => OPENAI_GROQ_TRANSCRIPTION_MAX_AUDIO_BYTES,
+        _ => MAX_TRANSCRIPTION_AUDIO_BYTES,
+    };
+    MAX_TRANSCRIPTION_AUDIO_BYTES.min(provider_limit)
+}
+
+fn transcription_audio_limit_error(provider: &str, max_bytes: u64) -> ToolError {
+    ToolError::InvalidParams(format!(
+        "Transcription audio exceeds the {max_bytes} byte limit for {provider}"
+    ))
+}
+
+async fn read_transcription_audio(
+    upload: ValidatedExternalMediaUpload,
+    provider: &str,
+) -> Result<Vec<u8>, ToolError> {
+    let max_bytes = transcription_audio_byte_limit(provider);
+    let file = tokio::task::spawn_blocking(move || {
+        let file = open_validated_upload(&upload)?;
+        hermes_config::validate_media_file_handle(&file)?;
+        Ok::<_, std::io::Error>(file)
+    })
+    .await
+    .map_err(|error| ToolError::ExecutionFailed(format!("Audio file open task failed: {error}")))?
+    .map_err(|error| {
+        ToolError::ExecutionFailed(format!(
+            "Cannot open approved audio file without following symlinks: {error}"
+        ))
+    })?;
+    let mut file = tokio::fs::File::from_std(file);
+    let metadata = file.metadata().await.map_err(|error| {
+        ToolError::ExecutionFailed(format!("Cannot inspect audio file: {error}"))
+    })?;
+    if metadata.len() == 0 {
+        return Err(ToolError::ExecutionFailed(
+            "Transcription audio file is empty".into(),
+        ));
+    }
+    if metadata.len() > max_bytes {
+        return Err(transcription_audio_limit_error(provider, max_bytes));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|error| ToolError::ExecutionFailed(format!("Cannot read audio file: {error}")))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(transcription_audio_limit_error(provider, max_bytes));
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn transcription_response_format_for_model(model: &str) -> &'static str {
@@ -325,9 +538,20 @@ pub(crate) fn resolve_transcription_endpoint(
     }
 }
 
-#[async_trait]
-impl ToolHandler for TranscriptionHandler {
-    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+fn transcription_http_client(timeout: Duration) -> Result<reqwest::Client, ToolError> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(timeout)
+        .build()
+        .map_err(|error| ToolError::ExecutionFailed(format!("Transcription HTTP client: {error}")))
+}
+
+impl TranscriptionHandler {
+    pub(crate) async fn execute_with_trusted_roots(
+        &self,
+        params: Value,
+        extra_trusted_roots: &[PathBuf],
+    ) -> Result<String, ToolError> {
         let path = params
             .get("audio_path")
             .and_then(|v| v.as_str())
@@ -335,6 +559,22 @@ impl ToolHandler for TranscriptionHandler {
         if path.is_empty() {
             return Err(ToolError::InvalidParams("Missing 'audio_path'".into()));
         }
+        let validated_upload =
+            hermes_config::validate_external_media_upload_path(path, extra_trusted_roots)
+                .ok_or_else(|| {
+                    ToolError::InvalidParams(
+                        "Refusing to upload audio outside configured media roots".into(),
+                    )
+                })?;
+        let canonical_path = validated_upload.canonical_path.to_str().ok_or_else(|| {
+            ToolError::InvalidParams("Transcription audio path is not valid UTF-8".into())
+        })?;
+        let fmt = audio_extension_format(canonical_path).ok_or_else(|| {
+            ToolError::InvalidParams(
+                "Unsupported transcription audio extension; expected wav, mp3, m4a, webm, ogg, oga, or flac"
+                    .into(),
+            )
+        })?;
 
         let provider = params
             .get("provider")
@@ -365,12 +605,8 @@ impl ToolHandler for TranscriptionHandler {
                     )
                 })?;
 
-        let bytes = tokio::fs::read(path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Cannot read audio file: {e}")))?;
-
-        let fmt = audio_extension_format(path);
-        let client = reqwest::Client::new();
+        let bytes = read_transcription_audio(validated_upload, request.provider).await?;
+        let client = transcription_http_client(TRANSCRIPTION_REQUEST_TIMEOUT)?;
         let part = reqwest::multipart::Part::bytes(bytes)
             .file_name(format!("audio.{fmt}"))
             .mime_str(&format!("audio/{fmt}"))
@@ -401,17 +637,27 @@ impl ToolHandler for TranscriptionHandler {
 
         let status = resp.status();
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = read_bounded_error(resp).await;
             return Err(ToolError::ExecutionFailed(format!(
                 "Transcription error {status}: {body}"
             )));
         }
 
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Transcription read body: {e}")))?;
+        let body = read_bounded_response(
+            resp,
+            MAX_TRANSCRIPTION_RESPONSE_BYTES,
+            "Transcription response",
+        )
+        .await?;
+        let body = String::from_utf8(body).map_err(|error| {
+            ToolError::ExecutionFailed(format!("Transcription response is not UTF-8: {error}"))
+        })?;
         let text = parse_transcription_response(&body, &request.response_format)?;
+        if text.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "Transcription provider returned an empty transcript".into(),
+            ));
+        }
 
         Ok(json!({
             "audio_path": path,
@@ -424,12 +670,19 @@ impl ToolHandler for TranscriptionHandler {
         })
         .to_string())
     }
+}
+
+#[async_trait]
+impl ToolHandler for TranscriptionHandler {
+    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+        self.execute_with_trusted_roots(params, &[]).await
+    }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
         props.insert(
             "audio_path".into(),
-            json!({"type":"string","description":"Path to audio file"}),
+            json!({"type":"string","description":"Absolute audio path under a configured media cache/allow root; external uploads outside those roots are rejected"}),
         );
         props.insert(
             "provider".into(),
@@ -453,10 +706,11 @@ impl ToolHandler for TranscriptionHandler {
         );
         tool_schema(
             "transcription",
-            "Transcribe audio into text via OpenAI, Groq Whisper, or Mistral Voxtral. \
+            "Transcribe an approved local audio file via OpenAI, Groq Whisper, or Mistral Voxtral. \
+             The path must be under a configured media root (including HERMES_MEDIA_ALLOW_DIRS). \
              Honors VOICE_TOOLS_OPENAI_KEY / HERMES_OPENAI_API_KEY (or OPENAI_API_KEY), \
-             GROQ_API_KEY, MISTRAL_API_KEY, provider/model overrides, and routes OpenAI audio \
-             through the Nous-managed openai-audio gateway when HERMES_ENABLE_NOUS_MANAGED_TOOLS is enabled.",
+             GROQ_API_KEY, MISTRAL_API_KEY, provider/model overrides, and Nous-managed OpenAI audio \
+             when HERMES_ENABLE_NOUS_MANAGED_TOOLS is enabled.",
             JsonSchema::object(props, vec!["audio_path".into()]),
         )
     }
@@ -466,6 +720,8 @@ impl ToolHandler for TranscriptionHandler {
 mod tests {
     use super::*;
     use hermes_config::managed_gateway::test_lock;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     struct EnvScope {
         _tmp: tempfile::TempDir,
@@ -499,6 +755,8 @@ mod tests {
                 "TOOL_GATEWAY_USER_TOKEN",
                 "TOOL_GATEWAY_DOMAIN",
                 "TOOL_GATEWAY_SCHEME",
+                "HERMES_MEDIA_ALLOW_DIRS",
+                "HERMES_MEDIA_CACHE_DIR",
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
@@ -526,20 +784,20 @@ mod tests {
 
     #[test]
     fn audio_extension_known_formats() {
-        assert_eq!(audio_extension_format("a.wav"), "wav");
-        assert_eq!(audio_extension_format("a.mp3"), "mp3");
-        assert_eq!(audio_extension_format("a.m4a"), "mp4");
-        assert_eq!(audio_extension_format("a.webm"), "webm");
-        assert_eq!(audio_extension_format("a.ogg"), "ogg");
-        assert_eq!(audio_extension_format("a.oga"), "ogg");
-        assert_eq!(audio_extension_format("a.flac"), "flac");
+        assert_eq!(audio_extension_format("a.wav"), Some("wav"));
+        assert_eq!(audio_extension_format("a.mp3"), Some("mp3"));
+        assert_eq!(audio_extension_format("a.m4a"), Some("mp4"));
+        assert_eq!(audio_extension_format("a.webm"), Some("webm"));
+        assert_eq!(audio_extension_format("a.ogg"), Some("ogg"));
+        assert_eq!(audio_extension_format("a.oga"), Some("ogg"));
+        assert_eq!(audio_extension_format("a.flac"), Some("flac"));
     }
 
     #[test]
-    fn audio_extension_unknown_falls_back_to_wav() {
-        assert_eq!(audio_extension_format("a.xyz"), "wav");
-        assert_eq!(audio_extension_format("noext"), "wav");
-        assert_eq!(audio_extension_format(""), "wav");
+    fn audio_extension_unknown_fails_closed() {
+        assert_eq!(audio_extension_format("a.xyz"), None);
+        assert_eq!(audio_extension_format("noext"), None);
+        assert_eq!(audio_extension_format(""), None);
     }
 
     #[test]
@@ -694,13 +952,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_errors_when_no_credentials_or_gateway() {
-        let _g = EnvScope::new();
+    async fn execute_errors_when_authorized_path_has_no_credentials_or_gateway() {
+        let scope = EnvScope::new();
+        let audio_root = scope._tmp.path().join("audio_cache");
+        std::fs::create_dir_all(&audio_root).unwrap();
+        let audio = audio_root.join("input.wav");
+        std::fs::write(&audio, b"authorized audio fixture").unwrap();
         let h = TranscriptionHandler;
-        let err = h
-            .execute(json!({"audio_path": "/tmp/nope.wav"}))
-            .await
-            .unwrap_err();
+        let err = h.execute(json!({"audio_path": audio})).await.unwrap_err();
         let s = err.to_string();
         assert!(s.contains("VOICE_TOOLS_OPENAI_KEY"));
         assert!(s.contains("HERMES_OPENAI_API_KEY") || s.contains("OPENAI_API_KEY"));
@@ -716,6 +975,298 @@ mod tests {
         let h = TranscriptionHandler;
         let err = h.execute(json!({})).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidParams(_)));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_arbitrary_readable_path_before_network_or_credentials() {
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        std::env::set_var("STT_OPENAI_BASE_URL", server.uri());
+        let arbitrary = tempfile::tempdir().unwrap();
+        let audio = arbitrary.path().join("renamed-secret.wav");
+        std::fs::write(&audio, b"not approved for upload").unwrap();
+
+        let error = TranscriptionHandler
+            .execute(json!({"audio_path": audio, "provider": "openai"}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("configured media roots"));
+    }
+
+    #[test]
+    fn transcription_audio_byte_limit_caps_openai_and_groq() {
+        assert_eq!(
+            transcription_audio_byte_limit("openai"),
+            OPENAI_GROQ_TRANSCRIPTION_MAX_AUDIO_BYTES
+        );
+        assert_eq!(
+            transcription_audio_byte_limit("groq"),
+            OPENAI_GROQ_TRANSCRIPTION_MAX_AUDIO_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn approved_upload_handle_reads_single_link_audio() {
+        let scope = EnvScope::new();
+        let approved = scope._tmp.path().join("approved");
+        std::fs::create_dir_all(&approved).unwrap();
+        let audio = approved.join("sample.wav");
+        std::fs::write(&audio, b"approved bytes").unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", &approved);
+        let upload =
+            hermes_config::validate_external_media_upload_path(&audio.to_string_lossy(), &[])
+                .unwrap();
+
+        assert_eq!(
+            read_transcription_audio(upload, "openai").await.unwrap(),
+            b"approved bytes".to_vec()
+        );
+    }
+    #[tokio::test]
+    async fn approved_upload_handle_accepts_exact_openai_provider_limit() {
+        let scope = EnvScope::new();
+        let approved = scope._tmp.path().join("approved");
+        std::fs::create_dir_all(&approved).unwrap();
+        let audio = approved.join("sample.wav");
+        let limit = transcription_audio_byte_limit("openai");
+        std::fs::File::create(&audio)
+            .unwrap()
+            .set_len(limit)
+            .unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", &approved);
+        let upload =
+            hermes_config::validate_external_media_upload_path(&audio.to_string_lossy(), &[])
+                .unwrap();
+
+        assert_eq!(
+            read_transcription_audio(upload, "openai")
+                .await
+                .unwrap()
+                .len() as u64,
+            limit
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_rejects_hard_linked_audio_before_network_send() {
+        let scope = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        std::env::set_var("STT_OPENAI_BASE_URL", server.uri());
+        let approved = scope._tmp.path().join("approved");
+        std::fs::create_dir_all(&approved).unwrap();
+        let credential = scope._tmp.path().join("credential.wav");
+        std::fs::write(&credential, b"same-user credential bytes").unwrap();
+        let audio = approved.join("audio.wav");
+        std::fs::hard_link(&credential, &audio).unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", &approved);
+
+        let error = TranscriptionHandler
+            .execute(json!({"audio_path": audio, "provider": "openai"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ToolError::ExecutionFailed(_)), "{error}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn approved_upload_handle_rejects_ancestor_swapped_to_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let scope = EnvScope::new();
+        let container = scope._tmp.path().join("container");
+        let approved = container.join("approved");
+        let displaced_container = scope._tmp.path().join("container-original");
+        let outside_container = scope._tmp.path().join("outside-container");
+        let outside_approved = outside_container.join("approved");
+        std::fs::create_dir_all(&approved).unwrap();
+        std::fs::create_dir_all(&outside_approved).unwrap();
+        let audio = approved.join("sample.wav");
+        std::fs::write(&audio, b"approved bytes").unwrap();
+        std::fs::write(outside_approved.join("sample.wav"), b"outside bytes").unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", &approved);
+        let upload =
+            hermes_config::validate_external_media_upload_path(&audio.to_string_lossy(), &[])
+                .unwrap();
+
+        std::fs::rename(&container, &displaced_container).unwrap();
+        symlink(&outside_container, &container).unwrap();
+
+        let error = read_transcription_audio(upload, "openai")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("without following symlinks"));
+    }
+
+    #[tokio::test]
+    async fn execute_posts_bounded_audio_and_returns_nonempty_transcript() {
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .and(header("authorization", "Bearer test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("hello from mock"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        std::env::set_var("STT_OPENAI_BASE_URL", server.uri());
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", temp.path());
+        let audio = temp.path().join("sample.wav");
+        std::fs::write(&audio, b"bounded audio fixture").unwrap();
+
+        let response = TranscriptionHandler
+            .execute(json!({"audio_path": audio, "provider": "openai"}))
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["status"], "transcribed");
+        assert_eq!(response["text"], "hello from mock");
+        assert_eq!(response["provider"], "openai");
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_audio_over_openai_provider_limit_before_network_send() {
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        std::env::set_var("STT_OPENAI_BASE_URL", server.uri());
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", temp.path());
+        let audio = temp.path().join("oversized.wav");
+        let file = std::fs::File::create(&audio).unwrap();
+        file.set_len(transcription_audio_byte_limit("openai") + 1)
+            .unwrap();
+
+        let error = TranscriptionHandler
+            .execute(json!({"audio_path": audio, "provider": "openai"}))
+            .await
+            .unwrap_err();
+        match error {
+            ToolError::InvalidParams(message) => assert_eq!(
+                message,
+                format!(
+                    "Transcription audio exceeds the {} byte limit for openai",
+                    transcription_audio_byte_limit("openai")
+                )
+            ),
+            _ => panic!("expected provider limit preflight rejection"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_oversized_provider_response() {
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![
+                b'x';
+                MAX_TRANSCRIPTION_RESPONSE_BYTES
+                    + 1
+            ]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        std::env::set_var("STT_OPENAI_BASE_URL", server.uri());
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", temp.path());
+        let audio = temp.path().join("sample.wav");
+        std::fs::write(&audio, b"bounded audio fixture").unwrap();
+
+        let error = TranscriptionHandler
+            .execute(json!({"audio_path": audio, "provider": "openai"}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("byte limit"));
+    }
+
+    #[tokio::test]
+    async fn execute_refuses_redirects_without_replaying_transcription_upload() {
+        let _g = EnvScope::new();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HERMES_MEDIA_ALLOW_DIRS", temp.path());
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        let audio = temp.path().join("sample.wav");
+        std::fs::write(&audio, b"redirect audio fixture").unwrap();
+
+        for redirect_status in [307, 308] {
+            let redirect_target = MockServer::start().await;
+            let redirect_source = MockServer::start().await;
+            let redirect_uri =
+                redirect_target
+                    .uri()
+                    .replacen("://", "://redirect-user:redirect-password@", 1);
+            Mock::given(method("POST"))
+                .and(path("/audio/transcriptions"))
+                .and(header("authorization", "Bearer test-key"))
+                .respond_with(
+                    ResponseTemplate::new(redirect_status)
+                        .insert_header("location", format!("{redirect_uri}/redirected")),
+                )
+                .expect(1)
+                .mount(&redirect_source)
+                .await;
+            std::env::set_var("STT_OPENAI_BASE_URL", redirect_source.uri());
+
+            let error = TranscriptionHandler
+                .execute(json!({"audio_path": audio, "provider": "openai"}))
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("Transcription error {redirect_status}")),
+                "{error}"
+            );
+
+            let received = redirect_target.received_requests().await.unwrap();
+            assert!(
+                received.is_empty(),
+                "redirect target received a request that could expose auth, URL credentials, multipart headers, filename, or audio bytes: {received:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn transcription_client_enforces_request_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(100)))
+            .mount(&server)
+            .await;
+
+        let client = transcription_http_client(Duration::from_millis(10)).unwrap();
+        let error = client
+            .get(format!("{}/slow", server.uri()))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_timeout(), "{error}");
     }
 
     #[test]

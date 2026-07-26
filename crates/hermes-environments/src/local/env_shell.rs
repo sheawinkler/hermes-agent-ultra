@@ -1,86 +1,343 @@
 #[cfg(unix)]
-fn configure_foreground_process_group(cmd: &mut TokioCommand) {
+fn configure_bounded_process_tree(cmd: &mut TokioCommand) {
     use std::os::unix::process::CommandExt;
 
+    // Every managed local command owns a fresh process group.  That is
+    // containment for lifecycle purposes only, not an isolation boundary.
     cmd.as_std_mut().process_group(0);
 }
 
 #[cfg(not(unix))]
-fn configure_foreground_process_group(_cmd: &mut TokioCommand) {}
+fn configure_bounded_process_tree(_cmd: &mut TokioCommand) {}
 
-struct ForegroundChildGuard {
-    child: Option<tokio::process::Child>,
-    pid: Option<u32>,
+#[cfg(windows)]
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtResumeProcess(process_handle: windows_sys::Win32::Foundation::HANDLE) -> i32;
 }
 
-impl ForegroundChildGuard {
-    fn new(child: tokio::process::Child) -> Self {
+/// Kill-on-close Job Object used when Unix process groups are unavailable.
+///
+/// The command starts suspended, is assigned before user code runs, and is
+/// resumed only after assignment. That closes the child-spawn race that a
+/// post-spawn `taskkill` approach would leave open.
+#[cfg(windows)]
+struct OwnedProcessJob {
+    handle: std::os::windows::io::OwnedHandle,
+}
+
+#[cfg(windows)]
+impl OwnedProcessJob {
+    fn assign(child: &tokio::process::Child) -> Result<Self, std::io::Error> {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if configured == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(handle);
+            }
+            return Err(error);
+        }
+        let child_handle = child.raw_handle().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "spawned Windows child has no process handle",
+            )
+        })?;
+        if unsafe { AssignProcessToJobObject(handle, child_handle) } == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(handle);
+            }
+            return Err(error);
+        }
+        // SAFETY: `CreateJobObjectW` returned this live, uniquely owned handle,
+        // and all error paths above close it before returning.
+        let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+        Ok(Self { handle })
+    }
+
+    fn terminate(&self) {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        unsafe {
+            TerminateJobObject(self.handle.as_raw_handle(), 1);
+        }
+    }
+}
+
+
+#[cfg(windows)]
+fn configure_windows_bounded_process_tree(cmd: &mut TokioCommand) {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+
+    cmd.as_std_mut()
+        .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+}
+
+#[cfg(windows)]
+fn resume_windows_bounded_process_tree(child: &tokio::process::Child) -> Result<(), std::io::Error> {
+    let handle = child.raw_handle().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "spawned Windows child has no process handle",
+        )
+    })?;
+    let status = unsafe { NtResumeProcess(handle) };
+    if status < 0 {
+        return Err(std::io::Error::other(format!(
+            "NtResumeProcess failed with NTSTATUS 0x{status:08x}"
+        )));
+    }
+    Ok(())
+}
+
+const PROCESS_TREE_TERM_GRACE: std::time::Duration = std::time::Duration::from_millis(150);
+const PROCESS_TREE_REAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+const PROCESS_TREE_WAIT_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// Owns one direct child and its process tree for the complete command
+/// lifetime. Unix process groups and Windows Job Objects provide a lifecycle
+/// kill boundary; neither provides filesystem, network, or credential
+/// isolation.
+struct BoundedProcessTree {
+    child: Option<tokio::process::Child>,
+    pid: Option<u32>,
+    #[cfg(windows)]
+    job: Option<OwnedProcessJob>,
+}
+
+impl BoundedProcessTree {
+    fn spawn(mut command: TokioCommand, spawn_label: &str) -> Result<Self, AgentError> {
+        #[cfg(all(not(unix), not(windows)))]
+        {
+            let _ = command;
+            return Err(AgentError::Io(format!(
+                "{spawn_label} execution is unsupported on platforms without process-tree ownership"
+            )));
+        }
+
+        configure_bounded_process_tree(&mut command);
+        #[cfg(windows)]
+        configure_windows_bounded_process_tree(&mut command);
+        let child = command
+            .spawn()
+            .map_err(|error| AgentError::Io(format!("Failed to spawn {spawn_label}: {error}")))?;
+        #[cfg(windows)]
+        let mut child = child;
+        #[cfg(windows)]
+        let job = match OwnedProcessJob::assign(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.start_kill();
+                return Err(AgentError::Io(format!(
+                    "Failed to assign {spawn_label} to Windows Job Object: {error}"
+                )));
+            }
+        };
+        #[cfg(windows)]
+        if let Err(error) = resume_windows_bounded_process_tree(&child) {
+            job.terminate();
+            let _ = child.start_kill();
+            return Err(AgentError::Io(format!(
+                "Failed to resume {spawn_label} after Job Object assignment: {error}"
+            )));
+        }
         let pid = child.id();
-        Self {
+        Ok(Self {
             child: Some(child),
             pid,
-        }
+            #[cfg(windows)]
+            job: Some(job),
+        })
+    }
+
+    fn pid(&self) -> Option<u32> {
+        self.pid
     }
 
     fn child_mut(&mut self) -> &mut tokio::process::Child {
-        self.child.as_mut().expect("foreground child present")
+        self.child.as_mut().expect("bounded process child present")
+    }
+
+    fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        self.child_mut().stdout.take()
+    }
+
+    fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
+        self.child_mut().stderr.take()
+    }
+
+    fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
+        self.child_mut().stdin.take()
+    }
+
+    #[cfg(unix)]
+    fn direct_child_exited_without_reap(pid: u32) -> Result<bool, std::io::Error> {
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { info.assume_init().si_pid() } == pid as libc::pid_t)
+    }
+
+    #[cfg(unix)]
+    fn signal_process_group(pid: u32, signal: libc::c_int) {
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), signal);
+        }
+    }
+
+    /// Poll the direct child without ever reaping it before its descendants are
+    /// terminated.  A shell may exit while a background child retains stdio;
+    /// signaling the group first prevents that descendant from outliving us.
+    fn poll_exit(&mut self) -> Result<Option<std::process::ExitStatus>, std::io::Error> {
+        #[cfg(unix)]
+        {
+            if let Some(pid) = self.pid {
+                if Self::direct_child_exited_without_reap(pid)? {
+                    Self::signal_process_group(pid, libc::SIGKILL);
+                    let status = self.child_mut().try_wait()?;
+                    if status.is_some() {
+                        self.child.take();
+                        self.pid.take();
+                    }
+                    return Ok(status);
+                }
+                return Ok(None);
+            }
+            return Ok(None);
+        }
+        #[cfg(windows)]
+        {
+            let status = self.child_mut().try_wait()?;
+            if status.is_some() {
+                // Closing the job kills any descendant that survived its
+                // leader; do this before releasing the leader handle.
+                self.job.take();
+                self.child.take();
+                self.pid.take();
+            }
+            return Ok(status);
+        }
+
+        #[cfg(all(not(unix), not(windows)))]
+        {
+            Ok(None)
+        }
+    }
+
+    async fn wait_until_exit(&mut self) -> Result<std::process::ExitStatus, std::io::Error> {
+        loop {
+            if let Some(status) = self.poll_exit()? {
+                return Ok(status);
+            }
+            tokio::time::sleep(PROCESS_TREE_WAIT_POLL).await;
+        }
+    }
+
+    /// Synchronically terminate and reap the direct child. This is usable
+    /// from Drop, where awaiting is impossible, and terminates the owned
+    /// process tree before releasing its leader handle.
+    fn terminate_and_join_sync(&mut self) {
+        #[cfg(unix)]
+        {
+            let Some(pid) = self.pid.take() else {
+                self.child.take();
+                return;
+            };
+            Self::signal_process_group(pid, libc::SIGTERM);
+            std::thread::sleep(PROCESS_TREE_TERM_GRACE);
+            Self::signal_process_group(pid, libc::SIGKILL);
+
+            let deadline = std::time::Instant::now() + PROCESS_TREE_REAP_TIMEOUT;
+            loop {
+                let mut status = 0;
+                let waited = unsafe {
+                    libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG)
+                };
+                if waited == pid as libc::pid_t
+                    || waited == -1
+                    || std::time::Instant::now() >= deadline
+                {
+                    break;
+                }
+                std::thread::sleep(PROCESS_TREE_WAIT_POLL);
+            }
+            self.child.take();
+        }
+
+        #[cfg(windows)]
+        {
+            if let Some(job) = self.job.take() {
+                job.terminate();
+            }
+            if let Some(mut child) = self.child.take() {
+                let _ = child.start_kill();
+                let deadline = std::time::Instant::now() + PROCESS_TREE_REAP_TIMEOUT;
+                while std::time::Instant::now() < deadline {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) => std::thread::sleep(PROCESS_TREE_WAIT_POLL),
+                    }
+                }
+            }
+            self.pid.take();
+        }
+
+        #[cfg(all(not(unix), not(windows)))]
+        {
+            self.child.take();
+            self.pid.take();
+        }
+    }
+
+    async fn terminate_and_join(&mut self) {
+        self.terminate_and_join_sync();
     }
 
     fn disarm(&mut self) {
+        #[cfg(windows)]
+        self.job.take();
         self.child.take();
+        self.pid.take();
     }
 }
 
-impl Drop for ForegroundChildGuard {
+impl Drop for BoundedProcessTree {
     fn drop(&mut self) {
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        terminate_child_process_sync(self.pid);
-        let _ = child.start_kill();
+        self.terminate_and_join_sync();
     }
-}
-
-#[cfg(unix)]
-fn terminate_child_process_sync(pid: Option<u32>) {
-    if let Some(pid) = pid {
-        let pgid = -(pid as i32);
-        unsafe {
-            libc::kill(pgid, libc::SIGTERM);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        unsafe {
-            libc::kill(pgid, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate_child_process_sync(_pid: Option<u32>) {}
-
-#[cfg(unix)]
-async fn terminate_child_process(child: &mut tokio::process::Child) {
-    if let Some(pid) = child.id() {
-        let pgid = -(pid as i32);
-        unsafe {
-            libc::kill(pgid, libc::SIGTERM);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        match child.try_wait() {
-            Ok(Some(_)) => return,
-            Ok(None) | Err(_) => unsafe {
-                libc::kill(pgid, libc::SIGKILL);
-            },
-        }
-    }
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-}
-
-#[cfg(not(unix))]
-async fn terminate_child_process(child: &mut tokio::process::Child) {
-    let _ = child.kill().await;
-    let _ = child.wait().await;
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -174,19 +431,28 @@ fn real_home_dir() -> Option<PathBuf> {
         .or_else(home_dir)
 }
 
-fn ensure_profile_home_dir() -> Option<PathBuf> {
-    let home = hermes_home_dir()?.join("home");
-    if std::fs::create_dir_all(&home).is_ok() {
-        Some(home)
-    } else {
-        None
-    }
+fn ensure_profile_home_dir() -> Result<PathBuf, AgentError> {
+    let hermes_home = hermes_home_dir().ok_or_else(|| {
+        AgentError::Config(
+            "TERMINAL_HOME_MODE=profile requires HERMES_HOME or HERMES_AGENT_ULTRA_HOME".into(),
+        )
+    })?;
+    let home = hermes_home.join("home");
+    std::fs::create_dir_all(&home).map_err(|error| {
+        AgentError::Io(format!(
+            "Failed to create isolated terminal profile HOME '{}': {error}",
+            home.display()
+        ))
+    })?;
+    Ok(home)
 }
 
-fn subprocess_home_for_mode(mode: TerminalHomeMode) -> Option<PathBuf> {
+fn subprocess_home_for_mode(mode: TerminalHomeMode) -> Result<Option<PathBuf>, AgentError> {
     match mode {
-        TerminalHomeMode::Auto | TerminalHomeMode::Real => real_home_dir(),
-        TerminalHomeMode::Profile => ensure_profile_home_dir().or_else(real_home_dir),
+        TerminalHomeMode::Auto | TerminalHomeMode::Real => Ok(real_home_dir()),
+        // Profile (also called "isolated" in TERMINAL_HOME_MODE) is
+        // fail-closed: it never falls back to the operator's real HOME.
+        TerminalHomeMode::Profile => ensure_profile_home_dir().map(Some),
     }
 }
 
@@ -242,11 +508,11 @@ fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
 }
 
 use hermes_core::subprocess_env::{
-    should_strip_subprocess_env_key, SUBPROCESS_ENV_BLOCKLIST_EXACT,
-    SUBPROCESS_ENV_BLOCKLIST_PREFIXES, SUBPROCESS_ENV_FORCE_PREFIX,
-    SUBPROCESS_ENV_PASSTHROUGH_VAR,
+    hermes_subprocess_env, should_strip_subprocess_env_key, SUBPROCESS_ENV_BLOCKLIST_EXACT,
+    SUBPROCESS_ENV_BLOCKLIST_PREFIXES, SUBPROCESS_ENV_PASSTHROUGH_VAR,
 };
 
+#[cfg(test)]
 const SANE_PATH_ENTRIES: &[&str] = &[
     "/usr/local/bin",
     "/usr/bin",
@@ -282,22 +548,16 @@ fn parse_subprocess_env_passthrough(value: &str) -> BTreeSet<String> {
 }
 
 fn subprocess_env_passthrough_set(configured: &[String]) -> BTreeSet<String> {
-    let mut values = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
-        .ok()
-        .map(|raw| parse_subprocess_env_passthrough(&raw))
-        .unwrap_or_default();
-    values.extend(
-        configured
-            .iter()
-            .filter_map(|name| normalize_env_passthrough_name(name)),
-    );
-    values
+    // Configuration may opt in ordinary operator variables, but it cannot
+    // reopen the credential blocklist or inject dispatcher control variables.
+    configured
+        .iter()
+        .filter_map(|name| normalize_env_passthrough_name(name))
+        .filter(|name| !should_strip_subprocess_env(name))
+        .collect()
 }
 
-fn is_subprocess_env_passthrough(key: &str, passthrough: &BTreeSet<String>) -> bool {
-    passthrough.contains(key)
-}
-
+#[cfg(test)]
 fn normalize_subprocess_path(path: Option<&str>) -> String {
     let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
         return SANE_PATH_ENTRIES.join(":");
@@ -318,20 +578,11 @@ fn normalize_subprocess_path(path: Option<&str>) -> String {
     entries.join(":")
 }
 
-fn shell_env_cleanup_snippet(configured_passthrough: &[String]) -> String {
+fn shell_env_cleanup_snippet(_configured_passthrough: &[String]) -> String {
+    // Profiles run in the child process, so sanitize again after explicit
+    // profile sourcing. There is intentionally no shell-level escape hatch
+    // for force/passthrough control variables.
     let mut snippet = String::new();
-    let configured_passthrough = configured_passthrough
-        .iter()
-        .filter_map(|name| normalize_env_passthrough_name(name))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if !configured_passthrough.is_empty() {
-        snippet.push_str(
-            "HERMES_SUBPROCESS_ENV_PASSTHROUGH=\"${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} ",
-        );
-        snippet.push_str(&configured_passthrough);
-        snippet.push_str("\"; ");
-    }
     if !SUBPROCESS_ENV_BLOCKLIST_PREFIXES.is_empty() {
         snippet
             .push_str("for __hermes_env in $(env | sed 's/=.*//'); do case \"$__hermes_env\" in ");
@@ -342,16 +593,13 @@ fn shell_env_cleanup_snippet(configured_passthrough: &[String]) -> String {
             snippet.push_str(prefix);
             snippet.push('*');
         }
-        snippet.push_str(") case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" $__hermes_env \"*) ;; *) unset \"$__hermes_env\" ;; esac ;; esac; done; unset __hermes_env; ");
+        snippet.push_str(") unset \"$__hermes_env\" ;; esac; done; unset __hermes_env; ");
     }
     for key in SUBPROCESS_ENV_BLOCKLIST_EXACT {
-        snippet.push_str("case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" ");
+        snippet.push_str("unset ");
         snippet.push_str(key);
-        snippet.push_str(" \"*) ;; *) unset ");
-        snippet.push_str(key);
-        snippet.push_str(" ;; esac; ");
+        snippet.push_str(" 2>/dev/null || true; ");
     }
-    snippet.push_str("unset HERMES_SUBPROCESS_FORCE_TARGETS; ");
     snippet
 }
 
@@ -517,48 +765,17 @@ fn shell_source_prelude(files: &[PathBuf]) -> String {
 }
 
 fn scrub_subprocess_env(cmd: &mut TokioCommand, configured_passthrough: &[String]) {
-    let passthrough = subprocess_env_passthrough_set(configured_passthrough);
-    let mut forced = Vec::new();
-    for (key, _) in std::env::vars() {
-        if let Some(target) = key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX) {
-            cmd.env_remove(&key);
-            if !target.is_empty() && should_strip_subprocess_env(target) {
-                if let Ok(value) = std::env::var(&key) {
-                    forced.push((target.to_string(), value));
-                }
-            }
-        } else if should_strip_subprocess_env(&key)
-            && !is_subprocess_env_passthrough(&key, &passthrough)
-        {
-            cmd.env_remove(key);
+    // Start from a closed environment, rather than deleting selected values
+    // from an inherited one. This prevents future secret names and dispatcher
+    // controls from leaking merely because they were not in a local denylist.
+    let mut environment = hermes_subprocess_env(false);
+    for name in subprocess_env_passthrough_set(configured_passthrough) {
+        if let Ok(value) = std::env::var(&name) {
+            environment.insert(name, value);
         }
     }
-    for (target, value) in forced {
-        cmd.env(target, value);
-    }
-    let forced_targets: Vec<String> = std::env::vars()
-        .filter_map(|(key, _)| {
-            key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX)
-                .filter(|target| !target.is_empty() && should_strip_subprocess_env(target))
-                .map(ToString::to_string)
-        })
-        .collect();
-    if forced_targets.is_empty() {
-        cmd.env_remove("HERMES_SUBPROCESS_FORCE_TARGETS");
-    } else {
-        cmd.env("HERMES_SUBPROCESS_FORCE_TARGETS", forced_targets.join(" "));
-    }
-    if passthrough.is_empty() {
-        cmd.env_remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
-    } else {
-        cmd.env(
-            SUBPROCESS_ENV_PASSTHROUGH_VAR,
-            passthrough.into_iter().collect::<Vec<_>>().join(" "),
-        );
-    }
-
-    let normalized_path = normalize_subprocess_path(std::env::var("PATH").ok().as_deref());
-    cmd.env("PATH", normalized_path);
+    cmd.env_clear();
+    cmd.envs(environment);
 }
 
 fn apply_subprocess_home_policy(cmd: &mut TokioCommand, subprocess_home: Option<&PathBuf>) {

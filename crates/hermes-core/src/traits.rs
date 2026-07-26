@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde_json::Value;
 
-use crate::errors::{AgentError, GatewayError, ToolError};
+use crate::errors::{AgentError, GatewayError, PartialDelivery, ToolError};
 use crate::tool_schema::ToolSchema;
 use crate::types::{CommandOutput, LlmResponse, Skill, SkillMeta, StreamChunk};
 
@@ -61,12 +61,31 @@ pub enum ParseMode {
     Markdown,
     Html,
 }
+/// Whether a native media delivery error conclusively proves that the platform
+/// did not accept the media payload.
+///
+/// Callers may replace native media with a text notice only for explicit
+/// no-effect outcomes. Transport errors, timeouts, malformed success bodies,
+/// and partial deliveries stay [`Uncertain`] so the durable delivery owner can
+/// handle them without risking a duplicate visible send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeMediaFailureClass {
+    /// The adapter cannot represent this native media request.
+    Unsupported,
+    /// The remote platform conclusively rejected the request before accepting it.
+    Rejected,
+    /// Acceptance cannot be ruled out; do not send a fallback.
+    Uncertain,
+}
 
 /// Optional routing hints for platform sends.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SendMessageOptions {
     /// Platform-native thread/topic id for adapters that support threaded replies.
     pub thread_id: Option<String>,
+    /// Original message to reply-reference when resuming a provider-specific
+    /// partial response. Adapters that do not support reply references ignore it.
+    pub reply_to_message_id: Option<String>,
     /// True when the caller supplied the chat/topic id explicitly rather than
     /// letting the gateway choose a configured home/publish target.
     pub explicit_chat_id: bool,
@@ -76,6 +95,11 @@ pub struct SendMessageOptions {
     /// True for lifecycle/status sends that should not become conversational
     /// history boundaries on platforms that backfill channel context.
     pub non_conversational: bool,
+    /// Deliver an audio file as a platform-native voice note when supported.
+    ///
+    /// This is an explicit media intent; adapters must not infer it from a
+    /// container extension such as `.ogg`.
+    pub send_as_voice: bool,
     /// Stable label used when saving full long-form output before truncation.
     pub delivery_audit_label: Option<String>,
 }
@@ -84,9 +108,11 @@ impl SendMessageOptions {
     pub fn threaded(thread_id: Option<&str>) -> Self {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
+            reply_to_message_id: None,
             explicit_chat_id: false,
             notify: false,
             non_conversational: false,
+            send_as_voice: false,
             delivery_audit_label: None,
         }
     }
@@ -94,9 +120,11 @@ impl SendMessageOptions {
     pub fn explicit_threaded(thread_id: Option<&str>) -> Self {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
+            reply_to_message_id: None,
             explicit_chat_id: true,
             notify: false,
             non_conversational: false,
+            send_as_voice: false,
             delivery_audit_label: None,
         }
     }
@@ -104,9 +132,11 @@ impl SendMessageOptions {
     pub fn notify_threaded(thread_id: Option<&str>) -> Self {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
+            reply_to_message_id: None,
             explicit_chat_id: false,
             notify: true,
             non_conversational: false,
+            send_as_voice: false,
             delivery_audit_label: None,
         }
     }
@@ -114,11 +144,18 @@ impl SendMessageOptions {
     pub fn non_conversational_threaded(thread_id: Option<&str>) -> Self {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
+            reply_to_message_id: None,
             explicit_chat_id: false,
             notify: false,
             non_conversational: true,
+            send_as_voice: false,
             delivery_audit_label: None,
         }
+    }
+
+    pub fn with_voice_delivery(mut self, send_as_voice: bool) -> Self {
+        self.send_as_voice = send_as_voice;
+        self
     }
 
     pub fn with_delivery_audit_label(mut self, label: impl Into<String>) -> Self {
@@ -174,6 +211,40 @@ pub trait PlatformAdapter: Send + Sync {
             .await
     }
 
+    /// Classify a failed native media call before any text fallback is sent.
+    ///
+    /// The default is deliberately fail-closed. An adapter must explicitly
+    /// prove that its own error means no media side effect occurred before the
+    /// gateway may replace it with text.
+    fn classify_native_media_failure(&self, _error: &GatewayError) -> NativeMediaFailureClass {
+        NativeMediaFailureClass::Uncertain
+    }
+
+    /// Resume a provider response whose accepted prefix was recorded durably.
+    ///
+    /// A default adapter can only preserve generic routing metadata. Providers
+    /// with split-specific reply semantics must override this method.
+    async fn resume_partial_delivery(&self, partial: &PartialDelivery) -> Result<(), GatewayError> {
+        if !partial.retryable {
+            return Err(GatewayError::PartialDelivery(partial.clone()));
+        }
+        self.send_message_with_options(
+            &partial.chat_id,
+            &partial.remaining_text,
+            None,
+            SendMessageOptions {
+                thread_id: partial.thread_id.clone(),
+                reply_to_message_id: partial.reply_to_message_id.clone(),
+                explicit_chat_id: true,
+                notify: false,
+                non_conversational: partial.non_conversational,
+                send_as_voice: false,
+                delivery_audit_label: None,
+            },
+        )
+        .await
+    }
+
     /// Send or update a status message keyed by stable status type.
     ///
     /// Platforms that can edit messages should override this to keep noisy
@@ -187,6 +258,23 @@ pub trait PlatformAdapter: Send + Sync {
         parse_mode: Option<ParseMode>,
     ) -> Result<(), GatewayError> {
         self.send_message(chat_id, text, parse_mode).await
+    }
+
+    /// Send or update a status message with optional native routing hints.
+    ///
+    /// The default intentionally delegates to the established status method,
+    /// preserving existing adapters' keyed-status behavior while allowing
+    /// adapters with thread-as-channel routing to honor `thread_id`.
+    async fn send_or_update_status_with_options(
+        &self,
+        chat_id: &str,
+        status_key: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        _options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        self.send_or_update_status(chat_id, status_key, text, parse_mode)
+            .await
     }
 
     /// Edit an existing message.
@@ -238,6 +326,30 @@ pub trait PlatformAdapter: Send + Sync {
             .await
     }
 
+    /// Send an image URL with routing hints.
+    ///
+    /// Adapters with native thread-aware image delivery should override this.
+    /// Hints unrelated to thread placement do not disable native delivery.
+    /// A requested thread falls back through the options-aware text path so
+    /// adapters without native thread support do not silently target its root.
+    async fn send_image_url_with_options(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        if options.thread_id.is_none() {
+            return self.send_image_url(chat_id, image_url, caption).await;
+        }
+        let content = match caption.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(caption) => format!("{caption}\n{image_url}"),
+            None => image_url.to_string(),
+        };
+        self.send_message_with_options(chat_id, &content, Some(ParseMode::Plain), options)
+            .await
+    }
+
     /// Delete a previously sent message when the platform supports it.
     async fn delete_message(
         &self,
@@ -253,6 +365,19 @@ pub trait PlatformAdapter: Send + Sync {
     /// platforms without requiring every adapter to expose thread metadata.
     async fn rename_thread(&self, _thread_id: &str, _title: &str) -> Result<bool, GatewayError> {
         Ok(false)
+    }
+
+    /// Resolve the platform channel used by reaction APIs.
+    ///
+    /// Most platforms keep reactions on the parent chat even when replies use
+    /// a thread identifier. Adapters whose thread ID is itself a channel ID
+    /// (for example Discord) may override this without allocating.
+    fn reaction_target_chat_id<'a>(
+        &self,
+        chat_id: &'a str,
+        _thread_id: Option<&'a str>,
+    ) -> &'a str {
+        chat_id
     }
 
     /// Add a reaction emoji to a message if the platform supports it.
@@ -277,6 +402,15 @@ pub trait PlatformAdapter: Send + Sync {
 
     /// Check whether the adapter is currently running.
     fn is_running(&self) -> bool;
+
+    /// Whether the gateway reconnect watcher may attempt another start.
+    ///
+    /// Most adapters recover from an offline state. Adapters that receive a
+    /// terminal provider rejection can opt out until their configuration is
+    /// rebuilt, preventing a permanent error from becoming a retry loop.
+    fn is_reconnectable(&self) -> bool {
+        true
+    }
 
     /// Whether this adapter splits long outgoing text into multiple messages.
     ///

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
-use crate::{ToolPolicyDecision, ToolRegistry};
+use crate::{ToolPolicyDecision, ToolPolicyMode, ToolRegistry};
 
 pub const TOOL_POLICY_SIMULATE_TOOL_NAME: &str = "tool_policy_simulate";
 
@@ -36,6 +36,7 @@ impl ToolHandler for ToolPolicySimulateHandler {
 
         let args = params.get("args").cloned().unwrap_or_else(|| json!({}));
         let decision = self.registry.evaluate_policy_preview(target_tool, &args);
+        let mode = self.registry.policy_mode();
         let target = self.registry.get_tool(target_tool);
         let available = self.registry.is_available(target_tool);
 
@@ -49,7 +50,7 @@ impl ToolHandler for ToolPolicySimulateHandler {
                 "description": target.as_ref().map(|t| t.description.as_str()),
             },
             "args": summarize_value_for_output(&args),
-            "policy": policy_decision_json(&decision),
+            "policy": policy_decision_json(&decision, mode),
             "will_execute": false,
             "counter_effect": "none",
         })
@@ -80,29 +81,42 @@ impl ToolHandler for ToolPolicySimulateHandler {
     }
 }
 
-pub(crate) fn dispatch_policy_params(params: &Value) -> Value {
-    let target_tool = params
+/// Return the target tool name carried by a dispatch to this preview tool.
+///
+/// Registry simulation uses this before handler invocation so the synthetic
+/// preview evaluates the same target call that the dedicated handler would
+/// evaluate in enforce/audit mode.
+pub(crate) fn dispatch_policy_target(params: &Value) -> Option<&str> {
+    params
         .get("tool")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or("<missing>");
-    let args = params.get("args").unwrap_or(&Value::Null);
+}
+
+/// Replace target arguments before evaluating the preview wrapper itself.
+///
+/// In Enforce and Audit, this prevents a sensitive target payload from
+/// blocking the harmless preview handler before it can return the target's
+/// own decision. Simulate mode instead evaluates the raw target arguments
+/// directly and never invokes this handler.
+pub(crate) fn dispatch_policy_wrapper_params(params: &Value) -> Value {
+    let target = dispatch_policy_target(params).unwrap_or("<missing>");
+    let empty_args = Value::Null;
+    let args = params.get("args").unwrap_or(&empty_args);
     json!({
-        "tool": target_tool,
+        "tool": target,
         "args": summarize_value_for_dispatch_policy(args),
         "policy_preview_wrapper": true,
     })
 }
 
-fn policy_decision_json(decision: &ToolPolicyDecision) -> Value {
+fn policy_decision_json(decision: &ToolPolicyDecision, mode: ToolPolicyMode) -> Value {
     json!({
         "decision": if decision.allow { "allow" } else { "deny" },
         "allow": decision.allow,
-        "mode": decision.mode.as_str(),
-        "audited_only": decision.audited_only,
-        "simulated": decision.simulated,
-        "would_block": decision.would_block,
+        "mode": mode.as_str(),
+        "would_block": !decision.allow,
         "code": decision.code.as_deref(),
         "reason": decision.reason.as_deref(),
     })
@@ -137,17 +151,11 @@ fn summarize_value_for_dispatch_policy(value: &Value) -> Value {
         "type": value_type(value),
         "json_bytes": json_bytes,
     });
-
     match value {
-        Value::Object(map) => {
-            summary["key_count"] = json!(map.len());
-        }
-        Value::Array(values) => {
-            summary["item_count"] = json!(values.len());
-        }
+        Value::Object(map) => summary["key_count"] = json!(map.len()),
+        Value::Array(values) => summary["item_count"] = json!(values.len()),
         _ => {}
     }
-
     summary
 }
 
@@ -251,6 +259,36 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(!output.contains("sk-secret"), "{output}");
         assert!(!output.contains("rm -rf /tmp/demo"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn simulate_dispatch_previews_the_wrapped_target_with_raw_target_args() {
+        let registry = ToolRegistry::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        register_counting_target(&registry, calls.clone());
+        register_simulator(&registry);
+        registry.set_policy(
+            ToolPolicyEngine::new(ToolPolicyMode::Simulate)
+                .with_deny_param_patterns(&[r"secret-[a-z]+"]),
+        );
+
+        let output = registry
+            .dispatch_async(
+                TOOL_POLICY_SIMULATE_TOOL_NAME,
+                json!({
+                    "tool": "terminal",
+                    "args": {"command": "echo secret-value"}
+                }),
+            )
+            .await;
+        let parsed: Value = serde_json::from_str(&output).expect("synthetic preview");
+        assert_eq!(parsed["status"], "preview");
+        assert_eq!(parsed["tool"], TOOL_POLICY_SIMULATE_TOOL_NAME);
+        assert_eq!(parsed["policy"]["decision"], "deny");
+        assert_eq!(parsed["policy"]["code"], "params_pattern_denied");
+        assert_eq!(parsed["will_execute"], false);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!output.contains("secret-value"), "{output}");
     }
 
     #[tokio::test]

@@ -232,7 +232,7 @@ def main() -> int:
 
     payload = {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "divergence_file": str(div_path),
+        "divergence_file": div_path.relative_to(repo_root).as_posix(),
         "summary": {
             "items": len(rows),
             "errors": errors,

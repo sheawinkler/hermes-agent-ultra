@@ -10,6 +10,10 @@ pub enum GatewayCommandResult {
     Reply(String),
     /// Reset the session and send a reply.
     ResetSession(String),
+    /// Forget persistent memory for the authenticated gateway subject only.
+    ForgetMemory,
+    /// Export persistent memory for the authenticated gateway subject only.
+    ExportMemory,
     /// Switch the model and send a reply.
     SwitchModel { request: ModelSwitchRequest },
     /// Switch the personality and send a reply.
@@ -71,10 +75,10 @@ pub enum GatewayCommandResult {
     Retry,
     /// Undo the last exchange.
     Undo,
-    /// Approve a user for DM access.
-    ApproveUser { user_id: String },
-    /// Deny and revoke a user from DM access.
-    DenyUser { user_id: String },
+    /// Approve a pending DM pairing code.
+    ApproveUser { pairing_code: String },
+    /// Deny a pending pairing code or revoke its durable DM grant.
+    DenyUser { pairing_code: String },
     /// Resolve a blocked command approval for this gateway session.
     ResolveCommandApproval {
         choice: hermes_tools::approval::ApprovalChoice,
@@ -150,6 +154,17 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &["/clear"],
             description: "Reset the current session",
             usage: "/reset",
+        },
+        CommandInfo {
+            name: "/memory",
+            aliases: &[
+                "/forget-memory",
+                "/memory-forget",
+                "/export-memory",
+                "/memory-export",
+            ],
+            description: "Export or forget persistent memory for this authenticated conversation",
+            usage: "/memory forget|export",
         },
         CommandInfo {
             name: "/topic",
@@ -298,14 +313,14 @@ pub fn all_commands() -> Vec<CommandInfo> {
         CommandInfo {
             name: "/approve",
             aliases: &[],
-            description: "Authorize a user id for DM access (admin only)",
-            usage: "/approve <user_id>",
+            description: "Approve a pending DM pairing code (admin DM only)",
+            usage: "/approve <PAIRING_CODE>",
         },
         CommandInfo {
             name: "/deny",
             aliases: &[],
-            description: "Revoke a user id from DM access (admin only)",
-            usage: "/deny <user_id>",
+            description: "Deny or revoke a DM pairing code (admin DM only)",
+            usage: "/deny <PAIRING_CODE>",
         },
         CommandInfo {
             name: "/reload_mcp",
@@ -536,8 +551,8 @@ Usage:\n\
   /topic <id>        Restore a previous session into the current topic\n\n\
 Rust gateway behavior:\n\
   Telegram messages with a non-General topic thread are routed as independent \
-session lanes using chat_id:thread_id. /new inside a topic resets only that \
-topic lane; General topic (thread 1) and threadless messages stay in the root chat."
+session lanes by their parent chat and platform topic ID. /new inside a topic \
+resets only that topic lane; General topic (thread 1) and threadless messages stay in the root chat."
         .to_string()
 }
 
@@ -622,6 +637,38 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/start" => GatewayCommandResult::Noop,
         "/new" => GatewayCommandResult::ResetSession("🆕 New conversation started.".to_string()),
         "/reset" | "/clear" => GatewayCommandResult::ResetSession("🔄 Session reset.".to_string()),
+        "/memory" => {
+            if args.eq_ignore_ascii_case("forget") {
+                GatewayCommandResult::ForgetMemory
+            } else if args.eq_ignore_ascii_case("export") {
+                GatewayCommandResult::ExportMemory
+            } else {
+                GatewayCommandResult::Reply(
+                    "Usage: /memory forget|export. Subject, principal, provider, and output arguments are not accepted."
+                        .to_string(),
+                )
+            }
+        }
+        "/forget_memory" | "/memory_forget" => {
+            if args.is_empty() {
+                GatewayCommandResult::ForgetMemory
+            } else {
+                GatewayCommandResult::Reply(
+                    "Usage: /memory forget. Subject, principal, provider, and output arguments are not accepted."
+                        .to_string(),
+                )
+            }
+        }
+        "/export_memory" | "/memory_export" => {
+            if args.is_empty() {
+                GatewayCommandResult::ExportMemory
+            } else {
+                GatewayCommandResult::Reply(
+                    "Usage: /memory export. Subject, principal, provider, and output arguments are not accepted."
+                        .to_string(),
+                )
+            }
+        }
         "/topic" => match args.to_ascii_lowercase().as_str() {
             "" | "status" => GatewayCommandResult::Reply(telegram_topic_status_text()),
             "help" | "?" | "-h" | "--help" => {
@@ -685,7 +732,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 }
             } else {
                 GatewayCommandResult::ApproveUser {
-                    user_id: args.clone(),
+                    pairing_code: args.clone(),
                 }
             }
         }
@@ -703,7 +750,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 }
             } else {
                 GatewayCommandResult::DenyUser {
-                    user_id: args.clone(),
+                    pairing_code: args.clone(),
                 }
             }
         }
@@ -950,6 +997,53 @@ mod tests {
         match handle_command("/new") {
             GatewayCommandResult::ResetSession(_) => {}
             other => panic!("Expected ResetSession, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn memory_forget_command_accepts_no_targeting_arguments() {
+        assert!(matches!(
+            handle_command("/memory forget"),
+            GatewayCommandResult::ForgetMemory
+        ));
+        assert!(matches!(
+            handle_command("/forget-memory"),
+            GatewayCommandResult::ForgetMemory
+        ));
+        for attempted_target in [
+            "/memory forget user-2",
+            "/memory forget --subject=user-2",
+            "/memory forget --provider=remote",
+            "/forget-memory --principal=user-2",
+        ] {
+            let GatewayCommandResult::Reply(reply) = handle_command(attempted_target) else {
+                panic!("targeting arguments must be rejected: {attempted_target}");
+            };
+            assert!(reply.contains("not accepted"));
+        }
+    }
+
+    #[test]
+    fn memory_export_command_accepts_no_targeting_or_output_arguments() {
+        assert!(matches!(
+            handle_command("/memory export"),
+            GatewayCommandResult::ExportMemory
+        ));
+        assert!(matches!(
+            handle_command("/export-memory"),
+            GatewayCommandResult::ExportMemory
+        ));
+        for attempted_argument in [
+            "/memory export user-2",
+            "/memory export --subject=user-2",
+            "/memory export --provider=remote",
+            "/memory export --output=/tmp/export.json",
+            "/export-memory --principal=user-2",
+        ] {
+            let GatewayCommandResult::Reply(reply) = handle_command(attempted_argument) else {
+                panic!("export arguments must be rejected: {attempted_argument}");
+            };
+            assert!(reply.contains("not accepted"));
         }
     }
 
@@ -1244,13 +1338,17 @@ mod tests {
     }
 
     #[test]
-    fn test_admin_commands() {
-        match handle_command("/approve alice") {
-            GatewayCommandResult::ApproveUser { user_id } => assert_eq!(user_id, "alice"),
+    fn test_dm_pairing_admin_commands() {
+        match handle_command("/approve A1B2C3D4") {
+            GatewayCommandResult::ApproveUser { pairing_code } => {
+                assert_eq!(pairing_code, "A1B2C3D4")
+            }
             other => panic!("Expected ApproveUser, got {:?}", other),
         }
-        match handle_command("/deny bob") {
-            GatewayCommandResult::DenyUser { user_id } => assert_eq!(user_id, "bob"),
+        match handle_command("/deny E5F6G7H8") {
+            GatewayCommandResult::DenyUser { pairing_code } => {
+                assert_eq!(pairing_code, "E5F6G7H8")
+            }
             other => panic!("Expected DenyUser, got {:?}", other),
         }
     }

@@ -13,6 +13,7 @@ use reqwest::Client;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::provider::{map_reqwest_body_error, map_reqwest_transport_error};
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
     StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
@@ -185,15 +186,14 @@ impl LlmProvider for BedrockProvider {
         )? {
             request = request.header(key, value);
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|err| AgentError::LlmApi(format!("Bedrock Converse request failed: {err}")))?;
+        let response = request.send().await.map_err(|error| {
+            map_reqwest_transport_error("Bedrock Converse request failed", error)
+        })?;
         let status = response.status();
         let payload = response
             .text()
             .await
-            .map_err(|err| AgentError::LlmApi(format!("Bedrock response read failed: {err}")))?;
+            .map_err(|error| map_reqwest_body_error("Bedrock response read failed", error))?;
         if !status.is_success() {
             return Err(map_bedrock_error(status.as_u16(), &payload));
         }
@@ -288,7 +288,7 @@ impl LlmProvider for BedrockProvider {
             let response = match request.send().await {
                 Ok(response) => response,
                 Err(err) => {
-                    yield Err(AgentError::LlmApi(format!("Bedrock ConverseStream request failed: {err}")));
+                    yield Err(map_reqwest_transport_error("Bedrock ConverseStream request failed", err));
                     return;
                 }
             };
@@ -309,7 +309,7 @@ impl LlmProvider for BedrockProvider {
                 let bytes = match chunk_result {
                     Ok(bytes) => bytes,
                     Err(err) => {
-                        yield Err(AgentError::LlmApi(format!("Bedrock ConverseStream read failed: {err}")));
+                        yield Err(map_reqwest_body_error("Bedrock ConverseStream read failed", err));
                         return;
                     }
                 };
@@ -355,7 +355,7 @@ impl LlmProvider for BedrockProvider {
                 }
             }
             if !buffer.is_empty() {
-                yield Err(AgentError::LlmApi(format!(
+                yield Err(AgentError::Io(format!(
                     "Incomplete Bedrock ConverseStream event frame: {} trailing bytes",
                     buffer.len()
                 )));

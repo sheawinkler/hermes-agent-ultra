@@ -1,3 +1,5 @@
+const PROFILE_EXECUTION_MODE_STARTUP_ONLY: &str = "execution posture is startup-only";
+
 fn gateway_profiles_dir() -> PathBuf {
     hermes_config::hermes_home().join("profiles")
 }
@@ -58,6 +60,26 @@ fn yaml_string(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn reject_startup_only_profile_fields(
+    map: &serde_yaml::Mapping,
+    name: &str,
+    path: &Path,
+) -> Result<(), String> {
+    let execution_mode_key = serde_yaml::Value::String("execution_mode".to_string());
+    if map.contains_key(&execution_mode_key) {
+        return Err(format!(
+            "profile '{}' at {} declares execution_mode, but {PROFILE_EXECUTION_MODE_STARTUP_ONLY}; restart with the desired profile or --execution-mode",
+            name,
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn rejects_profile_switch(error: &str) -> bool {
+    error.contains(PROFILE_EXECUTION_MODE_STARTUP_ONLY)
+}
+
 fn load_gateway_profile_overlay(requested: &str) -> Result<GatewayProfileOverlay, String> {
     let profiles_dir = gateway_profiles_dir();
     let aliases = load_gateway_profile_aliases(&profiles_dir);
@@ -76,6 +98,7 @@ fn load_gateway_profile_overlay(requested: &str) -> Result<GatewayProfileOverlay
     let Some(map) = value.as_mapping() else {
         return Err(format!("profile '{}' must be a YAML mapping", name));
     };
+    reject_startup_only_profile_fields(map, &name, &path)?;
 
     let model = yaml_string(map, "model");
     let provider = yaml_string(map, "provider").or_else(|| {
@@ -140,4 +163,63 @@ fn render_profile_overlay_reply(requested: &str, overlay: &GatewayProfileOverlay
         applied,
         overlay.path.display()
     )
+}
+
+fn render_profile_switch_rejected_reply(requested: &str, error: &str) -> String {
+    format!(
+        "⚠️ Profile switch rejected for '{}': {error}",
+        requested.trim()
+    )
+}
+
+#[cfg(test)]
+mod profile_overlay_tests {
+    use super::*;
+
+    #[test]
+    fn profile_execution_mode_is_rejected_as_startup_only() {
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("execution_mode: reviewed\nmodel: test/model\n")
+                .expect("parse fixture");
+        let map = value.as_mapping().expect("mapping fixture");
+        let error = reject_startup_only_profile_fields(
+            map,
+            "review",
+            Path::new("/profiles/review.yaml"),
+        )
+        .expect_err("runtime profile switch must reject execution_mode");
+
+        assert!(error.contains("startup-only"));
+        assert!(rejects_profile_switch(&error));
+        assert!(!rejects_profile_switch("profile file does not exist"));
+        assert!(error.contains("--execution-mode"));
+        let reply = render_profile_switch_rejected_reply("review", &error);
+        assert!(reply.contains("rejected"));
+        assert!(!reply.contains("switched"));
+    }
+
+    #[test]
+    fn model_and_personality_profile_overlay_remain_runtime_switchable() {
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("model: test/model\npersonality: focused\n")
+                .expect("parse fixture");
+        let map = value.as_mapping().expect("mapping fixture");
+        reject_startup_only_profile_fields(map, "focused", Path::new("/profiles/focused.yaml"))
+            .expect("model/personality-only profile must be accepted");
+
+        let overlay = GatewayProfileOverlay {
+            name: "focused".to_string(),
+            path: PathBuf::from("/profiles/focused.yaml"),
+            model: Some("test/model".to_string()),
+            provider: None,
+            personality: Some("focused".to_string()),
+            home: None,
+        };
+        let mut state = SessionRuntimeState::default();
+        apply_gateway_profile_overlay(&mut state, &overlay);
+
+        assert_eq!(state.profile.as_deref(), Some("focused"));
+        assert_eq!(state.model.as_deref(), Some("test/model"));
+        assert_eq!(state.personality.as_deref(), Some("focused"));
+    }
 }

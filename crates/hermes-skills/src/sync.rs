@@ -1,14 +1,20 @@
 //! Bundled and official skill synchronization.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::skill::SkillError;
+use crate::trust::{
+    canonical_bundle_digest, full_skill_scan, load_lock_for_migration, store_lock,
+    SkillCompatibility, SkillLockEntryV2, SkillLockLoad, SkillLockV2, SkillPackageIdentityV2,
+    SkillPackageManifestV2, SkillPackageProof, SkillPackageSource, SkillPermissions,
+    SkillQuarantineReason,
+};
 use crate::usage::{read_skill_name_from_dir, read_skill_name_from_file};
 
 pub const NO_BUNDLED_SKILLS_MARKER: &str = ".no-bundled-skills";
@@ -19,6 +25,10 @@ pub struct SkillSyncConfig {
     pub optional_dir: PathBuf,
     pub skills_dir: PathBuf,
     pub manifest_file: PathBuf,
+    /// Compile-time/source-manifest digests for embedded builtins. An absent
+    /// entry deliberately leaves copied files untracked and therefore
+    /// non-executable through the v2 store.
+    pub embedded_manifest_digests: BTreeMap<String, String>,
 }
 
 impl SkillSyncConfig {
@@ -29,7 +39,19 @@ impl SkillSyncConfig {
             optional_dir,
             skills_dir,
             manifest_file,
+            embedded_manifest_digests: BTreeMap::new(),
         }
+    }
+
+    /// Bind verified compile-time/source manifest digests for the embedded
+    /// packages this sync operation is permitted to activate.
+    #[must_use]
+    pub fn with_embedded_manifest_digests(
+        mut self,
+        embedded_manifest_digests: BTreeMap<String, String>,
+    ) -> Self {
+        self.embedded_manifest_digests = embedded_manifest_digests;
+        self
     }
 
     pub fn hermes_home(&self) -> PathBuf {
@@ -104,35 +126,6 @@ pub struct RemovePristineBundledSkillsResult {
     pub skipped: Vec<PristineBundledSkillSkip>,
     pub dry_run: bool,
     pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SkillHubInstalledEntry {
-    name: String,
-    source: String,
-    identifier: String,
-    trust_level: String,
-    scan_verdict: String,
-    content_hash: String,
-    install_path: String,
-    #[serde(default)]
-    files: Vec<String>,
-    #[serde(default)]
-    metadata: Value,
-    installed_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SkillsHubLockFile {
-    #[serde(default = "default_lock_version")]
-    version: u32,
-    #[serde(default)]
-    installed: Vec<SkillHubInstalledEntry>,
-}
-
-fn default_lock_version() -> u32 {
-    1
 }
 
 pub fn read_manifest(path: &Path) -> BTreeMap<String, String> {
@@ -281,7 +274,11 @@ pub fn compute_relative_dest(skill_dir: &Path, bundled_dir: &Path) -> PathBuf {
 
 pub fn discover_bundled_skills(bundled_dir: &Path) -> Vec<BundledSkill> {
     let mut out = Vec::new();
-    if !bundled_dir.exists() {
+    if !bundled_dir.exists()
+        || fs::symlink_metadata(bundled_dir)
+            .map(|metadata| metadata.file_type().is_symlink() || !metadata.is_dir())
+            .unwrap_or(true)
+    {
         return out;
     }
     let mut stack = vec![bundled_dir.to_path_buf()];
@@ -297,18 +294,26 @@ pub fn discover_bundled_skills(bundled_dir: &Path) -> Vec<BundledSkill> {
             if name.starts_with('.') || name == "node_modules" || name == "__pycache__" {
                 continue;
             }
-            if !path.is_dir() {
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 continue;
             }
             let skill_md = path.join("SKILL.md");
-            if skill_md.exists() {
-                out.push(BundledSkill {
-                    name: read_skill_name(&skill_md, name),
-                    relative_dest: compute_relative_dest(&path, bundled_dir),
-                    path,
-                });
-            } else {
-                stack.push(path);
+            match fs::symlink_metadata(&skill_md) {
+                Ok(skill_metadata)
+                    if !skill_metadata.file_type().is_symlink() && skill_metadata.is_file() =>
+                {
+                    out.push(BundledSkill {
+                        name: read_skill_name(&skill_md, name),
+                        relative_dest: compute_relative_dest(&path, bundled_dir),
+                        path,
+                    });
+                }
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => stack.push(path),
+                Err(_) => continue,
             }
         }
     }
@@ -321,18 +326,66 @@ pub fn discover_bundled_skills(bundled_dir: &Path) -> Vec<BundledSkill> {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), SkillError> {
-    fs::create_dir_all(dst)?;
+    let source_metadata = fs::symlink_metadata(src)?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err(SkillError::Quarantined {
+            reason: SkillQuarantineReason::FilesystemViolation,
+            detail: format!("sync source is not a regular directory: {}", src.display()),
+        });
+    }
+    match fs::symlink_metadata(dst) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::FilesystemViolation,
+                detail: format!(
+                    "sync destination is not a regular directory: {}",
+                    dst.display()
+                ),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::create_dir_all(dst)?,
+        Err(error) => return Err(error.into()),
+    }
     let entries = fs::read_dir(src)?;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
+        let metadata = fs::symlink_metadata(&src_path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::FilesystemViolation,
+                detail: format!("sync source contains a symlink: {}", src_path.display()),
+            });
+        }
+        if metadata.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
-        } else if src_path.is_file() {
-            if let Some(parent) = dst_path.parent() {
-                fs::create_dir_all(parent)?;
+        } else if metadata.is_file() {
+            let bytes = fs::read(&src_path)?;
+            if std::str::from_utf8(&bytes).is_err() {
+                return Err(SkillError::Quarantined {
+                    reason: SkillQuarantineReason::FilesystemViolation,
+                    detail: format!(
+                        "sync source contains a non-UTF-8 file: {}",
+                        src_path.display()
+                    ),
+                });
             }
-            fs::copy(&src_path, &dst_path)?;
+            let mut destination = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&dst_path)?;
+            destination.write_all(&bytes)?;
+            destination.sync_all()?;
+        } else {
+            return Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::FilesystemViolation,
+                detail: format!(
+                    "sync source contains a non-regular file: {}",
+                    src_path.display()
+                ),
+            });
         }
     }
     Ok(())
@@ -418,10 +471,24 @@ pub fn sync_skills(config: &SkillSyncConfig, quiet: bool) -> Result<SkillSyncRes
         return Ok(SkillSyncResult::default());
     }
     fs::create_dir_all(&config.skills_dir)?;
+    // Do not overwrite a v1 lock during sync: legacy records must be
+    // quarantined/reverified rather than silently receiving a clean v2 claim.
+    let _ = v2_lock(&config.skills_dir)?;
     let mut result = SkillSyncResult::default();
     let mut manifest = read_manifest(&config.manifest_file);
     let bundled = discover_bundled_skills(&config.bundled_dir);
     result.total_bundled = bundled.len();
+    // Validate every source bundle that is explicitly eligible for embedded
+    // activation before any filesystem copy occurs.
+    let mut verified_embedded_source_digests = BTreeMap::new();
+    for skill in &bundled {
+        if config.embedded_manifest_digests.contains_key(&skill.name) {
+            verified_embedded_source_digests.insert(
+                skill.name.clone(),
+                verified_embedded_source_digest(config, &skill.name, &skill.path)?,
+            );
+        }
+    }
 
     let bundled_names: BTreeSet<String> = bundled.iter().map(|s| s.name.clone()).collect();
     let stale: Vec<String> = manifest
@@ -489,6 +556,28 @@ pub fn sync_skills(config: &SkillSyncConfig, quiet: bool) -> Result<SkillSyncRes
             Err(err) => result
                 .errors
                 .push(format!("Failed to copy {}: {}", skill.name, err)),
+        }
+    }
+
+    // A copied embedded bundle becomes executable only after its current source
+    // and destination both match an explicitly supplied immutable manifest
+    // digest. Unlisted bundles remain untracked, so legacy bootstrap copying
+    // cannot turn a source directory into an executable package.
+    for skill in &bundled {
+        let Some(source_digest) = verified_embedded_source_digests.get(&skill.name) else {
+            continue;
+        };
+        let dest = config.skills_dir.join(&skill.relative_dest);
+        let Ok(metadata) = fs::symlink_metadata(&dest) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let destination_digest =
+            canonical_bundle_digest(&dest).map_err(|error| SkillError::Io(error.to_string()))?;
+        if destination_digest.as_str() == source_digest.as_str() {
+            record_official_lock(config, &skill.name, &skill.relative_dest, &dest)?;
         }
     }
 
@@ -587,32 +676,41 @@ pub fn remove_pristine_bundled_skills(
     Ok(result)
 }
 
-fn skills_hub_lock_path(skills_dir: &Path) -> PathBuf {
-    skills_dir.join(".hub").join("lock.json")
-}
-
-fn read_hub_lock(skills_dir: &Path) -> SkillsHubLockFile {
-    let Ok(raw) = fs::read_to_string(skills_hub_lock_path(skills_dir)) else {
-        return SkillsHubLockFile {
-            version: 1,
-            installed: Vec::new(),
-        };
-    };
-    serde_json::from_str::<SkillsHubLockFile>(&raw).unwrap_or(SkillsHubLockFile {
-        version: 1,
-        installed: Vec::new(),
-    })
-}
-
-fn write_hub_lock(skills_dir: &Path, lock: &SkillsHubLockFile) -> Result<(), SkillError> {
-    let path = skills_hub_lock_path(skills_dir);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+fn v2_lock(skills_dir: &Path) -> Result<SkillLockV2, SkillError> {
+    match load_lock_for_migration(skills_dir).map_err(|error| SkillError::Io(error.to_string()))? {
+        SkillLockLoad::V2(lock) => Ok(lock),
+        SkillLockLoad::Legacy { .. } => Err(SkillError::Quarantined {
+            reason: SkillQuarantineReason::LegacyLock,
+            detail: "legacy skill lock must be quarantined and explicitly reverified".to_string(),
+        }),
     }
-    let raw = serde_json::to_string_pretty(lock)
-        .map_err(|e| SkillError::Parse(format!("Failed to encode hub lock: {e}")))?;
-    fs::write(path, raw)?;
-    Ok(())
+}
+
+fn verified_embedded_source_digest(
+    config: &SkillSyncConfig,
+    name: &str,
+    skill_dir: &Path,
+) -> Result<String, SkillError> {
+    let expected = config
+        .embedded_manifest_digests
+        .get(name)
+        .ok_or_else(|| SkillError::Quarantined {
+            reason: SkillQuarantineReason::InvalidEmbeddedManifest,
+            detail: format!(
+                "embedded skill {name} has no compiled/source manifest digest; copied files remain untracked"
+            ),
+        })?;
+    let actual =
+        canonical_bundle_digest(skill_dir).map_err(|error| SkillError::Io(error.to_string()))?;
+    if &actual != expected {
+        return Err(SkillError::Quarantined {
+            reason: SkillQuarantineReason::InvalidEmbeddedManifest,
+            detail: format!(
+                "embedded skill {name} differs from its compiled/source manifest digest"
+            ),
+        });
+    }
+    Ok(expected.clone())
 }
 
 fn record_official_lock(
@@ -621,25 +719,49 @@ fn record_official_lock(
     rel_dest: &Path,
     skill_dir: &Path,
 ) -> Result<(), SkillError> {
-    let mut lock = read_hub_lock(&config.skills_dir);
-    let install_path = rel_dest.to_string_lossy().replace('\\', "/");
-    let now = Utc::now().to_rfc3339();
-    lock.installed.retain(|entry| entry.name != name);
-    lock.installed.push(SkillHubInstalledEntry {
-        name: name.to_string(),
-        source: "official".to_string(),
-        identifier: format!("official/{install_path}"),
-        trust_level: "builtin".to_string(),
-        scan_verdict: "clean".to_string(),
-        content_hash: format!("md5:{}", dir_hash(skill_dir)),
+    let mut lock = v2_lock(&config.skills_dir)?;
+    let install_path = crate::normalize_relative_package_path(rel_dest)
+        .map_err(|error| SkillError::Io(error.to_string()))?;
+    let source_manifest_digest = verified_embedded_source_digest(config, name, skill_dir)?;
+    let content_digest =
+        canonical_bundle_digest(skill_dir).map_err(|error| SkillError::Io(error.to_string()))?;
+    let identity = SkillPackageIdentityV2::new(
+        name,
+        format!("embedded-{}", &content_digest["sha256:".len()..][..16]),
+        format!("embedded://{install_path}"),
+        "hermes-embedded",
+        content_digest.clone(),
+        content_digest,
+        Utc::now().to_rfc3339(),
+    );
+    let mut manifest = SkillPackageManifestV2::new(
+        SkillPackageSource::EmbeddedBuiltin,
+        identity,
+        SkillPackageProof::EmbeddedManifest {
+            manifest_digest: source_manifest_digest,
+        },
+        full_skill_scan(skill_dir),
+        SkillCompatibility::default(),
+        SkillPermissions::default(),
+        Vec::new(),
+    );
+    manifest
+        .refresh_manifest_digest()
+        .map_err(|error| SkillError::Io(error.to_string()))?;
+    lock.packages
+        .retain(|entry| entry.manifest.identity.name != name);
+    lock.packages.push(SkillLockEntryV2 {
         install_path,
-        files: Vec::new(),
-        metadata: Value::Null,
-        installed_at: now.clone(),
-        updated_at: now,
+        manifest,
+        quarantine: None,
     });
-    lock.installed.sort_by(|a, b| a.name.cmp(&b.name));
-    write_hub_lock(&config.skills_dir, &lock)
+    lock.packages.sort_by(|left, right| {
+        left.manifest
+            .identity
+            .stable_key()
+            .cmp(&right.manifest.identity.stable_key())
+    });
+    store_lock(&config.skills_dir, &lock).map_err(|error| SkillError::Io(error.to_string()))
 }
 
 fn discover_optional_skills(optional_dir: &Path) -> Vec<BundledSkill> {
@@ -651,8 +773,12 @@ fn backfill_optional_provenance(config: &SkillSyncConfig) -> Result<Vec<String>,
     if !config.optional_dir.exists() {
         return Ok(out);
     }
-    let lock = read_hub_lock(&config.skills_dir);
-    let existing: BTreeSet<String> = lock.installed.into_iter().map(|entry| entry.name).collect();
+    let lock = v2_lock(&config.skills_dir)?;
+    let existing: BTreeSet<String> = lock
+        .packages
+        .into_iter()
+        .map(|entry| entry.manifest.identity.name)
+        .collect();
     for skill in discover_optional_skills(&config.optional_dir) {
         if existing.contains(&skill.name) {
             continue;
@@ -817,6 +943,10 @@ pub fn restore_official_optional_skill(
     if !restore {
         return Ok(result);
     }
+    // Verify the immutable compiled/source manifest before moving an
+    // incumbent aside. A mutable optional source cannot cause a destructive
+    // restore and then fail only after the active payload was replaced.
+    let _ = verified_embedded_source_digest(config, &skill.name, &skill.path)?;
 
     let backup_root = PathBuf::from(&result.backup_dir);
     let canonical_rel = skill.relative_dest.to_string_lossy().replace('\\', "/");
@@ -947,8 +1077,58 @@ mod tests {
         assert!(cfg.skills_dir.join("category/DESCRIPTION.md").exists());
         let manifest = read_manifest(&cfg.manifest_file);
         assert_eq!(manifest["new-skill"].len(), 32);
+        assert!(crate::load_lock(&cfg.skills_dir)
+            .unwrap()
+            .packages
+            .is_empty());
     }
 
+    #[test]
+    fn sync_tracks_only_manifest_verified_embedded_bundles() {
+        let dir = tempdir().unwrap();
+        let bundled = setup_bundled(dir.path());
+        let source = bundled.join("category/new-skill");
+        let mut embedded_manifest_digests = BTreeMap::new();
+        embedded_manifest_digests.insert(
+            "new-skill".to_string(),
+            canonical_bundle_digest(&source).unwrap(),
+        );
+        let cfg =
+            config(dir.path(), bundled).with_embedded_manifest_digests(embedded_manifest_digests);
+
+        sync_skills(&cfg, true).unwrap();
+
+        let lock = crate::load_lock(&cfg.skills_dir).unwrap();
+        assert_eq!(lock.packages.len(), 1);
+        assert_eq!(lock.packages[0].manifest.identity.name, "new-skill");
+        assert_eq!(
+            lock.packages[0].manifest.source,
+            SkillPackageSource::EmbeddedBuiltin
+        );
+        assert_eq!(lock.packages[0].install_path, "category/new-skill");
+    }
+
+    #[test]
+    fn sync_rejects_tampered_embedded_source_before_copy() {
+        let dir = tempdir().unwrap();
+        let bundled = setup_bundled(dir.path());
+        let source = bundled.join("category/new-skill");
+        let expected = canonical_bundle_digest(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Tampered").unwrap();
+        let mut embedded_manifest_digests = BTreeMap::new();
+        embedded_manifest_digests.insert("new-skill".to_string(), expected);
+        let cfg =
+            config(dir.path(), bundled).with_embedded_manifest_digests(embedded_manifest_digests);
+
+        assert!(matches!(
+            sync_skills(&cfg, true),
+            Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::InvalidEmbeddedManifest,
+                ..
+            })
+        ));
+        assert!(!cfg.skills_dir.join("category/new-skill").exists());
+    }
     #[test]
     fn sync_skills_honors_bundled_skills_opt_out_marker() {
         let dir = tempdir().unwrap();
@@ -1137,7 +1317,7 @@ mod tests {
     fn optional_provenance_backfill_and_restore_with_backup() {
         let dir = tempdir().unwrap();
         let bundled = setup_bundled(dir.path());
-        let cfg = config(dir.path(), bundled);
+        let mut cfg = config(dir.path(), bundled);
         let optional = cfg.optional_dir.join("mlops/training/trl-fine-tuning");
         fs::create_dir_all(&optional).unwrap();
         fs::write(
@@ -1145,6 +1325,10 @@ mod tests {
             "---\nname: fine-tuning-with-trl\n---\n# official\n",
         )
         .unwrap();
+        cfg.embedded_manifest_digests.insert(
+            "fine-tuning-with-trl".to_string(),
+            canonical_bundle_digest(&optional).unwrap(),
+        );
         let active = cfg.skills_dir.join("mlops/training/trl-fine-tuning");
         fs::create_dir_all(&active).unwrap();
         fs::write(
@@ -1175,5 +1359,68 @@ mod tests {
         assert!(fs::read_to_string(active.join("SKILL.md"))
             .unwrap()
             .contains("official"));
+    }
+
+    #[test]
+    fn optional_restore_refuses_unpinned_source_before_moving_incumbent() {
+        let directory = tempdir().unwrap();
+        let bundled = setup_bundled(directory.path());
+        let config = config(directory.path(), bundled);
+        let optional = config.optional_dir.join("ops/pinned");
+        let active = config.skills_dir.join("ops/pinned");
+        fs::create_dir_all(&optional).unwrap();
+        fs::create_dir_all(&active).unwrap();
+        fs::write(
+            optional.join("SKILL.md"),
+            "---\nname: pinned\n---\n# mutable source\n",
+        )
+        .unwrap();
+        fs::write(
+            active.join("SKILL.md"),
+            "---\nname: pinned\n---\n# incumbent\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            restore_official_optional_skill(&config, "pinned", true),
+            Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::InvalidEmbeddedManifest,
+                ..
+            })
+        ));
+        assert!(fs::read_to_string(active.join("SKILL.md"))
+            .unwrap()
+            .contains("incumbent"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_copy_rejects_symlinked_or_binary_payloads() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "---\nname: source\n---\n# Safe\n").unwrap();
+        fs::write(directory.path().join("outside"), "outside").unwrap();
+        symlink(directory.path().join("outside"), source.join("linked")).unwrap();
+        assert!(matches!(
+            copy_dir_recursive(&source, &destination),
+            Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::FilesystemViolation,
+                ..
+            })
+        ));
+
+        fs::remove_file(source.join("linked")).unwrap();
+        fs::write(source.join("binary"), [0xff_u8, 1, 2]).unwrap();
+        assert!(matches!(
+            copy_dir_recursive(&source, &directory.path().join("binary-destination")),
+            Err(SkillError::Quarantined {
+                reason: SkillQuarantineReason::FilesystemViolation,
+                ..
+            })
+        ));
     }
 }

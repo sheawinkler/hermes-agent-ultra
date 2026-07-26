@@ -73,10 +73,10 @@ All variables go in `~/.hermes/.env`. You can also set them with `hermes config 
 | `STEPFUN_BASE_URL` | Override StepFun base URL (default: `https://api.stepfun.com/v1`) |
 | `OLLAMA_API_KEY` | Ollama Cloud API key — managed Ollama catalog without local GPU ([ollama.com/settings/keys](https://ollama.com/settings/keys)) |
 | `OLLAMA_BASE_URL` | Override Ollama Cloud base URL (default: `https://ollama.com/v1`) |
-| `XAI_API_KEY` | xAI (Grok) API key for chat + TTS ([console.x.ai](https://console.x.ai/)) |
+| `XAI_API_KEY` | xAI (Grok) API key for chat (and any xAI surfaces that exist outside TTS/STT). **Not** a Rust `transcription` STT provider; upstream-only xAI TTS names fail closed. ([console.x.ai](https://console.x.ai/)) |
 | `XAI_BASE_URL` | Override xAI base URL (default: `https://api.x.ai/v1`) |
 | `HERMES_WEB_XAI_MODEL` | Override the xAI web-search model (default: `grok-build-0.1`) |
-| `MISTRAL_API_KEY` | Mistral API key for Voxtral TTS and Voxtral STT ([console.mistral.ai](https://console.mistral.ai)) |
+| `MISTRAL_API_KEY` | Mistral API key for the callable `transcription` tool (and other Mistral surfaces where configured) ([console.mistral.ai](https://console.mistral.ai)) |
 | `AWS_REGION` | AWS region for Bedrock inference (e.g. `us-east-1`, `eu-central-1`). Read by boto3. |
 | `AWS_PROFILE` | AWS named profile for Bedrock authentication (reads `~/.aws/credentials`). Leave unset to use default boto3 credential chain. |
 | `BEDROCK_BASE_URL` | Override Bedrock runtime base URL (default: `https://bedrock-runtime.us-east-1.amazonaws.com`; usually leave unset and use `AWS_REGION` instead) |
@@ -87,9 +87,16 @@ All variables go in `~/.hermes/.env`. You can also set them with `hermes config 
 | `OPENCODE_GO_BASE_URL` | Override OpenCode Go base URL |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Explicit Claude Code token override if you export one manually |
 | `HERMES_MODEL` | Override model name at process level (used by cron scheduler; prefer `config.yaml` for normal use) |
-| `VOICE_TOOLS_OPENAI_KEY` | Preferred OpenAI key for OpenAI speech-to-text and text-to-speech providers |
-| `HERMES_LOCAL_STT_COMMAND` | Optional local speech-to-text command template. Supports `{input_path}`, `{output_dir}`, `{language}`, and `{model}` placeholders |
-| `HERMES_LOCAL_STT_LANGUAGE` | Default language passed to `HERMES_LOCAL_STT_COMMAND` or auto-detected local `whisper` CLI fallback (default: `en`) |
+| `VOICE_TOOLS_OPENAI_KEY` | Preferred OpenAI key for OpenAI `text_to_speech` and the callable `transcription` tool |
+| `HERMES_STT_PROVIDER` | Default STT provider when the `transcription` tool omits `provider` (`openai`, `groq`, or `mistral`). Alias: `STT_PROVIDER`. Does **not** come from `config.yaml` `stt:` |
+| `STT_PROVIDER` | Alias of `HERMES_STT_PROVIDER` |
+| `STT_MISTRAL_MODEL` | Override the Mistral STT model (default: `voxtral-mini-latest`) |
+| `STT_MISTRAL_BASE_URL` | Override the Mistral STT base URL (also `MISTRAL_BASE_URL`) |
+| `STT_GROQ_BASE_URL` | Override the Groq STT base URL (also `GROQ_BASE_URL`) |
+| `HERMES_LOCAL_STT_COMMAND` | **Not implemented** in the Rust `TranscriptionHandler` — reserved/legacy name only; do not expect local-command STT |
+| `HERMES_LOCAL_STT_LANGUAGE` | **Not implemented** with local whisper CLI fallback in this runtime — reserved/legacy name only |
+| `HERMES_MEDIA_CACHE_DIR` | Media cache root used by delivery and as an approved root for external uploads such as `transcription` `audio_path` (default: `/tmp/hermes-media-cache`). Does **not** make the whole workspace uploadable |
+| `HERMES_MEDIA_ALLOW_DIRS` | Extra absolute directories whose canonical files may be uploaded by `transcription` (and other external media-upload paths). Platform path separator (`:` on Unix, `;` on Windows); commas also accepted. Example Unix: `/var/hermes/inbound-audio:/mnt/shared/voice-drop`. Workspace paths are not allowed unless listed here |
 | `HERMES_HOME` | Override Hermes config directory (default: `~/.hermes`). Also scopes the gateway PID file and systemd service name, so multiple installations can run concurrently |
 | `HERMES_GIT_BASH_PATH` | **Windows only.** Override `bash.exe` discovery for the terminal tool. Points at any bash — full Git-for-Windows install, WSL bash via symlink, MSYS2, Cygwin. The installer sets this automatically to the PortableGit it provisioned. See the [Windows (Native) Guide](../user-guide/windows-native.md#how-hermes-runs-shell-commands-on-windows) |
 | `HERMES_DISABLE_WINDOWS_UTF8` | **Windows only.** Set to `1` to disable the UTF-8 stdio shim (`configure_windows_stdio()`) and fall back to the console's locale code page. Useful for bisecting encoding bugs; rarely the right setting in normal operation |
@@ -132,7 +139,7 @@ For native Anthropic auth, Hermes prefers Claude Code's own credential files whe
 | `CAMOFOX_URL` | Camofox local anti-detection browser URL (default: `http://localhost:9377`) |
 | `BROWSER_INACTIVITY_TIMEOUT` | Browser session inactivity timeout in seconds |
 | `FAL_KEY` | Image generation ([fal.ai](https://fal.ai/)) |
-| `GROQ_API_KEY` | Groq Whisper STT API key ([groq.com](https://groq.com/)) |
+| `GROQ_API_KEY` | Groq API key for the callable `transcription` tool ([groq.com](https://groq.com/)) |
 | `ELEVENLABS_API_KEY` | ElevenLabs premium TTS voices ([elevenlabs.io](https://elevenlabs.io/)) |
 | `STT_GROQ_MODEL` | Override the Groq STT model (default: `whisper-large-v3-turbo`) |
 | `GROQ_BASE_URL` | Override the Groq OpenAI-compatible STT endpoint |
@@ -359,17 +366,17 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `BLUEBUBBLES_HOME_CHANNEL` | Phone/email for cron/notification delivery |
 | `BLUEBUBBLES_ALLOWED_USERS` | Comma-separated authorized users |
 | `BLUEBUBBLES_ALLOW_ALL_USERS` | Allow all users (`true`/`false`) |
-| `QQ_APP_ID` | QQ Bot App ID from [q.qq.com](https://q.qq.com) |
-| `QQ_CLIENT_SECRET` | QQ Bot App Secret from [q.qq.com](https://q.qq.com) |
-| `QQ_STT_API_KEY` | API key for external STT fallback provider (optional, used when QQ built-in ASR returns no text) |
-| `QQ_STT_BASE_URL` | Base URL for external STT provider (optional) |
-| `QQ_STT_MODEL` | Model name for external STT provider (optional) |
-| `QQ_ALLOWED_USERS` | Comma-separated QQ user openIDs allowed to message the bot |
-| `QQ_GROUP_ALLOWED_USERS` | Comma-separated QQ group IDs for group @-message access |
-| `QQ_ALLOW_ALL_USERS` | Allow all users (`true`/`false`, overrides `QQ_ALLOWED_USERS`) |
-| `QQBOT_HOME_CHANNEL` | QQ user/group openID for cron delivery and notifications |
-| `QQBOT_HOME_CHANNEL_NAME` | Display name for the QQ home channel |
-| `QQ_PORTAL_HOST` | Override the QQ portal host (set to `sandbox.q.qq.com` to route through the sandbox gateway; default: `q.qq.com`). |
+| `QQ_APP_ID` | Seeds `platforms.qqbot.extra.app_id` during setup/onboarding ([q.qq.com](https://q.qq.com)). Runtime send uses config `extra.app_id` |
+| `QQ_CLIENT_SECRET` | Seeds `platforms.qqbot.extra.client_secret` during setup/onboarding. Runtime send uses config `extra.client_secret` |
+| `QQ_PORTAL_HOST` | Onboarding portal host override only (not read by `QqBotAdapter` send). Default portal host is `q.qq.com` |
+| `QQ_STT_API_KEY` | **Not used** by Rust `QqBotAdapter` — no QQ STT/ASR path |
+| `QQ_STT_BASE_URL` | **Not used** by Rust `QqBotAdapter` |
+| `QQ_STT_MODEL` | **Not used** by Rust `QqBotAdapter` |
+| `QQ_ALLOWED_USERS` | Legacy allowlist name; **no inbound QQ consumer** to enforce — adapter is outbound send only |
+| `QQ_GROUP_ALLOWED_USERS` | Legacy group allowlist name; **no inbound QQ consumer** |
+| `QQ_ALLOW_ALL_USERS` | Legacy allow-all name; **no inbound QQ consumer** |
+| `QQBOT_HOME_CHANNEL` | Target open id for cron/notification **delivery** when configured by delivery paths — not an inbound inbox |
+| `QQBOT_HOME_CHANNEL_NAME` | Display label for home channel metadata where used |
 | `MATTERMOST_URL` | Mattermost server URL (e.g. `https://mm.example.com`) |
 | `MATTERMOST_TOKEN` | Bot token or personal access token for Mattermost |
 | `MATTERMOST_ALLOWED_USERS` | Comma-separated Mattermost user IDs allowed to message the bot |
@@ -420,30 +427,30 @@ App-only credentials for the Microsoft Graph REST client used by the upcoming Te
 | `MSGRAPH_SCOPE` | OAuth2 scope for the client-credentials token request (default: `https://graph.microsoft.com/.default`). |
 | `MSGRAPH_AUTHORITY_URL` | Microsoft identity platform authority (default: `https://login.microsoftonline.com`). Override only for national/sovereign clouds (e.g. `https://login.microsoftonline.us` for GCC High). |
 
-### Microsoft Graph Webhook Listener
+### Microsoft Graph Webhook Listener (optional Python/source only)
 
-Inbound change-notification listener for Graph events (Teams meetings, calendar, chat, etc.). See [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook) for setup and security hardening.
-
-| Variable | Description |
-|----------|-------------|
-| `MSGRAPH_WEBHOOK_ENABLED` | Enable the `msgraph_webhook` gateway platform (`true`/`1`/`yes`). |
-| `MSGRAPH_WEBHOOK_PORT` | Port the listener binds to (default: `8646`). |
-| `MSGRAPH_WEBHOOK_CLIENT_STATE` | Shared secret Graph echoes in every notification; compared with `hmac.compare_digest`. Generate with `openssl rand -hex 32`. |
-| `MSGRAPH_WEBHOOK_ACCEPTED_RESOURCES` | Comma-separated allowlist of Graph resource paths/patterns (e.g. `communications/onlineMeetings,chats/*/messages`). Trailing `*` is prefix-matching. Empty = accept all. |
-| `MSGRAPH_WEBHOOK_ALLOWED_SOURCE_CIDRS` | Comma-separated CIDR ranges allowed to POST to the listener (e.g. `52.96.0.0/14,52.104.0.0/14`). Empty = allow all (default). Restrict to Microsoft Graph's published egress ranges in production. |
-
-### Teams Meeting Summary Delivery
-
-Only used when the [`teams_pipeline` plugin](/docs/user-guide/messaging/msgraph-webhook) is enabled. Settings are also configurable under `platforms.teams.extra` in `config.yaml` — env vars take priority when both are set. See [Microsoft Teams → Meeting Summary Delivery](/docs/user-guide/messaging/teams#meeting-summary-delivery-teams-meeting-pipeline).
+**Not used by the Rust release binary.** These variables apply only if you separately run an upstream/source-tree Python `msgraph_webhook` gateway plugin. Rust `hermes-gateway` does not host that listener; `hermes teams-pipeline validate` does **not** read these keys. See [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook).
 
 | Variable | Description |
 |----------|-------------|
-| `TEAMS_DELIVERY_MODE` | `graph` or `incoming_webhook`. |
-| `TEAMS_INCOMING_WEBHOOK_URL` | Teams-generated webhook URL; required when `TEAMS_DELIVERY_MODE=incoming_webhook`. |
-| `TEAMS_GRAPH_ACCESS_TOKEN` | Pre-acquired delegated access token for Graph delivery. Rarely needed — the writer falls back to the `MSGRAPH_*` app credentials when unset. |
-| `TEAMS_TEAM_ID` | Target Team ID for channel delivery (`graph` mode). |
-| `TEAMS_CHANNEL_ID` | Target channel ID (paired with `TEAMS_TEAM_ID`). |
-| `TEAMS_CHAT_ID` | Target 1:1 or group chat ID (alternative to team+channel for `graph` mode). |
+| `MSGRAPH_WEBHOOK_ENABLED` | (Python/source only) Enable the `msgraph_webhook` gateway platform (`true`/`1`/`yes`). **Ignored by Rust.** |
+| `MSGRAPH_WEBHOOK_PORT` | (Python/source only) Port the listener binds to (default: `8646`). **Ignored by Rust.** |
+| `MSGRAPH_WEBHOOK_CLIENT_STATE` | (Python/source only) Shared secret Graph echoes in every notification. Generate with `openssl rand -hex 32`. **Ignored by Rust.** |
+| `MSGRAPH_WEBHOOK_ACCEPTED_RESOURCES` | (Python/source only) Comma-separated allowlist of Graph resource paths/patterns. Empty = accept all. **Ignored by Rust.** |
+| `MSGRAPH_WEBHOOK_ALLOWED_SOURCE_CIDRS` | (Python/source only) Comma-separated CIDR ranges allowed to POST. Empty = allow all. **Ignored by Rust.** |
+
+### Teams Meeting Summary Delivery (optional Python/source only)
+
+**Not used by the Rust release binary.** Delivery-mode / webhook / team / channel / chat writer settings apply only to an optional upstream/source Python `teams_pipeline` plugin (or equivalent out-of-tree writer). Rust `TeamsPipelineConfig` rejects `notion` / `linear` / `teams_delivery` under `meeting_pipeline`; `build_pipeline_runtime_config` and `hermes teams-pipeline validate` do **not** consume these env vars. For the shipped path see [Teams Meetings](/docs/user-guide/messaging/teams-meetings).
+
+| Variable | Description |
+|----------|-------------|
+| `TEAMS_DELIVERY_MODE` | (Python/source only) `graph` or `incoming_webhook`. **Ignored by Rust.** |
+| `TEAMS_INCOMING_WEBHOOK_URL` | (Python/source only) Teams-generated webhook URL when mode is `incoming_webhook`. **Ignored by Rust.** |
+| `TEAMS_GRAPH_ACCESS_TOKEN` | (Python/source only) Pre-acquired delegated token for Graph delivery; writer may fall back to `MSGRAPH_*` in that plugin. **Ignored by Rust.** |
+| `TEAMS_TEAM_ID` | (Python/source only) Target Team ID for channel delivery (`graph` mode). **Ignored by Rust.** |
+| `TEAMS_CHANNEL_ID` | (Python/source only) Target channel ID (with `TEAMS_TEAM_ID`). **Ignored by Rust.** |
+| `TEAMS_CHAT_ID` | (Python/source only) Target chat ID alternative to team+channel (`graph` mode). **Ignored by Rust.** |
 
 ### ntfy (push notifications)
 

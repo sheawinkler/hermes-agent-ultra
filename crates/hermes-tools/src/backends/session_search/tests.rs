@@ -709,6 +709,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_recovers_pure_latin_term_embedded_in_cjk_text() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "cjk-latin",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-04T00:00:00Z",
+        );
+        insert_message(&conn, "cjk-latin", "user", "修改youer服务端的计划");
+
+        let fts_hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?1",
+                rusqlite::params!["\"youer\""],
+                |row| row.get(0),
+            )
+            .expect("unicode61 FTS query");
+        assert_eq!(fts_hits, 0, "regression setup must miss at the FTS layer");
+
+        let output = backend
+            .search(Some("youer"), None, 1, None)
+            .await
+            .expect("search");
+
+        assert_eq!(result_ids(&output), vec!["cjk-latin".to_string()], "{output}");
+    }
+
+    #[tokio::test]
     async fn search_session_id_treats_like_wildcards_literally() {
         let (tmp, backend) = backend_with_db();
         let conn = db_conn(&tmp);

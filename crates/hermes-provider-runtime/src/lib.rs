@@ -82,8 +82,9 @@ pub struct ProviderRuntimeDiagnostic {
     pub uses_openai_pro_backend: bool,
 }
 
+/// Resolver-only expectation. This does not send a provider request or prove authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderAuthSmokeCase {
+pub struct ProviderAuthDiagnosticCase {
     pub id: String,
     pub model: String,
     pub expected_runtime_provider: String,
@@ -94,7 +95,7 @@ pub struct ProviderAuthSmokeCase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderAuthSmokeResult {
+pub struct ProviderAuthDiagnosticResult {
     pub id: String,
     pub model: String,
     pub runtime_provider: String,
@@ -107,7 +108,7 @@ pub struct ProviderAuthSmokeResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderAuthSmokeSummary {
+pub struct ProviderAuthDiagnosticSummary {
     pub total: usize,
     pub passed: usize,
     pub failed: usize,
@@ -115,10 +116,10 @@ pub struct ProviderAuthSmokeSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderAuthSmokeMatrix {
+pub struct ProviderAuthDiagnosticMatrix {
     pub pass: bool,
-    pub summary: ProviderAuthSmokeSummary,
-    pub results: Vec<ProviderAuthSmokeResult>,
+    pub summary: ProviderAuthDiagnosticSummary,
+    pub results: Vec<ProviderAuthDiagnosticResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,11 +226,11 @@ pub fn provider_runtime_diagnostic_with_auth_resolver(
     }
 }
 
-pub fn provider_auth_smoke_matrix_with_auth_resolver(
+pub fn provider_auth_diagnostic_matrix_with_auth_resolver(
     config: &GatewayConfig,
-    cases: &[ProviderAuthSmokeCase],
+    cases: &[ProviderAuthDiagnosticCase],
     oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
-) -> ProviderAuthSmokeMatrix {
+) -> ProviderAuthDiagnosticMatrix {
     let mut results = Vec::with_capacity(cases.len());
     for case in cases {
         let diagnostic = provider_runtime_diagnostic_with_auth_resolver(
@@ -269,7 +270,7 @@ pub fn provider_auth_smoke_matrix_with_auth_resolver(
             ));
         }
 
-        results.push(ProviderAuthSmokeResult {
+        results.push(ProviderAuthDiagnosticResult {
             id: case.id.clone(),
             model: case.model.clone(),
             runtime_provider: diagnostic.runtime_provider,
@@ -289,9 +290,9 @@ pub fn provider_auth_smoke_matrix_with_auth_resolver(
         .collect::<Vec<_>>();
     covered_runtime_providers.sort();
     covered_runtime_providers.dedup();
-    ProviderAuthSmokeMatrix {
+    ProviderAuthDiagnosticMatrix {
         pass: passed == results.len(),
-        summary: ProviderAuthSmokeSummary {
+        summary: ProviderAuthDiagnosticSummary {
             total: results.len(),
             passed,
             failed: results.len().saturating_sub(passed),
@@ -301,9 +302,9 @@ pub fn provider_auth_smoke_matrix_with_auth_resolver(
     }
 }
 
-pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
+pub fn default_provider_auth_diagnostic_cases() -> Vec<ProviderAuthDiagnosticCase> {
     vec![
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "openai_dynamic_chatgpt_oauth",
             "openai:dynamic",
             "openai",
@@ -312,7 +313,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             true,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "codex_oauth_resolver",
             "codex:gpt-5.5",
             "openai-codex",
@@ -321,7 +322,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             true,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "nous_key",
             "nous:Hermes-4",
             "nous",
@@ -330,7 +331,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "anthropic_key",
             "anthropic:claude-sonnet-4-6",
             "anthropic",
@@ -339,7 +340,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "gemini_oauth_resolver",
             "gemini-cli:gemini-2.5-pro",
             "google-gemini-cli",
@@ -348,7 +349,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "qwen_oauth_resolver",
             "qwen-cli:qwen3-coder",
             "qwen-oauth",
@@ -357,7 +358,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "openrouter_key",
             "openrouter:anthropic/claude-sonnet-4.6",
             "openrouter",
@@ -366,7 +367,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             false,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "local_no_key_llamafile",
             "llamafile:local-gguf",
             "llama-cpp",
@@ -375,7 +376,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
             true,
             false,
         ),
-        provider_auth_smoke_case(
+        provider_auth_diagnostic_case(
             "moa_virtual_no_key",
             "moa:default",
             "moa",
@@ -387,7 +388,7 @@ pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
     ]
 }
 
-pub fn deterministic_provider_auth_smoke_matrix() -> ProviderAuthSmokeMatrix {
+pub fn deterministic_provider_auth_diagnostic_matrix() -> ProviderAuthDiagnosticMatrix {
     let mut config = GatewayConfig::default();
     config.llm_providers.insert(
         "openai".to_string(),
@@ -397,9 +398,9 @@ pub fn deterministic_provider_auth_smoke_matrix() -> ProviderAuthSmokeMatrix {
         },
     );
     for (provider, key) in [
-        ("nous", "nous-smoke-key"),
-        ("anthropic", "anthropic-smoke-key"),
-        ("openrouter", "openrouter-smoke-key"),
+        ("nous", "nous-diagnostic-key"),
+        ("anthropic", "anthropic-diagnostic-key"),
+        ("openrouter", "openrouter-diagnostic-key"),
     ] {
         config.llm_providers.insert(
             provider.to_string(),
@@ -410,19 +411,19 @@ pub fn deterministic_provider_auth_smoke_matrix() -> ProviderAuthSmokeMatrix {
         );
     }
     let resolver = |provider: &str| match provider {
-        "codex" | "openai-codex" => Some("codex-oauth-smoke-token".to_string()),
-        "gemini-cli" | "google-gemini-cli" => Some("gemini-oauth-smoke-token".to_string()),
-        "qwen-cli" | "qwen-oauth" => Some("qwen-oauth-smoke-token".to_string()),
+        "codex" | "openai-codex" => Some("codex-oauth-diagnostic-token".to_string()),
+        "gemini-cli" | "google-gemini-cli" => Some("gemini-oauth-diagnostic-token".to_string()),
+        "qwen-cli" | "qwen-oauth" => Some("qwen-oauth-diagnostic-token".to_string()),
         _ => None,
     };
-    provider_auth_smoke_matrix_with_auth_resolver(
+    provider_auth_diagnostic_matrix_with_auth_resolver(
         &config,
-        &default_provider_auth_smoke_cases(),
+        &default_provider_auth_diagnostic_cases(),
         Some(&resolver),
     )
 }
 
-fn provider_auth_smoke_case(
+fn provider_auth_diagnostic_case(
     id: &str,
     model: &str,
     expected_runtime_provider: &str,
@@ -430,8 +431,8 @@ fn provider_auth_smoke_case(
     expected_api_key_source: Option<&str>,
     expected_local_no_key_allowed: bool,
     expected_openai_pro_backend: bool,
-) -> ProviderAuthSmokeCase {
-    ProviderAuthSmokeCase {
+) -> ProviderAuthDiagnosticCase {
+    ProviderAuthDiagnosticCase {
         id: id.to_string(),
         model: model.to_string(),
         expected_runtime_provider: expected_runtime_provider.to_string(),
@@ -444,7 +445,7 @@ fn provider_auth_smoke_case(
 
 fn chatgpt_oauth_fixture_token(account_id: &str) -> String {
     let payload = base64_url_no_pad(format!(
-        r#"{{"sub":"user-smoke","https://api.openai.com/auth":{{"chatgpt_account_id":"{account_id}","chatgpt_plan_type":"plus"}}}}"#
+        r#"{{"sub":"user-diagnostic","https://api.openai.com/auth":{{"chatgpt_account_id":"{account_id}","chatgpt_plan_type":"plus"}}}}"#
     )
     .as_bytes());
     format!("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.{payload}.sig")
@@ -1087,9 +1088,12 @@ pub fn build_provider_with_auth_resolver(
             Arc::new(p)
         }
         "openrouter" => {
-            let p = OpenRouterProvider::new(&api_key)
+            let mut p = OpenRouterProvider::new(&api_key)
                 .with_model(model_name.as_str())
                 .with_optional_request_timeout_seconds(request_timeout_seconds);
+            if let Some(url) = base_url {
+                p = p.with_base_url(url);
+            }
             Arc::new(p)
         }
         "qwen" | "qwen-oauth" => {

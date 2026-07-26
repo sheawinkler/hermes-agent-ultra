@@ -818,7 +818,15 @@ fn media_method_for_known_extensions() {
     );
     assert_eq!(
         TelegramAdapter::media_method_for_extension("ogg"),
+        ("sendDocument", "document")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("ogg", true),
         ("sendVoice", "voice")
+    );
+    assert_eq!(
+        TelegramAdapter::media_method_for_delivery("png", true),
+        ("sendPhoto", "photo")
     );
     assert_eq!(
         TelegramAdapter::media_method_for_extension("pdf"),
@@ -935,8 +943,8 @@ fn telegram_response_error_uses_typed_retry_after() {
     assert!(matches!(
         err,
         GatewayError::RateLimited {
-            retry_after_secs: Some(37)
-        }
+            retry_after: Some(retry_after)
+        } if retry_after == std::time::Duration::from_secs(37)
     ));
 }
 

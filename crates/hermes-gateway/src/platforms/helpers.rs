@@ -2,6 +2,9 @@
 //!
 //! Common text manipulation utilities used across platform adapters.
 
+use std::collections::{HashMap, HashSet};
+
+use hermes_core::{Message, MessageRole};
 use regex::Regex;
 
 /// Image reference extracted from generated markdown / HTML.
@@ -100,50 +103,6 @@ pub fn extract_urls(text: &str) -> Vec<String> {
     re.find_iter(text).map(|m| m.as_str().to_string()).collect()
 }
 
-/// Extract markdown image links from text.
-///
-/// Returns `(cleaned_text, image_urls)` where only image tags of the form
-/// `![alt](url)` are removed from the cleaned text. Normal markdown links
-/// `[text](url)` are preserved.
-pub fn extract_markdown_images(text: &str) -> (String, Vec<String>) {
-    let image_re = Regex::new(r"!\[[^\]]*\]\(([^)]+)\)").expect("valid regex");
-    let mut images = Vec::new();
-
-    let cleaned = image_re
-        .replace_all(text, |caps: &regex::Captures| {
-            if let Some(url) = caps.get(1).map(|m| m.as_str().trim()) {
-                images.push(url.to_string());
-            }
-            ""
-        })
-        .to_string();
-
-    let cleaned = cleaned
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string();
-    (cleaned, images)
-}
-
-fn looks_like_image_url(url: &str) -> bool {
-    let lower = url.trim().to_ascii_lowercase();
-    if lower.contains("fal.media")
-        || lower.contains("fal-cdn")
-        || lower.contains("replicate.delivery")
-    {
-        return true;
-    }
-    let base = lower.split('?').next().unwrap_or(lower.as_str());
-    [
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif", ".heic", ".heif",
-        ".tiff", ".tif",
-    ]
-    .iter()
-    .any(|ext| base.ends_with(ext))
-}
-
 /// Download a remote media URL into memory while enforcing the gateway media cap.
 ///
 /// Some platform APIs require uploading downloaded image bytes through their
@@ -223,56 +182,257 @@ pub fn extract_inline_images(text: &str) -> (String, Vec<InlineImageRef>) {
     let md_re = Regex::new(r"!\[([^\]]*)\]\((https?://[^\s)]+)\)").expect("valid regex");
     let html_re =
         Regex::new(r#"<img[^>]*\bsrc=["']?(https?://[^"' >]+)["']?[^>]*>"#).expect("valid regex");
+    let code_ranges = markdown_code_ranges(text);
 
-    let mut images: Vec<InlineImageRef> = Vec::new();
+    let mut matches = Vec::new();
+    for captures in md_re.captures_iter(text) {
+        let Some(full) = captures.get(0) else {
+            continue;
+        };
+        if overlaps_markdown_code(full.start(), full.end(), &code_ranges) {
+            continue;
+        }
+        let url = captures
+            .get(2)
+            .map(|value| value.as_str().trim())
+            .unwrap_or_default();
+        let alt_text = captures
+            .get(1)
+            .map(|value| value.as_str().trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        matches.push((
+            full.start(),
+            full.end(),
+            InlineImageRef {
+                url: url.to_string(),
+                alt_text,
+            },
+        ));
+    }
+    for captures in html_re.captures_iter(text) {
+        let Some(full) = captures.get(0) else {
+            continue;
+        };
+        if overlaps_markdown_code(full.start(), full.end(), &code_ranges) {
+            continue;
+        }
+        let url = captures
+            .get(1)
+            .map(|value| value.as_str().trim())
+            .unwrap_or_default();
+        matches.push((
+            full.start(),
+            full.end(),
+            InlineImageRef {
+                url: url.to_string(),
+                alt_text: None,
+            },
+        ));
+    }
+    matches.sort_by_key(|(start, _, _)| *start);
 
-    let without_md = md_re
-        .replace_all(text, |caps: &regex::Captures| {
-            let url = caps.get(2).map(|m| m.as_str().trim()).unwrap_or_default();
-            let alt = caps
-                .get(1)
-                .map(|m| m.as_str().trim())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string());
-            if looks_like_image_url(url) {
-                images.push(InlineImageRef {
-                    url: url.to_string(),
-                    alt_text: alt,
-                });
-                "".to_string()
-            } else {
-                caps.get(0)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default()
-            }
-        })
-        .to_string();
-
-    let without_html = html_re
-        .replace_all(&without_md, |caps: &regex::Captures| {
-            let url = caps.get(1).map(|m| m.as_str().trim()).unwrap_or_default();
-            if looks_like_image_url(url) {
-                images.push(InlineImageRef {
-                    url: url.to_string(),
-                    alt_text: None,
-                });
-                "".to_string()
-            } else {
-                caps.get(0)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default()
-            }
-        })
-        .to_string();
-
-    let cleaned = without_html
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string();
+    let mut cleaned = String::with_capacity(text.len());
+    let mut images = Vec::with_capacity(matches.len());
+    let mut cursor = 0;
+    let mut normalize_seam = false;
+    for (start, end, image) in matches {
+        if start < cursor {
+            continue;
+        }
+        append_inline_image_segment(&mut cleaned, &text[cursor..start], normalize_seam);
+        images.push(image);
+        cursor = end;
+        normalize_seam = true;
+    }
+    append_inline_image_segment(&mut cleaned, &text[cursor..], normalize_seam);
+    if normalize_seam && cursor == text.len() {
+        while matches!(cleaned.as_bytes().last(), Some(b' ' | b'\t')) {
+            cleaned.pop();
+        }
+    }
+    if cleaned.trim().is_empty() {
+        cleaned.clear();
+    }
 
     (cleaned, images)
+}
+
+fn markdown_code_ranges(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut fenced = Vec::new();
+    let mut line_start = 0;
+
+    while line_start < bytes.len() {
+        let (line_end, next_line) = markdown_line_bounds(bytes, line_start);
+        let opener =
+            markdown_fence_marker(bytes, line_start, line_end).filter(|(marker, _, marker_end)| {
+                *marker != b'`' || !bytes[*marker_end..line_end].contains(&b'`')
+            });
+        let Some((marker, minimum_run, _)) = opener else {
+            line_start = next_line;
+            continue;
+        };
+
+        let mut candidate_start = next_line;
+        let mut fence_end = bytes.len();
+        while candidate_start < bytes.len() {
+            let (candidate_end, following_line) = markdown_line_bounds(bytes, candidate_start);
+            if let Some((candidate_marker, run, marker_end)) =
+                markdown_fence_marker(bytes, candidate_start, candidate_end)
+            {
+                let suffix_is_blank = bytes[marker_end..candidate_end]
+                    .iter()
+                    .all(|byte| matches!(byte, b' ' | b'\t'));
+                if candidate_marker == marker && run >= minimum_run && suffix_is_blank {
+                    fence_end = following_line;
+                    break;
+                }
+            }
+            candidate_start = following_line;
+        }
+        fenced.push((line_start, fence_end));
+        line_start = fence_end;
+    }
+
+    let mut ranges = fenced.clone();
+    let mut cursor = 0;
+    for (fence_start, fence_end) in fenced {
+        append_inline_code_ranges(bytes, cursor, fence_start, &mut ranges);
+        cursor = fence_end;
+    }
+    append_inline_code_ranges(bytes, cursor, bytes.len(), &mut ranges);
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    ranges
+}
+
+fn markdown_line_bounds(bytes: &[u8], start: usize) -> (usize, usize) {
+    let newline = bytes[start..].iter().position(|byte| *byte == b'\n');
+    match newline {
+        Some(relative) => {
+            let raw_end = start + relative;
+            let line_end = raw_end
+                .checked_sub(1)
+                .filter(|index| bytes[*index] == b'\r')
+                .unwrap_or(raw_end);
+            (line_end, raw_end + 1)
+        }
+        None => (bytes.len(), bytes.len()),
+    }
+}
+
+fn markdown_fence_marker(
+    bytes: &[u8],
+    line_start: usize,
+    line_end: usize,
+) -> Option<(u8, usize, usize)> {
+    let mut marker_start = line_start;
+    while marker_start < line_end && marker_start - line_start < 3 && bytes[marker_start] == b' ' {
+        marker_start += 1;
+    }
+    let marker = *bytes.get(marker_start)?;
+    if !matches!(marker, b'`' | b'~') {
+        return None;
+    }
+    let marker_end = bytes[marker_start..line_end]
+        .iter()
+        .take_while(|byte| **byte == marker)
+        .count()
+        + marker_start;
+    let run = marker_end - marker_start;
+    (run >= 3).then_some((marker, run, marker_end))
+}
+
+fn append_inline_code_ranges(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let mut paragraph_start = start;
+    let mut line_start = start;
+    while line_start < end {
+        let (line_end, next_line) = markdown_line_bounds(bytes, line_start);
+        let next_line = next_line.min(end);
+        let is_blank = bytes[line_start..line_end.min(end)]
+            .iter()
+            .all(|byte| matches!(byte, b' ' | b'\t'));
+        if is_blank {
+            append_inline_code_range_segment(bytes, paragraph_start, line_start, ranges);
+            paragraph_start = next_line;
+        }
+        line_start = next_line;
+    }
+    append_inline_code_range_segment(bytes, paragraph_start, end, ranges);
+}
+
+fn append_inline_code_range_segment(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let mut runs = Vec::new();
+    let mut cursor = start;
+    while cursor < end {
+        let Some(relative) = bytes[cursor..end].iter().position(|byte| *byte == b'`') else {
+            break;
+        };
+        let run_start = cursor + relative;
+        let run_end = bytes[run_start..end]
+            .iter()
+            .take_while(|byte| **byte == b'`')
+            .count()
+            + run_start;
+        runs.push((run_start, run_end, run_end - run_start));
+        cursor = run_end;
+    }
+
+    let mut next_same = vec![None; runs.len()];
+    let mut last_by_length = HashMap::new();
+    for (index, (_, _, length)) in runs.iter().enumerate().rev() {
+        next_same[index] = last_by_length.insert(*length, index);
+    }
+    let mut index = 0;
+    while index < runs.len() {
+        if let Some(close_index) = next_same[index] {
+            ranges.push((runs[index].0, runs[close_index].1));
+            index = close_index + 1;
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn overlaps_markdown_code(start: usize, end: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(code_start, code_end)| start < *code_end && end > *code_start)
+}
+
+fn markdown_code_contains(index: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(code_start, code_end)| index >= *code_start && index < *code_end)
+}
+
+fn append_inline_image_segment(output: &mut String, segment: &str, normalize_seam: bool) {
+    if !normalize_seam {
+        output.push_str(segment);
+        return;
+    }
+    let should_trim_horizontal =
+        output.is_empty() || matches!(output.as_bytes().last(), Some(b' ' | b'\t'));
+    if should_trim_horizontal {
+        let leading_horizontal = segment
+            .as_bytes()
+            .iter()
+            .take_while(|byte| **byte == b' ' || **byte == b'\t')
+            .count();
+        output.push_str(&segment[leading_horizontal..]);
+    } else {
+        output.push_str(segment);
+    }
 }
 
 fn clean_media_marker_path(raw: &str) -> String {
@@ -290,36 +450,267 @@ fn clean_media_marker_path(raw: &str) -> String {
     cleaned.trim().to_string()
 }
 
+fn has_active_voice_directive(text: &str) -> bool {
+    let voice_re = Regex::new(r"\[\[audio_as_voice\]\]").expect("valid regex");
+    let code_ranges = markdown_code_ranges(text);
+    let active = voice_re
+        .find_iter(text)
+        .any(|marker| !overlaps_markdown_code(marker.start(), marker.end(), &code_ranges));
+    active
+}
+
+fn terminal_unclosed_fence_closer(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut line_start = 0;
+    while line_start < bytes.len() {
+        let (line_end, next_line) = markdown_line_bounds(bytes, line_start);
+        let opener =
+            markdown_fence_marker(bytes, line_start, line_end).filter(|(marker, _, marker_end)| {
+                *marker != b'`' || !bytes[*marker_end..line_end].contains(&b'`')
+            });
+        let Some((marker, minimum_run, _)) = opener else {
+            line_start = next_line;
+            continue;
+        };
+
+        let mut candidate_start = next_line;
+        let mut closed_at = None;
+        while candidate_start < bytes.len() {
+            let (candidate_end, following_line) = markdown_line_bounds(bytes, candidate_start);
+            if let Some((candidate_marker, run, marker_end)) =
+                markdown_fence_marker(bytes, candidate_start, candidate_end)
+            {
+                let suffix_is_blank = bytes[marker_end..candidate_end]
+                    .iter()
+                    .all(|byte| matches!(byte, b' ' | b'\t'));
+                if candidate_marker == marker && run >= minimum_run && suffix_is_blank {
+                    closed_at = Some(following_line);
+                    break;
+                }
+            }
+            candidate_start = following_line;
+        }
+        match closed_at {
+            Some(next) => line_start = next,
+            None => return Some((marker as char).to_string().repeat(minimum_run)),
+        }
+    }
+    None
+}
+
 /// Extract `MEDIA:<path>` output markers and `[[audio_as_voice]]` directives.
 ///
 /// Tool backends such as browser screenshots and TTS can return media paths
 /// inside tool JSON or plain text. The gateway strips these markers from the
 /// chat text and delivers the local paths through platform-native file APIs.
 pub fn extract_media_markers(text: &str) -> (String, Vec<MediaMarkerRef>) {
-    let as_voice = text.contains("[[audio_as_voice]]");
     let voice_re = Regex::new(r"\[\[audio_as_voice\]\]").expect("valid regex");
     let media_re = Regex::new(r"MEDIA:([^\r\n]+)").expect("valid regex");
-    let blank_re = Regex::new(r"\n{3,}").expect("valid regex");
+    let code_ranges = markdown_code_ranges(text);
+
+    let mut removals = Vec::new();
+    let mut as_voice = false;
+    for marker in voice_re.find_iter(text) {
+        if overlaps_markdown_code(marker.start(), marker.end(), &code_ranges) {
+            continue;
+        }
+        as_voice = true;
+        removals.push((marker.start(), marker.end()));
+    }
 
     let mut media = Vec::new();
-    for caps in media_re.captures_iter(text) {
-        let path = caps
+    for captures in media_re.captures_iter(text) {
+        let Some(full) = captures.get(0) else {
+            continue;
+        };
+        if markdown_code_contains(full.start(), &code_ranges) {
+            continue;
+        }
+        let path = captures
             .get(1)
-            .map(|m| clean_media_marker_path(m.as_str()))
+            .map(|value| clean_media_marker_path(value.as_str()))
             .unwrap_or_default();
-        if !path.is_empty() {
-            media.push(MediaMarkerRef { path, as_voice });
+        if path.is_empty() {
+            continue;
+        }
+        media.push(MediaMarkerRef { path, as_voice });
+        removals.push((full.start(), full.end()));
+    }
+
+    if removals.is_empty() {
+        return (text.to_string(), media);
+    }
+    removals.sort_unstable_by_key(|(start, _)| *start);
+
+    let mut cleaned = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let mut normalize_seam = false;
+    for (start, end) in removals {
+        if start < cursor {
+            continue;
+        }
+        append_media_marker_segment(&mut cleaned, &text[cursor..start], normalize_seam);
+        cursor = end;
+        normalize_seam = true;
+    }
+    append_media_marker_segment(&mut cleaned, &text[cursor..], normalize_seam);
+    if cleaned.trim().is_empty() {
+        cleaned.clear();
+    }
+
+    (cleaned, media)
+}
+
+/// Build the user-visible reply for the latest agent turn.
+///
+/// Only tool results after the latest user message may contribute media. This
+/// prevents TTS artifacts in conversation history from being redelivered on
+/// every later turn. `media_tag` is parsed as a JSON field rather than scanning
+/// arbitrary tool output for path-like text.
+pub fn extract_current_turn_gateway_reply(messages: &[Message]) -> String {
+    let turn_start = messages
+        .iter()
+        .rposition(|message| message.role == MessageRole::User)
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let current_turn = &messages[turn_start..];
+    let mut reply = current_turn
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::Assistant)
+        .and_then(|message| message.content.clone())
+        .unwrap_or_default();
+
+    let (_, existing_media) = extract_media_markers(&reply);
+    let reply_has_voice_directive = has_active_voice_directive(&reply);
+    let mut seen_paths: HashSet<String> =
+        existing_media.into_iter().map(|media| media.path).collect();
+    let mut tool_requested_voice = false;
+    let mut new_paths = Vec::new();
+
+    for message in current_turn
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+    {
+        let Some(content) = message.content.as_deref() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+            continue;
+        };
+        let Some(media_tag) = value.get("media_tag").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let (_, media) = extract_media_markers(media_tag);
+        tool_requested_voice |= media.iter().any(|item| item.as_voice);
+        for item in media {
+            if seen_paths.insert(item.path.clone()) {
+                new_paths.push(item.path);
+            }
         }
     }
 
-    let without_voice = voice_re.replace_all(text, "");
-    let without_media = media_re.replace_all(&without_voice, "");
-    let cleaned = blank_re
-        .replace_all(&without_media, "\n\n")
-        .trim()
-        .to_string();
+    let needs_voice_directive = tool_requested_voice && !reply_has_voice_directive;
+    if needs_voice_directive || !new_paths.is_empty() {
+        if let Some(closer) = terminal_unclosed_fence_closer(&reply) {
+            append_gateway_reply_line(&mut reply, &closer);
+        }
+    }
+    if needs_voice_directive {
+        append_gateway_reply_line(&mut reply, "[[audio_as_voice]]");
+    }
+    for path in new_paths {
+        append_gateway_reply_line(&mut reply, &format!("MEDIA:{path}"));
+    }
 
-    (cleaned, media)
+    if reply.trim().is_empty() {
+        "(no assistant reply)".to_string()
+    } else {
+        reply
+    }
+}
+
+fn append_gateway_reply_line(reply: &mut String, line: &str) {
+    if !reply.is_empty() && !reply.ends_with('\n') {
+        reply.push('\n');
+    }
+    reply.push_str(line);
+}
+
+fn append_media_marker_segment(output: &mut String, segment: &str, normalize_seam: bool) {
+    if !normalize_seam {
+        output.push_str(segment);
+        return;
+    }
+
+    let leading_horizontal =
+        if output.is_empty() || matches!(output.as_bytes().last(), Some(b' ' | b'\t')) {
+            segment
+                .as_bytes()
+                .iter()
+                .take_while(|byte| **byte == b' ' || **byte == b'\t')
+                .count()
+        } else {
+            0
+        };
+    let segment = &segment[leading_horizontal..];
+    let trailing_breaks = trailing_line_break_count(output);
+    let leading_breaks = leading_line_break_count(segment);
+    let retained_leading_breaks = 2usize.saturating_sub(trailing_breaks);
+    let skipped_breaks = leading_breaks.saturating_sub(retained_leading_breaks);
+    let skipped_bytes = byte_offset_after_line_breaks(segment, skipped_breaks);
+    output.push_str(&segment[skipped_bytes..]);
+}
+
+fn trailing_line_break_count(value: &str) -> usize {
+    let bytes = value.as_bytes();
+    let mut cursor = bytes.len();
+    let mut count = 0;
+    while cursor > 0 && bytes[cursor - 1] == b'\n' {
+        count += 1;
+        cursor -= 1;
+        if cursor > 0 && bytes[cursor - 1] == b'\r' {
+            cursor -= 1;
+        }
+    }
+    count
+}
+
+fn leading_line_break_count(value: &str) -> usize {
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+    let mut count = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\n' {
+            cursor += 1;
+            count += 1;
+        } else if bytes[cursor] == b'\r' && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
+        {
+            cursor += 2;
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+fn byte_offset_after_line_breaks(value: &str, count: usize) -> usize {
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+    let mut consumed = 0;
+    while cursor < bytes.len() && consumed < count {
+        if bytes[cursor] == b'\n' {
+            cursor += 1;
+        } else if bytes[cursor] == b'\r' && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
+        {
+            cursor += 2;
+        } else {
+            break;
+        }
+        consumed += 1;
+    }
+    cursor
 }
 
 /// Format a code block with optional language tag.
@@ -399,6 +790,34 @@ mod tests {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    struct StaticTtsBackend {
+        result: String,
+    }
+
+    #[async_trait::async_trait]
+    impl hermes_tools::tools::tts::TtsBackend for StaticTtsBackend {
+        async fn synthesize(
+            &self,
+            _text: &str,
+            _voice: Option<&str>,
+            _provider: Option<&str>,
+            _output_path: Option<&str>,
+            _speed: Option<f64>,
+        ) -> Result<String, hermes_core::ToolError> {
+            Ok(self.result.clone())
+        }
+    }
+    fn minimal_ogg_opus_stream() -> Vec<u8> {
+        let mut ogg = vec![0_u8; 28];
+        ogg[..4].copy_from_slice(b"OggS");
+        ogg[5] = 2; // beginning-of-stream
+        ogg[26] = 1;
+        ogg[27] = 19;
+        ogg.extend_from_slice(b"OpusHead");
+        ogg.extend_from_slice(&[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        ogg
+    }
+
     #[test]
     fn test_split_long_message_short() {
         let chunks = split_long_message("hello world", 100);
@@ -436,42 +855,85 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_markdown_images_preserves_non_image_links() {
-        let text =
-            "See ![diagram](https://img.example.com/a.png) and [doc](https://example.com/a.pdf)";
-        let (cleaned, images) = extract_markdown_images(text);
-        assert_eq!(images, vec!["https://img.example.com/a.png"]);
-        assert_eq!(cleaned, "See and [doc](https://example.com/a.pdf)");
-    }
-
-    #[test]
-    fn test_extract_markdown_images_multiple_tags() {
-        let text = "A ![one](https://i/1.png) B ![two](https://i/2.jpg) C";
-        let (cleaned, images) = extract_markdown_images(text);
-        assert_eq!(images.len(), 2);
-        assert_eq!(images[0], "https://i/1.png");
-        assert_eq!(images[1], "https://i/2.jpg");
-        assert_eq!(cleaned, "A B C");
-    }
-
-    #[test]
     fn test_extract_inline_images_markdown_and_html() {
-        let text = "Start ![chart](https://cdn.example.com/a.png) and <img src=\"https://fal.media/b/c\"> end";
+        let text = "Start ![chart](https://cdn.example.com/a.png) and <img src=\"https://assets.example/render?id=1\"> end";
         let (cleaned, images) = extract_inline_images(text);
         assert_eq!(cleaned, "Start and end");
         assert_eq!(images.len(), 2);
         assert_eq!(images[0].url, "https://cdn.example.com/a.png");
         assert_eq!(images[0].alt_text.as_deref(), Some("chart"));
-        assert_eq!(images[1].url, "https://fal.media/b/c");
+        assert_eq!(images[1].url, "https://assets.example/render?id=1");
         assert_eq!(images[1].alt_text, None);
     }
 
     #[test]
-    fn test_extract_inline_images_keeps_non_image_html() {
-        let text = "A <img src=\"https://example.com/not-image\"> B";
+    fn inline_images_preserve_multiline_markdown_and_source_order() {
+        let text = "# Report\n\n- first <img src=\"https://cdn.example.com/first.png\"> item\n- second\n\n```rust\nlet value = 42;\n```\n\nTail ![chart](https://cdn.example.com/second.webp) text";
+        let (cleaned, images) = extract_inline_images(text);
+
+        assert_eq!(
+            cleaned,
+            "# Report\n\n- first item\n- second\n\n```rust\nlet value = 42;\n```\n\nTail text"
+        );
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.url.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "https://cdn.example.com/first.png",
+                "https://cdn.example.com/second.webp"
+            ]
+        );
+        assert_eq!(images[1].alt_text.as_deref(), Some("chart"));
+    }
+
+    #[test]
+    fn inline_images_ignore_markdown_and_html_inside_code() {
+        let text = "Inline `![sample](https://cdn.example.com/inline.png)` and `<img src=\"https://cdn.example.com/inline-html.png\">`.\n\n```md\n![sample](https://cdn.example.com/fenced.png)\n<img src=\"https://cdn.example.com/fenced-html.png\">\n```\n\nLive ![chart](https://cdn.example.com/live.png)";
+        let (cleaned, images) = extract_inline_images(text);
+
+        assert_eq!(
+            cleaned,
+            "Inline `![sample](https://cdn.example.com/inline.png)` and `<img src=\"https://cdn.example.com/inline-html.png\">`.\n\n```md\n![sample](https://cdn.example.com/fenced.png)\n<img src=\"https://cdn.example.com/fenced-html.png\">\n```\n\nLive"
+        );
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].url, "https://cdn.example.com/live.png");
+    }
+
+    #[test]
+    fn unmatched_backtick_does_not_hide_images_after_paragraph_boundary() {
+        let text = "An unmatched ` delimiter\n\nLive ![chart](https://cdn.example.com/live.png)";
+        let (cleaned, images) = extract_inline_images(text);
+
+        assert_eq!(cleaned, "An unmatched ` delimiter\n\nLive");
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].url, "https://cdn.example.com/live.png");
+    }
+
+    #[test]
+    fn inline_image_seams_trim_horizontal_boundaries_but_preserve_newlines() {
+        let (terminal, terminal_images) =
+            extract_inline_images("Text ![one](https://cdn.example.com/one.png)");
+        assert_eq!(terminal, "Text");
+        assert_eq!(terminal_images.len(), 1);
+
+        let (consecutive, consecutive_images) = extract_inline_images(
+            "![one](https://cdn.example.com/one.png)  ![two](https://cdn.example.com/two.png)",
+        );
+        assert_eq!(consecutive, "");
+        assert_eq!(consecutive_images.len(), 2);
+
+        let (multiline, _) = extract_inline_images("A\n![one](https://cdn.example.com/one.png)\nB");
+        assert_eq!(multiline, "A\n\nB");
+    }
+
+    #[test]
+    fn test_extract_inline_images_keeps_ordinary_html_links() {
+        let text = "A <a href=\"https://example.com/not-image\">ordinary link</a> B";
         let (cleaned, images) = extract_inline_images(text);
         assert_eq!(images.len(), 0);
-        assert_eq!(cleaned, "A <img src=\"https://example.com/not-image\"> B");
+        assert_eq!(cleaned, text);
     }
 
     #[tokio::test]
@@ -534,6 +996,268 @@ mod tests {
                     as_voice: true,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn media_marker_parser_preserves_unrelated_text_verbatim() {
+        let text = "  Alpha\n\n\nBeta  ";
+        let (cleaned, media) = extract_media_markers(text);
+
+        assert_eq!(cleaned, text);
+        assert!(media.is_empty());
+    }
+
+    #[test]
+    fn media_markers_ignore_code_but_accept_backtick_quoted_paths() {
+        let text = "Before\nMEDIA:`/tmp/live image.png`\nAfter\n\nInline `MEDIA:/tmp/code.png`\n\n```text\nMEDIA:/tmp/fenced.png\n[[audio_as_voice]]\n```";
+        let (cleaned, media) = extract_media_markers(text);
+
+        assert_eq!(
+            cleaned,
+            "Before\n\nAfter\n\nInline `MEDIA:/tmp/code.png`\n\n```text\nMEDIA:/tmp/fenced.png\n[[audio_as_voice]]\n```"
+        );
+        assert_eq!(
+            media,
+            vec![MediaMarkerRef {
+                path: "/tmp/live image.png".to_string(),
+                as_voice: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_ignores_historical_media() {
+        let messages = vec![
+            Message::user("old audio"),
+            Message::tool_result(
+                "old-tool",
+                r#"{"media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/old.ogg"}"#,
+            ),
+            Message::assistant("Old reply"),
+            Message::user("new question"),
+            Message::assistant("Current reply"),
+        ];
+
+        assert_eq!(
+            extract_current_turn_gateway_reply(&messages),
+            "Current reply"
+        );
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_appends_structured_tool_media() {
+        let messages = vec![
+            Message::user("say this"),
+            Message::assistant_with_tool_calls(None, Vec::new()),
+            Message::tool_result(
+                "tts-tool",
+                r#"{"provider":"copy","media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/current.ogg"}"#,
+            ),
+            Message::assistant("Audio is ready."),
+        ];
+
+        assert_eq!(
+            extract_current_turn_gateway_reply(&messages),
+            "Audio is ready.\n[[audio_as_voice]]\nMEDIA:/tmp/current.ogg"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_tts_result_flows_through_current_turn_gateway_extraction() {
+        use hermes_core::ToolHandler;
+        use hermes_tools::backends::tts::MultiTtsBackend;
+        use hermes_tools::tools::tts::TextToSpeechHandler;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let fixture = tmp.path().join("gateway-voice-source.ogg");
+        let ogg_opus = minimal_ogg_opus_stream();
+        std::fs::write(&fixture, &ogg_opus).unwrap();
+        let output = tmp.path().join("gateway-voice.ogg");
+        let backend = MultiTtsBackend::with_tts_config(serde_json::json!({
+            "provider": "copy-tts",
+            "providers": {
+                "copy-tts": {
+                    "type": "command",
+                    "command": "cp {model} {output_path}",
+                    "model": fixture,
+                    "output_format": "ogg",
+                    "voice_compatible": true
+                }
+            }
+        }));
+        let handler = TextToSpeechHandler::new(std::sync::Arc::new(backend));
+        let tool_result = handler
+            .execute(serde_json::json!({
+                "text": "gateway audio",
+                "provider": "copy-tts",
+                "output_path": output
+            }))
+            .await
+            .unwrap();
+        let messages = vec![
+            Message::user("speak"),
+            Message::assistant_with_tool_calls(None, Vec::new()),
+            Message::tool_result("tts-tool", tool_result),
+            Message::assistant("Audio is ready."),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        let (cleaned, media) = extract_media_markers(&reply);
+        assert_eq!(cleaned.trim(), "Audio is ready.");
+        assert_eq!(
+            media,
+            vec![MediaMarkerRef {
+                path: output.display().to_string(),
+                as_voice: true,
+            }]
+        );
+        assert_eq!(std::fs::read(output).unwrap(), ogg_opus);
+    }
+
+    #[tokio::test]
+    async fn builtin_tts_result_is_normalized_before_gateway_extraction() {
+        use hermes_core::ToolHandler;
+        use hermes_tools::tools::tts::TextToSpeechHandler;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let output = tmp.path().join("builtin.mp3");
+        std::fs::write(&output, b"audio").unwrap();
+        let backend = StaticTtsBackend {
+            result: serde_json::json!({
+                "provider": "openai",
+                "transport": "direct",
+                "file": output
+            })
+            .to_string(),
+        };
+        let handler = TextToSpeechHandler::new(std::sync::Arc::new(backend));
+        let tool_result = handler
+            .execute(serde_json::json!({"text": "speak"}))
+            .await
+            .unwrap();
+        let messages = vec![
+            Message::user("speak"),
+            Message::tool_result("tts-tool", tool_result),
+            Message::assistant("Audio is ready."),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        let (_, media) = extract_media_markers(&reply);
+        assert_eq!(
+            media,
+            vec![MediaMarkerRef {
+                path: output.display().to_string(),
+                as_voice: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_deduplicates_model_repeated_media() {
+        let messages = vec![
+            Message::user("two clips"),
+            Message::tool_result(
+                "tts-tool",
+                r#"{"media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/same.ogg\nMEDIA:/tmp/new.ogg"}"#,
+            ),
+            Message::assistant("Ready\nMEDIA:/tmp/same.ogg"),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        assert_eq!(reply.matches("MEDIA:/tmp/same.ogg").count(), 1);
+        assert_eq!(reply.matches("MEDIA:/tmp/new.ogg").count(), 1);
+        assert_eq!(reply.matches("[[audio_as_voice]]").count(), 1);
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_does_not_scan_arbitrary_tool_text() {
+        let messages = vec![
+            Message::user("ordinary tool"),
+            Message::tool_result("other-tool", r#"{"note":"MEDIA:/tmp/not-an-artifact.ogg"}"#),
+            Message::assistant("No media."),
+        ];
+
+        assert_eq!(extract_current_turn_gateway_reply(&messages), "No media.");
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_ignores_voice_directive_inside_code() {
+        let messages = vec![
+            Message::user("show and speak"),
+            Message::tool_result(
+                "tts-tool",
+                r#"{"media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/live.ogg"}"#,
+            ),
+            Message::assistant("Example:\n```text\n[[audio_as_voice]]\n```\nReady"),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        assert_eq!(reply.matches("[[audio_as_voice]]").count(), 2);
+        let (_, media) = extract_media_markers(&reply);
+        assert_eq!(
+            media,
+            vec![MediaMarkerRef {
+                path: "/tmp/live.ogg".to_string(),
+                as_voice: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_reuses_active_standalone_voice_directive() {
+        let messages = vec![
+            Message::user("speak"),
+            Message::tool_result(
+                "tts-tool",
+                r#"{"media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/live.ogg"}"#,
+            ),
+            Message::assistant("Ready\n[[audio_as_voice]]"),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        assert_eq!(reply.matches("[[audio_as_voice]]").count(), 1);
+        let (_, media) = extract_media_markers(&reply);
+        assert_eq!(media.len(), 1);
+        assert!(media[0].as_voice);
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_closes_truncated_fence_before_media_suffix() {
+        let messages = vec![
+            Message::user("speak"),
+            Message::tool_result(
+                "tts-tool",
+                r#"{"media_tag":"[[audio_as_voice]]\nMEDIA:/tmp/live.ogg"}"#,
+            ),
+            Message::assistant("Ready\n```text\npartial"),
+        ];
+
+        let reply = extract_current_turn_gateway_reply(&messages);
+        assert!(reply.contains("partial\n```\n[[audio_as_voice]]"));
+        let (_, media) = extract_media_markers(&reply);
+        assert_eq!(
+            media,
+            vec![MediaMarkerRef {
+                path: "/tmp/live.ogg".to_string(),
+                as_voice: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn current_turn_gateway_reply_never_replays_prior_assistant_content() {
+        let messages = vec![
+            Message::user("old"),
+            Message::assistant("stale reply"),
+            Message::user("latest"),
+            Message::assistant_with_tool_calls(None, Vec::new()),
+        ];
+
+        assert_eq!(
+            extract_current_turn_gateway_reply(&messages),
+            "(no assistant reply)"
         );
     }
 

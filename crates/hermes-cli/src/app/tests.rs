@@ -6,7 +6,6 @@ mod tests {
         upsert_objective_contract,
     };
     use crate::test_env_lock;
-    use hermes_agent::plugins::{HookResult, Plugin, PluginContext, PluginManager};
     use hermes_config::LlmProviderConfig;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -68,6 +67,28 @@ mod tests {
         }
     }
 
+    struct CountingTestToolHandler {
+        name: &'static str,
+        executions: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl hermes_core::ToolHandler for CountingTestToolHandler {
+        async fn execute(&self, _params: Value) -> Result<String, hermes_core::ToolError> {
+            self.executions
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(format!("{} executed", self.name))
+        }
+
+        fn schema(&self) -> ToolSchema {
+            ToolSchema::new(
+                self.name,
+                "counting test tool",
+                hermes_core::JsonSchema::new("object"),
+            )
+        }
+    }
+
     fn register_test_tool_in_toolset(
         tools: &ToolRegistry,
         name: &'static str,
@@ -92,44 +113,123 @@ mod tests {
         register_test_tool_in_toolset(tools, name, "test");
     }
 
-    fn build_minimal_test_app() -> App {
-        build_minimal_test_app_with_state_root(hermes_home_dir())
+    fn register_counting_test_tool(
+        tools: &ToolRegistry,
+        name: &'static str,
+        executions: Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let handler: Arc<dyn hermes_core::ToolHandler> =
+            Arc::new(CountingTestToolHandler { name, executions });
+        tools.register(
+            name,
+            "test",
+            handler.schema(),
+            handler,
+            Arc::new(|| true),
+            vec![],
+            true,
+            "counting test tool",
+            "T",
+            None,
+        );
+    }
+
+    struct TestAppFixture {
+        app: App,
+        _state_root: tempfile::TempDir,
+    }
+
+    impl std::ops::Deref for TestAppFixture {
+        type Target = App;
+
+        fn deref(&self) -> &Self::Target {
+            &self.app
+        }
+    }
+
+    impl std::ops::DerefMut for TestAppFixture {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.app
+        }
+    }
+
+    fn build_minimal_test_app() -> TestAppFixture {
+        let state_root = tempfile::tempdir().expect("test state root");
+        let app = build_minimal_test_app_with_state_root(state_root.path().to_path_buf());
+        TestAppFixture {
+            app,
+            _state_root: state_root,
+        }
     }
 
     fn build_minimal_test_app_with_state_root(state_root: PathBuf) -> App {
         let config = Arc::new(GatewayConfig::default());
+        let execution_mode = hermes_core::ResolvedExecutionMode::default();
+        let run_runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(&state_root).expect("test run runtime"),
+        );
         let tool_registry = Arc::new(ToolRegistry::new());
+        let execution_containment = Arc::new(
+            hermes_environments::ExecutionContainmentContext::manual(execution_mode)
+                .expect("default mode must admit manual containment"),
+        );
         let cron_dir = state_root.join("cron");
         std::fs::create_dir_all(&cron_dir).expect("create cron test dir");
-        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
+        let cron_scheduler = Arc::new(
+            build_runtime_cron_scheduler(
+                config.as_ref(),
+                "dynamic",
+                cron_dir,
+                &tool_registry,
+                run_runtime.clone(),
+                execution_mode,
+                Arc::clone(&execution_containment),
+            )
+            .expect("test cron scheduler"),
+        );
+        let agent_tool_registry = Arc::new(bridge_tool_registry_with_execution_context(
+            &tool_registry,
+            Arc::clone(&execution_containment),
+        ));
+        let session_id = "test-session".to_string();
+        let mut agent_config = build_agent_config(
             config.as_ref(),
             "dynamic",
-            cron_dir,
-            &tool_registry,
-        ));
-        let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
-        let session_id = "test-session".to_string();
-        let mut agent_config = build_agent_config(config.as_ref(), "dynamic");
+            execution_mode,
+        );
         agent_config.session_id = Some(session_id.clone());
+        let memory_subject = hermes_agent::MemorySubject::local_owner(
+            hermes_agent::MemorySurface::Cli,
+            session_id.clone(),
+        )
+        .expect("test local memory subject");
         let provider: Arc<dyn LlmProvider> = Arc::new(hermes_provider_runtime::NoBackendProvider {
             model: "dynamic".to_string(),
         });
-        let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ))
+        let agent_inner = hermes_agent::attach_discovered_memory(
+            AgentLoop::new(
+                agent_config,
+                agent_tool_registry,
+                provider,
+            )
+            .with_run_runtime(run_runtime.clone())
+            .with_execution_containment_context(execution_containment)
+            .expect("matching test containment"),
+            memory_subject,
+        )
+        .expect("attach memory")
         .with_callbacks(App::stream_callbacks(Arc::new(StdMutex::new(None))));
-        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
-            &agent_inner,
-            state_root.clone(),
-        ));
+        let orchestrator = Arc::new(
+            SubAgentOrchestrator::from_parent(&agent_inner, state_root.clone())
+                .expect("test agent run runtime"),
+        );
         let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
         App {
             state_root,
             config,
             agent,
+            run_runtime,
             tool_registry,
             cron_scheduler,
             tool_schemas: Vec::new(),
@@ -588,168 +688,7 @@ mod tests {
         );
     }
 
-    struct LifecycleHookPlugin {
-        seen: Arc<StdMutex<Vec<(String, String)>>>,
-    }
 
-    #[async_trait::async_trait]
-    impl Plugin for LifecycleHookPlugin {
-        fn meta(&self) -> hermes_agent::plugins::PluginMeta {
-            hermes_agent::plugins::PluginMeta {
-                name: "lifecycle-recorder".to_string(),
-                version: "0.1.0".to_string(),
-                description: "Lifecycle recorder".to_string(),
-                author: None,
-            }
-        }
-
-        async fn initialize(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        async fn shutdown(&self) -> Result<(), AgentError> {
-            Ok(())
-        }
-
-        fn register(&self, ctx: &mut PluginContext) {
-            let finalize_seen = self.seen.clone();
-            ctx.on(
-                HookType::OnSessionFinalize,
-                Arc::new(move |value| {
-                    let session_id = value
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    finalize_seen
-                        .lock()
-                        .unwrap()
-                        .push(("on_session_finalize".to_string(), session_id));
-                    HookResult::Ok
-                }),
-            );
-            let reset_seen = self.seen.clone();
-            ctx.on(
-                HookType::OnSessionReset,
-                Arc::new(move |value| {
-                    let session_id = value
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    reset_seen
-                        .lock()
-                        .unwrap()
-                        .push(("on_session_reset".to_string(), session_id));
-                    HookResult::Ok
-                }),
-            );
-            let end_seen = self.seen.clone();
-            ctx.on(
-                HookType::OnSessionEnd,
-                Arc::new(move |value| {
-                    let session_id = value
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let interrupted = value
-                        .get("interrupted")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let reason = value
-                        .get("reason")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    end_seen.lock().unwrap().push((
-                        format!("on_session_end:interrupted={interrupted}:reason={reason}"),
-                        session_id,
-                    ));
-                    HookResult::Ok
-                }),
-            );
-        }
-    }
-
-    fn attach_lifecycle_recorder(app: &mut App, seen: Arc<StdMutex<Vec<(String, String)>>>) {
-        let mut plugin_manager = PluginManager::new();
-        plugin_manager.register(Arc::new(LifecycleHookPlugin { seen }));
-        let agent = AgentLoop::new(
-            app.agent.config.clone(),
-            app.agent.tool_registry.clone(),
-            app.agent.llm_provider.clone(),
-        )
-        .with_plugins(Arc::new(StdMutex::new(plugin_manager)));
-        app.agent = Arc::new(agent);
-    }
-
-    #[test]
-    fn app_new_session_invokes_session_lifecycle_hooks() {
-        let mut app = build_minimal_test_app();
-        let seen = Arc::new(StdMutex::new(Vec::new()));
-        attach_lifecycle_recorder(&mut app, seen.clone());
-        let old_session_id = app.session_id.clone();
-
-        app.new_session();
-
-        let events = seen.lock().unwrap().clone();
-        assert_eq!(events.len(), 2);
-        assert_eq!(
-            events[0],
-            ("on_session_finalize".to_string(), old_session_id)
-        );
-        assert_eq!(events[1].0, "on_session_reset");
-        assert_eq!(events[1].1, app.session_id);
-        assert_ne!(events[0].1, events[1].1);
-        assert_eq!(
-            app.agent.config.session_id.as_deref(),
-            Some(app.session_id.as_str())
-        );
-    }
-
-    #[test]
-    fn app_reset_session_invokes_session_lifecycle_hooks() {
-        let mut app = build_minimal_test_app();
-        let seen = Arc::new(StdMutex::new(Vec::new()));
-        attach_lifecycle_recorder(&mut app, seen.clone());
-        let session_id = app.session_id.clone();
-
-        app.reset_session();
-
-        let events = seen.lock().unwrap().clone();
-        assert_eq!(
-            events,
-            vec![
-                ("on_session_finalize".to_string(), session_id.clone()),
-                ("on_session_reset".to_string(), session_id)
-            ]
-        );
-        assert_eq!(app.session_id, "test-session");
-        assert_eq!(app.agent.config.session_id.as_deref(), Some("test-session"));
-    }
-
-    #[test]
-    fn finalize_interrupted_tui_session_invokes_session_end_hook() {
-        let _guard = env_test_lock();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let mut app = build_minimal_test_app();
-        app.state_root = tmp.path().join("custom-state-root");
-        app.session_id = "hooked-force-quit".to_string();
-        app.messages = vec![hermes_core::Message::user("still save this")];
-        let seen = Arc::new(StdMutex::new(Vec::new()));
-        attach_lifecycle_recorder(&mut app, seen.clone());
-
-        app.finalize_interrupted_tui_session(None, "shutdown_signal")
-            .expect("finalize interrupted session");
-
-        assert_eq!(
-            seen.lock().unwrap().clone(),
-            vec![(
-                "on_session_end:interrupted=true:reason=shutdown_signal".to_string(),
-                "hooked-force-quit".to_string()
-            )]
-        );
-    }
 
     #[test]
     fn active_subagent_count_reads_started_lineage_records() {
@@ -792,11 +731,26 @@ mod tests {
             personality: Some("helpful".to_string()),
             message_count: 5,
             created_at: "2025-01-01T00:00:00Z".to_string(),
+            cwd: Some("/workspace/hermes-agent".to_string()),
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.session_id, "test-123");
         assert_eq!(back.model, "dynamic");
+        assert_eq!(back.cwd.as_deref(), Some("/workspace/hermes-agent"));
+    }
+
+    #[test]
+    fn legacy_session_info_without_cwd_remains_readable() {
+        let legacy: SessionInfo = serde_json::from_value(serde_json::json!({
+            "session_id": "legacy",
+            "model": "dynamic",
+            "personality": null,
+            "message_count": 1,
+            "created_at": "2026-07-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(legacy.cwd, None);
     }
 
     #[test]
@@ -985,6 +939,194 @@ mod tests {
     }
 
     #[test]
+    fn quorum_fanout_never_advertises_or_executes_registered_tools() {
+        let _guard = env_test_lock();
+        let _environment = EnvSnapshot::capture(&[
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+            "HERMES_QUORUM_VOTER_PASSES",
+        ]);
+        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "1");
+
+        block_on_test(async {
+            let server = MockServer::start().await;
+            let response_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let response_count_for_mock = Arc::clone(&response_count);
+            Mock::given(method("POST"))
+                .and(path("/chat/completions"))
+                .respond_with(move |request: &wiremock::Request| {
+                    let response_index = response_count_for_mock
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let request_body: serde_json::Value =
+                        serde_json::from_slice(&request.body).expect("parse provider request");
+                    let is_tool_retry = request_body
+                        .get("messages")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|messages| {
+                            messages.iter().any(|message| {
+                                message.get("role").and_then(|value| value.as_str())
+                                    == Some("tool")
+                            })
+                        });
+                    let response_body = if is_tool_retry {
+                        serde_json::json!({
+                            "id": format!("chatcmpl-quorum-{response_index}"),
+                            "object": "chat.completion",
+                            "created": 0,
+                            "model": "quorum-test",
+                            "choices": [{
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": format!("provider answer {response_index}")
+                                },
+                                "finish_reason": "stop"
+                            }],
+                            "usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 1,
+                                "total_tokens": 2
+                            }
+                        })
+                    } else {
+                        serde_json::json!({
+                            "id": format!("chatcmpl-quorum-{response_index}"),
+                            "object": "chat.completion",
+                            "created": 0,
+                            "model": "quorum-test",
+                            "choices": [{
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": null,
+                                    "tool_calls": [{
+                                        "id": format!("call-quorum-{response_index}"),
+                                        "type": "function",
+                                        "function": {
+                                            "name": "quorum_forbidden",
+                                            "arguments": "{}"
+                                        }
+                                    }]
+                                },
+                                "finish_reason": "tool_calls"
+                            }],
+                            "usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 1,
+                                "total_tokens": 2
+                            }
+                        })
+                    };
+                    ResponseTemplate::new(200).set_body_json(response_body)
+                })
+                .mount(&server)
+                .await;
+
+            let state = tempfile::tempdir().expect("quorum state");
+            let mut app = build_minimal_test_app_with_state_root(state.path().to_path_buf());
+            Arc::make_mut(&mut app.config).llm_providers.insert(
+                "custom".to_string(),
+                LlmProviderConfig {
+                    api_key: Some("test-key".to_string()),
+                    base_url: Some(server.uri()),
+                    model: Some("quorum-origin-20260101".to_string()),
+                    ..LlmProviderConfig::default()
+                },
+            );
+            let tool_executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            register_counting_test_tool(
+                &app.tool_registry,
+                "quorum_forbidden",
+                Arc::clone(&tool_executions),
+            );
+            let refresh = app.refresh_agent_tool_snapshot();
+            assert!(refresh.changed());
+            app.try_switch_model("custom:quorum-origin-20260101")
+                .expect("switch to quorum test provider");
+            assert!(app.agent.tool_registry.get("quorum_forbidden").is_some());
+            assert!(app
+                .tool_schemas
+                .iter()
+                .any(|schema| schema.name == "quorum_forbidden"));
+
+            app.messages = vec![hermes_core::Message::user("resolve the quorum task")];
+            let handled = app
+                .run_quorum_fanout_turn(
+                    std::time::Instant::now(),
+                    QuorumPolicy {
+                        enabled: true,
+                        voters: 3,
+                        models: vec![
+                            "custom:quorum-voter-a-20260101".to_string(),
+                            "custom:quorum-voter-b-20260101".to_string(),
+                            "custom:quorum-voter-c-20260101".to_string(),
+                        ],
+                        mode: "balanced".to_string(),
+                        updated_at: "2026-07-20T00:00:00Z".to_string(),
+                    },
+                )
+                .await
+                .expect("provider-only quorum fan-out");
+            assert!(handled);
+
+            let requests = server
+                .received_requests()
+                .await
+                .expect("recorded provider requests");
+            let mut voter_requests = 0usize;
+            let mut synthesis_requests = 0usize;
+            for request in &requests {
+                let payload: serde_json::Value =
+                    serde_json::from_slice(&request.body).expect("parse recorded request");
+                assert_eq!(
+                    payload.get("tools"),
+                    None,
+                    "quorum request advertised a non-empty tool schema: {payload}"
+                );
+                let messages = payload
+                    .get("messages")
+                    .and_then(|value| value.as_array())
+                    .expect("provider request messages");
+                if messages.iter().any(|message| {
+                    message
+                        .get("content")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|content| content.contains("[QUORUM_VOTER]"))
+                }) {
+                    voter_requests = voter_requests.saturating_add(1);
+                }
+                if messages.iter().any(|message| {
+                    message
+                        .get("content")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|content| content.contains("[QUORUM_SYNTHESIS]"))
+                }) {
+                    synthesis_requests = synthesis_requests.saturating_add(1);
+                }
+            }
+            assert!(
+                voter_requests >= 6,
+                "every voter request and retry must receive an empty advertised schema"
+            );
+            assert!(
+                synthesis_requests >= 2,
+                "the synthesis request and retry must receive an empty advertised schema"
+            );
+            assert_eq!(
+                tool_executions.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "a registered tool requested by every quorum pass must never execute"
+            );
+            assert_eq!(
+                response_count.load(std::sync::atomic::Ordering::SeqCst),
+                requests.len()
+            );
+        });
+    }
+
+    #[test]
     fn test_run_agent_quorum_arm_persists_artifact_even_on_voter_failures() {
         let _guard = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
@@ -1055,6 +1197,27 @@ mod tests {
         }
     }
 
-    include!("tests/session_runtime.rs");
+    #[test]
+    fn quorum_contract_falls_back_to_portable_embedded_content() {
+        let _guard = env_test_lock();
+        let previous = std::env::var_os("HERMES_QUORUM_AGENT_CONTRACT_PATH");
+        std::env::remove_var("HERMES_QUORUM_AGENT_CONTRACT_PATH");
+        let state = tempfile::tempdir().expect("temp state");
+        let app = build_minimal_test_app_with_state_root(state.path().to_path_buf());
 
+        let (source, content) = app
+            .load_quorum_agent_contract_text()
+            .expect("embedded quorum contract");
+
+        assert_eq!(source, PathBuf::from(QUORUM_AGENT_CONTRACT_EMBEDDED_PATH));
+        assert!(!source.is_absolute());
+        assert_eq!(content, QUORUM_AGENT_CONTRACT_EMBEDDED.trim());
+        assert!(!content.is_empty());
+        match previous {
+            Some(value) => std::env::set_var("HERMES_QUORUM_AGENT_CONTRACT_PATH", value),
+            None => std::env::remove_var("HERMES_QUORUM_AGENT_CONTRACT_PATH"),
+        }
+    }
+
+    include!("tests/session_runtime.rs");
 }

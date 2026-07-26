@@ -16,6 +16,9 @@ pub struct DiscordConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
 
+    /// Optional Discord Gateway v10 WebSocket URL override for tests/private gateways.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway_url: Option<String>,
     /// REST liveness probe interval in seconds. Set to 0 to disable.
     #[serde(default = "default_liveness_interval_seconds")]
     pub liveness_interval_seconds: f64,
@@ -25,12 +28,19 @@ pub struct DiscordConfig {
     pub liveness_failure_threshold: u32,
 
     /// Whether the bot must be @mentioned in group channels.
-    #[serde(default)]
+    #[serde(default = "default_require_mention")]
     pub require_mention: bool,
 
-    /// Gateway intents bitmask (default: GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT).
+    /// Gateway intents bitmask. DIRECT_MESSAGES is always added for DM routing.
     #[serde(default = "default_intents")]
     pub intents: u64,
+
+    /// Verified-bot ingress policy resolved during platform configuration.
+    ///
+    /// It is runtime-only: serialized adapter config continues to use the
+    /// existing `DISCORD_ALLOW_BOTS` fallback when no platform value is set.
+    #[serde(skip, default = "default_bot_message_policy")]
+    pub bot_policy: DiscordBotMessagePolicy,
 
     /// How outgoing chunks should reply-reference the original Discord message.
     #[serde(default = "default_reply_to_mode")]
@@ -45,11 +55,28 @@ pub struct DiscordConfig {
     pub channel_skill_bindings: Vec<DiscordChannelSkillBinding>,
 }
 
+const DISCORD_DIRECT_MESSAGES_INTENT: u64 = 1 << 12;
+
 fn default_intents() -> u64 {
-    // GUILDS (1<<0) | GUILD_MESSAGES (1<<9) | MESSAGE_CONTENT (1<<15)
-    (1 << 0) | (1 << 9) | (1 << 15)
+    // GUILDS (1<<0) | GUILD_MESSAGES (1<<9) | DIRECT_MESSAGES (1<<12)
+    // | MESSAGE_CONTENT (1<<15)
+    (1 << 0) | (1 << 9) | DISCORD_DIRECT_MESSAGES_INTENT | (1 << 15)
 }
 
+fn default_bot_message_policy() -> DiscordBotMessagePolicy {
+    DiscordBotMessagePolicy::from_lookup(|name| std::env::var(name).ok())
+}
+
+impl DiscordConfig {
+    fn gateway_intents(&self) -> u64 {
+        self.intents | DISCORD_DIRECT_MESSAGES_INTENT
+    }
+}
+
+
+fn default_require_mention() -> bool {
+    true
+}
 fn default_reply_to_mode() -> String {
     "first".to_string()
 }
@@ -161,12 +188,15 @@ fn metadata_marks_non_conversational(metadata: Option<&DiscordSendMetadata>) -> 
 }
 
 fn discord_metadata_from_send_options(options: &SendMessageOptions) -> Option<DiscordSendMetadata> {
-    if options.thread_id.is_none() && !options.non_conversational {
+    if options.thread_id.is_none()
+        && options.reply_to_message_id.is_none()
+        && !options.non_conversational
+    {
         return None;
     }
     Some(DiscordSendMetadata {
         thread_id: options.thread_id.clone(),
-        reply_to_message_id: None,
+        reply_to_message_id: options.reply_to_message_id.clone(),
         non_conversational: options.non_conversational,
     })
 }
@@ -185,6 +215,14 @@ impl DiscordReplyToMode {
             Some(value) if value.eq_ignore_ascii_case("off") => Self::Off,
             Some(value) if value.eq_ignore_ascii_case("all") => Self::All,
             _ => Self::First,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::First => "first",
+            Self::All => "all",
         }
     }
 

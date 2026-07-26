@@ -12,7 +12,7 @@ fn sanitize_env_lines_splits_concatenated_assignments() {
 fn load_dotenv_file_sanitizes_project_env_before_loading() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     let project = tempdir().expect("project tempdir");
     let project_env = project.path().join(".env");
 
@@ -53,7 +53,7 @@ fn load_dotenv_file_sanitizes_project_env_before_loading() {
 fn project_env_only_fills_missing_when_user_env_loaded() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     let dir = tempdir().expect("tempdir");
     let user_env = dir.path().join("user.env");
     let project_env = dir.path().join("project.env");
@@ -91,7 +91,7 @@ fn project_env_only_fills_missing_when_user_env_loaded() {
 
 #[test]
 fn apply_env_overrides_ignores_empty_provider_keys() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe {
@@ -121,7 +121,7 @@ fn apply_env_overrides_ignores_empty_provider_keys() {
 
 #[test]
 fn apply_env_overrides_supports_kanban_dispatch_gate() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     unsafe {
         std::env::set_var("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "false");
@@ -138,7 +138,7 @@ fn apply_env_overrides_supports_kanban_dispatch_gate() {
 
 #[test]
 fn apply_env_overrides_supports_agent_api_max_retries() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     unsafe {
         std::env::set_var("HERMES_AGENT_API_MAX_RETRIES", "9");
@@ -155,7 +155,7 @@ fn apply_env_overrides_supports_agent_api_max_retries() {
 
 #[test]
 fn apply_env_overrides_openai_falls_back_when_primary_env_is_empty() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe {
@@ -182,7 +182,7 @@ fn apply_env_overrides_openai_falls_back_when_primary_env_is_empty() {
 
 #[test]
 fn apply_env_overrides_supports_codex_and_qwen_oauth_env_vars() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe {
@@ -215,7 +215,7 @@ fn apply_env_overrides_supports_codex_and_qwen_oauth_env_vars() {
 
 #[test]
 fn apply_env_overrides_supports_copilot_env_var_precedence() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe {
@@ -242,7 +242,7 @@ fn apply_env_overrides_supports_copilot_env_var_precedence() {
 
 #[test]
 fn apply_env_overrides_supports_direct_provider_env_vars() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     unsafe {
         std::env::set_var("ARCEEAI_API_KEY", "arcee-token");
@@ -312,7 +312,7 @@ fn apply_env_overrides_supports_direct_provider_env_vars() {
 
 #[test]
 fn apply_env_overrides_ignores_generic_github_tokens_for_copilot() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     // SAFETY: test process serializes env mutation via ENV_LOCK.
     unsafe {
@@ -339,7 +339,7 @@ fn apply_env_overrides_ignores_generic_github_tokens_for_copilot() {
 
 #[test]
 fn apply_env_overrides_slack_env_token_enables_platform_by_default() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     unsafe {
         std::env::set_var("SLACK_BOT_TOKEN", "[REDACTED_SLACK_TOKEN]");
@@ -369,7 +369,7 @@ fn apply_env_overrides_slack_env_token_enables_platform_by_default() {
 
 #[test]
 fn apply_env_overrides_slack_env_token_respects_explicit_disable_marker() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
 
     unsafe {
         std::env::set_var("SLACK_BOT_TOKEN", "[REDACTED_SLACK_TOKEN]");
@@ -401,7 +401,7 @@ fn apply_env_overrides_slack_env_token_respects_explicit_disable_marker() {
 
 #[test]
 fn apply_env_overrides_respects_ignore_rules_flags() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     unsafe {
         std::env::set_var("HERMES_IGNORE_RULES", "1");
     }
@@ -418,7 +418,7 @@ fn apply_env_overrides_respects_ignore_rules_flags() {
 fn load_config_ignore_user_config_uses_defaults_when_files_exist() {
     use tempfile::tempdir;
 
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = ENV_LOCK.lock();
     let home = tempdir().expect("tempdir");
     let cfg_path = home.path().join("config.yaml");
     std::fs::write(&cfg_path, "max_turns: 777\n").expect("write config");

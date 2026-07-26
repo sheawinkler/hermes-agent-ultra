@@ -117,7 +117,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build release binary
@@ -179,6 +179,7 @@ jobs:
             dist/*.zip.pem
             dist/security/release-sbom.cdx.json
             scripts/install.sh
+            scripts/install.ps1
             Formula/hermes-agent-ultra.rb
 
   release-smoke:
@@ -200,3 +201,48 @@ jobs:
         with:
           name: release-artifact-smoke
           path: .sync-reports/release-artifact-smoke.json
+
+  windows-release-smoke:
+    needs: sign-and-publish
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Smoke published Windows release installer
+        shell: pwsh
+        run: |
+          $binDir = Join-Path $env:RUNNER_TEMP "hermes-release-smoke-bin"
+          $hermesHome = Join-Path $env:RUNNER_TEMP "hermes-release-smoke-home"
+          New-Item -ItemType Directory -Force -Path $binDir, $hermesHome | Out-Null
+
+          $legacyPath = Join-Path $binDir "hermes.exe"
+          [System.IO.File]::WriteAllText($legacyPath, "upstream-hermes-sentinel", [System.Text.Encoding]::ASCII)
+
+          $installer = Join-Path $PWD "scripts/install.ps1"
+          & $installer -Version "${{ github.ref_name }}" -InstallDir $binDir -HermesHome $hermesHome -SkipSetup
+          if (-not $?) {
+            throw "Windows installer failed."
+          }
+
+          $canonical = Join-Path $binDir "hermes-agent-ultra.exe"
+          $primary = Join-Path $binDir "hermes-ultra.exe"
+          if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) {
+            throw "Canonical Windows binary was not installed."
+          }
+          if (-not (Test-Path -LiteralPath $primary -PathType Leaf)) {
+            throw "Primary Windows binary was not installed."
+          }
+          if ([System.IO.File]::ReadAllText($legacyPath, [System.Text.Encoding]::ASCII) -ne "upstream-hermes-sentinel") {
+            throw "Default install replaced the existing legacy hermes.exe command."
+          }
+
+          $versionOutput = & $primary --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed Windows binary --version exited with status $LASTEXITCODE."
+          }
+          $expectedVersion = "${{ github.ref_name }}".TrimStart("v")
+          if (-not ($versionOutput -join "`n").Contains($expectedVersion)) {
+            throw "Installed Windows binary did not report release version $expectedVersion: $versionOutput"
+          }

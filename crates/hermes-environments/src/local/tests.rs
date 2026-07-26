@@ -3,12 +3,10 @@ use std::ffi::OsString;
 use std::path::Path;
 use tempfile::tempdir;
 
-static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENV_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn lock_env() -> parking_lot::MutexGuard<'static, ()> {
+    ENV_TEST_LOCK.lock()
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -197,23 +195,24 @@ fn test_resolve_shell_init_files_uses_subprocess_home_override() {
 }
 
 #[test]
-fn test_subprocess_env_passthrough_parses_configured_and_env_values() {
+fn test_subprocess_env_passthrough_rejects_credential_control_values() {
     let _lock = lock_env();
     let _passthrough = EnvGuard::set(
         SUBPROCESS_ENV_PASSTHROUGH_VAR,
         "OPENAI_API_KEY,ANTHROPIC_TOKEN:BAD-NAME VALID_NAME",
     );
-    let parsed = subprocess_env_passthrough_set(&["GOOGLE_API_KEY".to_string()]);
-    assert!(parsed.contains("OPENAI_API_KEY"));
-    assert!(parsed.contains("ANTHROPIC_TOKEN"));
+    let parsed =
+        subprocess_env_passthrough_set(&["GOOGLE_API_KEY".to_string(), "VALID_NAME".to_string()]);
     assert!(parsed.contains("VALID_NAME"));
-    assert!(parsed.contains("GOOGLE_API_KEY"));
+    assert!(!parsed.contains("OPENAI_API_KEY"));
+    assert!(!parsed.contains("ANTHROPIC_TOKEN"));
+    assert!(!parsed.contains("GOOGLE_API_KEY"));
     assert!(!parsed.contains("BAD-NAME"));
 }
 
 #[cfg(unix)]
 #[test]
-fn test_shell_cleanup_keeps_configured_passthrough() {
+fn test_shell_cleanup_has_no_credential_passthrough_escape_hatch() {
     let wrapped = with_login_profile_sources(
         "echo hi",
         &[],
@@ -224,11 +223,10 @@ fn test_shell_cleanup_keeps_configured_passthrough() {
         ],
         None,
     );
-    assert!(wrapped.contains("HERMES_SUBPROCESS_ENV_PASSTHROUGH"));
-    assert!(wrapped.contains("OPENAI_API_KEY"));
-    assert!(wrapped.contains("HERMES_GATEWAY_SECRET"));
-    assert!(wrapped
-        .contains("${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-}"));
+    assert!(!wrapped.contains("HERMES_SUBPROCESS_ENV_PASSTHROUGH"));
+    assert!(!wrapped.contains("HERMES_SUBPROCESS_FORCE_TARGETS"));
+    assert!(wrapped.contains("unset OPENAI_API_KEY"));
+    assert!(wrapped.contains("HERMES_GATEWAY_"));
 }
 
 #[test]
@@ -268,6 +266,61 @@ fn test_profile_home_mode_sets_home_and_real_home() {
 }
 
 #[test]
+fn test_profile_home_mode_requires_profile_home_instead_of_real_home() {
+    let _lock = lock_env();
+    let real = tempdir().unwrap();
+    let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
+    let _real_home = EnvGuard::set("HERMES_REAL_HOME", real.path().to_string_lossy().as_ref());
+    let _hermes_home = EnvGuard::remove("HERMES_HOME");
+    let _agent_home = EnvGuard::remove("HERMES_AGENT_ULTRA_HOME");
+    let backend = LocalBackend::new_with_shell_init_and_home_mode(
+        10,
+        1_048_576,
+        Vec::new(),
+        true,
+        TerminalHomeMode::Profile,
+        Vec::new(),
+    );
+
+    let error =
+        block_on(backend.execute_command("printf should-not-run", None, None, false, false))
+            .expect_err("profile mode must not fall back to real HOME");
+    assert!(error
+        .to_string()
+        .contains("requires HERMES_HOME or HERMES_AGENT_ULTRA_HOME"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_profile_home_mode_never_auto_sources_real_home_rc() {
+    let _lock = lock_env();
+    let real = tempdir().unwrap();
+    let hermes = tempdir().unwrap();
+    std::fs::write(real.path().join(".bashrc"), "export REAL_HOME_RC_LEAK=1\n").unwrap();
+    let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
+    let _real_home = EnvGuard::set("HERMES_REAL_HOME", real.path().to_string_lossy().as_ref());
+    let _hermes_home = EnvGuard::set("HERMES_HOME", hermes.path().to_string_lossy().as_ref());
+    let backend = LocalBackend::new_with_shell_init_and_home_mode(
+        10,
+        1_048_576,
+        Vec::new(),
+        true,
+        TerminalHomeMode::Profile,
+        Vec::new(),
+    );
+
+    let output = block_on(backend.execute_command(
+        "printf '%s' \"${REAL_HOME_RC_LEAK-unset}\"",
+        None,
+        None,
+        false,
+        false,
+    ))
+    .expect("profile command");
+    assert_eq!(output.stdout, "unset");
+}
+
+#[test]
 fn test_terminal_sanitizer_blocks_provider_env_by_default() {
     let _lock = lock_env();
     let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
@@ -288,7 +341,7 @@ fn test_terminal_sanitizer_blocks_provider_env_by_default() {
 }
 
 #[test]
-fn test_terminal_config_passthrough_allows_blocklisted_env() {
+fn test_terminal_config_cannot_reopen_blocklisted_env() {
     let _lock = lock_env();
     let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
     let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
@@ -301,7 +354,7 @@ fn test_terminal_config_passthrough_allows_blocklisted_env() {
     );
 
     let output = block_on(backend.execute_command(
-        "printf '%s' \"$OPENAI_API_KEY\"",
+        "printf '%s' \"${OPENAI_API_KEY-unset}\"",
         Some(10),
         None,
         false,
@@ -310,18 +363,18 @@ fn test_terminal_config_passthrough_allows_blocklisted_env() {
     .unwrap();
 
     assert_eq!(output.exit_code, 0);
-    assert_eq!(output.stdout, "secret-value");
+    assert_eq!(output.stdout, "unset");
 }
 
 #[test]
-fn test_terminal_registry_env_passthrough_allows_prefix_blocked_env() {
+fn test_terminal_registry_env_passthrough_cannot_reopen_prefix_secret() {
     let _lock = lock_env();
     let _gateway = EnvGuard::set("HERMES_GATEWAY_SECRET", "gateway-secret");
     let _passthrough = EnvGuard::set(SUBPROCESS_ENV_PASSTHROUGH_VAR, "HERMES_GATEWAY_SECRET");
     let backend = LocalBackend::new_with_shell_init(10, 1_048_576, Vec::new(), true, Vec::new());
 
     let output = block_on(backend.execute_command(
-        "printf '%s' \"$HERMES_GATEWAY_SECRET\"",
+        "printf '%s' \"${HERMES_GATEWAY_SECRET-unset}\"",
         Some(10),
         None,
         false,
@@ -330,7 +383,7 @@ fn test_terminal_registry_env_passthrough_allows_prefix_blocked_env() {
     .unwrap();
 
     assert_eq!(output.exit_code, 0);
-    assert_eq!(output.stdout, "gateway-secret");
+    assert_eq!(output.stdout, "unset");
 }
 
 #[test]
@@ -467,6 +520,26 @@ async fn test_execute_command_timeout() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn test_foreground_timeout_kills_descendant_process_tree() {
+    let backend = LocalBackend::new(1, 1_048_576);
+    let marker = format!("hermes_timeout_descendant_{}", std::process::id());
+    let command = format!(
+        "python3 -c 'import subprocess,time; subprocess.Popen([\"python3\", \"-c\", \"import time; time.sleep(60)\", \"{marker}\"]); time.sleep(60)'"
+    );
+
+    let result = backend
+        .execute_command(&command, Some(1), None, false, false)
+        .await;
+    assert!(matches!(result, Err(AgentError::Timeout(_))));
+    assert!(
+        wait_for_marker(&marker, false, std::time::Duration::from_secs(5)).await,
+        "descendant survived foreground timeout: {:?}",
+        pids_for_marker(&marker)
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn test_foreground_child_group_is_killed_when_future_is_aborted() {
     let backend = Arc::new(LocalBackend::new(60, 1_048_576));
     let marker = format!("hermes_abort_guard_{}", std::process::id());
@@ -506,9 +579,6 @@ async fn test_plain_shell_background_child_does_not_hang_foreground_collection()
         .await
         .unwrap();
     let elapsed = started.elapsed();
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", probe])
-        .status();
 
     assert!(
         elapsed < std::time::Duration::from_secs(3),
@@ -516,6 +586,11 @@ async fn test_plain_shell_background_child_does_not_hang_foreground_collection()
     );
     assert_eq!(output.exit_code, 0);
     assert!(output.stdout.contains(marker), "stdout={:?}", output.stdout);
+    assert!(
+        wait_for_marker(probe, false, std::time::Duration::from_secs(5)).await,
+        "shell-backgrounded child survived foreground ownership: {:?}",
+        pids_for_marker(probe)
+    );
 }
 
 #[tokio::test]
@@ -761,7 +836,7 @@ fn test_execute_command_preserves_general_aws_credentials() {
 }
 
 #[test]
-fn test_execute_command_force_prefix_reinjects_blocked_var() {
+fn test_execute_command_force_prefix_cannot_reinject_blocked_var() {
     let _lock = lock_env();
     let _blocked = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
     let _forced = EnvGuard::set("_HERMES_FORCE_OPENAI_API_KEY", "sk-explicit");
@@ -777,7 +852,7 @@ fn test_execute_command_force_prefix_reinjects_blocked_var() {
     .unwrap();
 
     assert_eq!(output.exit_code, 0);
-    assert_eq!(output.stdout, "sk-explicit|");
+    assert_eq!(output.stdout, "|");
 }
 
 #[test]
@@ -863,6 +938,32 @@ async fn test_background_process_lifecycle_with_stdin() {
         .as_str()
         .unwrap_or_default()
         .contains("hello from stdin"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_background_owner_drop_kills_descendant_process_tree() {
+    let marker = format!("hermes_background_drop_{}", std::process::id());
+    let command = format!(
+        "python3 -c 'import subprocess,time; subprocess.Popen([\"python3\", \"-c\", \"import time; time.sleep(60)\", \"{marker}\"]); time.sleep(60)'"
+    );
+    let backend = LocalBackend::new(60, 1_048_576);
+    let started = backend
+        .execute_command(&command, Some(60), None, true, false)
+        .await
+        .expect("background start");
+    assert_eq!(started.exit_code, 0);
+    assert!(
+        wait_for_marker(&marker, true, std::time::Duration::from_secs(5)).await,
+        "test setup failed to observe background descendant"
+    );
+
+    drop(backend);
+    assert!(
+        wait_for_marker(&marker, false, std::time::Duration::from_secs(5)).await,
+        "background descendant survived owner drop: {:?}",
+        pids_for_marker(&marker)
+    );
 }
 
 #[tokio::test]

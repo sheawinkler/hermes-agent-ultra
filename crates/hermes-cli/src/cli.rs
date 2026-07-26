@@ -3,6 +3,7 @@
 //! Defines the command-line interface for the hermes binaries.
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // CliCommand
@@ -193,25 +194,25 @@ pub enum CliCommand {
         strict: bool,
     },
 
-    /// Inspect implemented system surfaces: release, replay, MCP, ACP, handoff, providers, provenance.
+    /// Inspect system-surface availability, local diagnostics, and evidence.
     Systems {
-        /// Action: status/release/replay/mcp/acp/providers/handoff/provenance/agent-card.
+        /// Action: status/release/replay/mcp/acp/providers/handoff/provenance/a2a-availability.
         action: Option<String>,
-        /// Optional action topic (e.g. mcp conformance, acp conformance, handoff template).
+        /// Optional action topic (e.g. mcp diagnostic, acp diagnostic, handoff template).
         topic: Option<String>,
         /// Print machine-readable JSON.
         #[arg(long)]
         json: bool,
-        /// Write the JSON report/card to this path.
+        /// Write the JSON report to this path.
         #[arg(long)]
         output: Option<String>,
-        /// Host for `systems agent-card serve`.
+        /// Host for `systems a2a-availability serve`.
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
-        /// Port for `systems agent-card serve`.
+        /// Port for `systems a2a-availability serve`.
         #[arg(long, default_value_t = 9127)]
         port: u16,
-        /// Serve one agent-card HTTP request, then exit.
+        /// Serve one A2A-availability HTTP request, then exit.
         #[arg(long)]
         once: bool,
     },
@@ -410,7 +411,7 @@ pub enum CliCommand {
 
     /// Authentication management.
     Auth {
-        /// Action: "login", "logout", "status", "verify", "add", "list", "remove", or "reset".
+        /// Action: "login", "logout", "status", "verify", "refresh", "add", "list", "remove", or "reset".
         action: Option<String>,
         /// Provider: openai/anthropic/... / `telegram` / `weixin|wechat|wx` (write platform token to config.yaml) / `copilot`.
         /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER`, config model provider, or `nous`.
@@ -575,6 +576,9 @@ pub enum CliCommand {
         /// Meeting id for fetch.
         #[arg(long)]
         meeting_id: Option<String>,
+        /// Microsoft Entra object ID for the meeting organizer; required for fetch and run artifact access.
+        #[arg(long)]
+        organizer_user_id: Option<String>,
         /// Join URL for fetch.
         #[arg(long)]
         join_web_url: Option<String>,
@@ -624,6 +628,9 @@ pub enum CliCommand {
         /// Single-shot query (non-interactive).
         #[arg(short, long)]
         query: Option<String>,
+        /// Read a single non-interactive query from standard input.
+        #[arg(long, hide = true, conflicts_with = "query")]
+        query_stdin: bool,
         /// Preload a skill before chatting.
         #[arg(long)]
         preload_skill: Option<String>,
@@ -634,13 +641,22 @@ pub enum CliCommand {
 
     /// Skills management.
     Skills {
-        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config/reset/subscribe/sync/opt-out/opt-in
+        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config/reset/subscribe/sync/opt-out/opt-in/trust
         action: Option<String>,
-        /// Skill name or search query.
+        /// Skill name, search query, or `trust` subcommand.
         name: Option<String>,
         /// Additional argument (e.g. tap URL, snapshot path).
         #[arg(long)]
         extra: Option<String>,
+        /// Owner-only external trust authority directory for `skills trust` and verified package operations.
+        #[arg(long, value_name = "ABSOLUTE_DIR")]
+        authority_dir: Option<PathBuf>,
+        /// Local regular admin file used by a `skills trust` provisioning operation.
+        #[arg(long, value_name = "ABSOLUTE_FILE")]
+        file: Option<PathBuf>,
+        /// Exact 64-character SHA-256 pin for a local `skills trust` provisioning file.
+        #[arg(long, value_name = "SHA256")]
+        expected_sha256: Option<String>,
         /// Also delete pristine bundled skills for `skills opt-out`.
         #[arg(long)]
         remove: bool,
@@ -652,27 +668,26 @@ pub enum CliCommand {
         sync: bool,
     },
 
-    /// Plugin management.
+    /// Plugin diagnostics and cleanup. Third-party plugin installation and
+    /// activation are unavailable until a loader is identity- and
+    /// sandbox-bound.
     Plugins {
-        /// Action: install/update/remove/list/enable/disable/inspect
+        /// Action: list/inspect/remove.
         action: Option<String>,
         /// Plugin name.
         name: Option<String>,
-        /// Git branch, tag, or commit to checkout after clone (remote installs only).
-        #[arg(long = "ref")]
-        git_ref: Option<String>,
-        /// Allow clone from hosts outside the default allowlist (high risk).
-        #[arg(long)]
-        allow_untrusted_git_host: bool,
     },
 
     /// Memory provider management.
     Memory {
-        /// Action: setup/status/off/reset
+        /// Action: setup/status/off/export/forget/retention/reset.
         action: Option<String>,
-        /// Provider for `memory setup` (e.g. mem0) or reset target (all|memory|user).
+        /// Provider for `memory setup` (for example, `mem0`).
+        ///
+        /// Governance commands deliberately do not accept a positional target:
+        /// their subject is the explicit runtime session below.
         target: Option<String>,
-        /// Skip reset confirmation prompt.
+        /// Confirm destructive memory forget/reset or apply a retention sweep.
         #[arg(short = 'y', long)]
         yes: bool,
         /// Memory provider setup mode, currently used by Mem0: platform|selfhosted|oss.
@@ -684,7 +699,19 @@ pub enum CliCommand {
         /// Memory provider API key, currently written to `$HERMES_HOME/.env` for Mem0.
         #[arg(long = "api-key")]
         api_key: Option<String>,
-        /// Show the provider setup plan without writing config or env files.
+        /// Explicit runtime session ID for memory export, forget, retention, or reset.
+        ///
+        /// Local CLI governance never invents a default subject. Gateway/HTTP
+        /// surfaces derive their subjects from authenticated ingress instead.
+        #[arg(long = "session-id")]
+        session_id: Option<String>,
+        /// Delete subject-scoped memory older than this many days during `memory retention`.
+        #[arg(long = "retention-days")]
+        retention_days: Option<u32>,
+        /// Keep at most this many subject-scoped memory records during `memory retention`.
+        #[arg(long = "retention-max-records")]
+        retention_max_records: Option<u64>,
+        /// Show the provider setup or retention plan without changing provider state.
         #[arg(long)]
         dry_run: bool,
     },
@@ -742,9 +769,15 @@ pub enum CliCommand {
         /// Restrict prune to sessions with this source marker.
         #[arg(long)]
         source: Option<String>,
+        /// Restrict `sessions list` to a recorded workspace path or basename.
+        #[arg(long)]
+        workspace: Option<String>,
         /// Prune sessions older than N days.
         #[arg(long = "older-than")]
         older_than: Option<u64>,
+        /// Maximum rows for `sessions list` (default 20).
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
     },
 
     /// Resume an interactive session from saved session state.
@@ -914,6 +947,18 @@ pub struct Cli {
     /// Override the provider for this invocation (e.g. "nous", "anthropic").
     #[arg(long, global = true)]
     pub provider: Option<String>,
+    /// Keep the current directory when resuming a saved session.
+    #[arg(long, global = true)]
+    pub no_restore_cwd: bool,
+
+    /// Override the startup execution posture for this invocation.
+    ///
+    /// Closed modes: `manual`, `reviewed`, `autonomous_local`, `ci`, `remote_worker`.
+    /// Precedence (low → high): built-in `manual`, profile, config file,
+    /// `HERMES_EXECUTION_MODE`, then `--execution-mode`. Every present layer is
+    /// validated; an invalid lower layer fails closed even if a higher layer is valid.
+    #[arg(long, global = true)]
+    pub execution_mode: Option<String>,
 
     /// One-shot prompt mode (non-interactive), aliasing upstream `-z`.
     #[arg(short = 'z', long, global = true)]

@@ -1,20 +1,30 @@
 ---
 title: "Operate the Teams Meeting Pipeline"
-description: "Runbook, go-live checklist, and operator worksheet for the Microsoft Teams meeting pipeline"
+description: "Rust CLI runbook for Teams meetings — manual fetch/replay; no automatic webhook product in the release binary"
 ---
 
 # Operate the Teams Meeting Pipeline
 
-Use this guide after you have already enabled the feature from [Teams Meetings](/docs/user-guide/messaging/teams-meetings).
+Use this guide with the **Rust** contract in [Teams Meetings](/docs/user-guide/messaging/teams-meetings).
+
+:::warning Release binary scope
+
+Docker/release packages ship **Rust only**. There is no packaged Python gateway that turns Graph webhooks into automatic meeting jobs.
+
+- **Shipped:** `hermes teams-pipeline` CLI (validate, token-health, subscriptions admin, fetch, list/show, **manual** `run`/`replay`)
+- **Not shipped in Rust:** `msgraph_webhook` listener, gateway auto-ingest, external sink keys (`notion` / `linear` / `teams_delivery` — **rejected** if present under `meeting_pipeline`)
+- **Upstream/source only:** optional Python plugin docs such as [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook) — reference if you build that tree yourself; **not** installed by the Rust artifact
+
+:::
 
 This page covers:
-- operator CLI flows
-- routine subscription maintenance
-- failure triage
-- go-live checks
-- rollout worksheet
 
-## Core Operator Commands
+- Rust operator CLI flows
+- optional Graph subscription maintenance (admin API only — not a notification consumer)
+- failure triage under the Rust contract
+- go-live checks that do **not** assume automatic webhook delivery
+
+## Core operator commands (Rust)
 
 ### Validate the config snapshot
 
@@ -22,7 +32,7 @@ This page covers:
 hermes teams-pipeline validate
 ```
 
-Use this first after any config change.
+Reports Graph app-only credential presence (`MSGRAPH_*`), whether `platforms.teams.extra.meeting_pipeline` parses (failing closed if `notion` / `linear` / `teams_delivery` keys are present), `runtime: "manual_local_only"`, an external-sinks unsupported notice, and store path/stats. It does **not** inspect `msgraph_webhook` enablement or Teams platform delivery fields.
 
 ### Inspect token health
 
@@ -31,30 +41,25 @@ hermes teams-pipeline token-health
 hermes teams-pipeline token-health --force-refresh
 ```
 
-Use `--force-refresh` when you suspect stale auth state.
-
-### Inspect subscriptions
+### Inspect / maintain Graph subscriptions (admin only)
 
 ```bash
 hermes teams-pipeline subscriptions
-```
-
-### Renew near-expiry subscriptions
-
-```bash
 hermes teams-pipeline maintain-subscriptions
 hermes teams-pipeline maintain-subscriptions --dry-run
 ```
 
-### Automating subscription renewal (REQUIRED for production)
+These talk to Microsoft Graph’s subscription APIs. They do **not** start an HTTP listener and do **not** process notification POSTs in the Rust gateway.
 
-**Microsoft Graph subscriptions expire in at most 72 hours.** If nothing renews them, meeting notifications silently stop after 3 days and the pipeline looks "broken." This is the #1 operational failure mode for any Graph-backed integration.
+If you create subscriptions that point at a notification URL, something **outside** the Rust release binary must implement that URL — the Rust package does not.
 
-You MUST run `maintain-subscriptions` on a schedule. Pick one of these three options:
+### Automating subscription renewal (only if you use Graph subscriptions)
 
-#### Option 1: Hermes cron (recommended if you already run the Hermes gateway)
+**Microsoft Graph subscriptions expire in at most 72 hours.** Renewal matters only if you actually created remote subscriptions for a consumer you operate separately.
 
-Hermes ships a built-in cron scheduler. The `--no-agent` mode runs a script as the job (rather than using an LLM), and `--script` must point at a file under `~/.hermes/scripts/`. First create the script:
+If you only use CLI `fetch` / manual jobs and never create Graph subscriptions, you can skip renewal automation.
+
+#### Option 1: Hermes cron (script job)
 
 ```bash
 mkdir -p ~/.hermes/scripts
@@ -63,11 +68,7 @@ cat > ~/.hermes/scripts/maintain-teams-subscriptions.sh <<'EOF'
 exec hermes teams-pipeline maintain-subscriptions
 EOF
 chmod +x ~/.hermes/scripts/maintain-teams-subscriptions.sh
-```
 
-Then register a script-only cron job that runs every 12 hours (gives 6x headroom against the 72h expiry window):
-
-```bash
 hermes cron create "0 */12 * * *" \
   --name "teams-pipeline-maintain-subscriptions" \
   --no-agent \
@@ -75,214 +76,127 @@ hermes cron create "0 */12 * * *" \
   --deliver local
 ```
 
-Verify it was registered and inspect the next run time:
+#### Option 2: systemd timer
 
-```bash
-hermes cron list
-hermes cron status        # scheduler status
-```
+Create a oneshot service that runs `hermes teams-pipeline maintain-subscriptions` every 12 hours (same pattern as any other host timer). Ensure `MSGRAPH_*` credentials are in the service environment.
 
-#### Option 2: systemd timer (recommended for Linux production deployments)
-
-Create `/etc/systemd/system/hermes-teams-pipeline-maintain.service`:
-
-```ini
-[Unit]
-Description=Hermes Teams pipeline subscription maintenance
-After=network-online.target
-
-[Service]
-Type=oneshot
-User=hermes
-EnvironmentFile=/etc/hermes/env
-ExecStart=/usr/local/bin/hermes teams-pipeline maintain-subscriptions
-```
-
-And `/etc/systemd/system/hermes-teams-pipeline-maintain.timer`:
-
-```ini
-[Unit]
-Description=Run Hermes Teams pipeline subscription maintenance every 12 hours
-
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=12h
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now hermes-teams-pipeline-maintain.timer
-systemctl list-timers hermes-teams-pipeline-maintain.timer
-```
-
-#### Option 3: Plain crontab
+#### Option 3: crontab
 
 ```cron
 0 */12 * * * /usr/local/bin/hermes teams-pipeline maintain-subscriptions >> /var/log/hermes/teams-pipeline-maintain.log 2>&1
 ```
 
-Make sure the cron environment has the `MSGRAPH_*` credentials. Simplest fix: source `~/.hermes/.env` at the top of a wrapper script that crontab calls.
-
-#### Verifying renewal is working
-
-After you've set up the schedule, check renewal activity after the first scheduled run:
-
-```bash
-hermes teams-pipeline subscriptions   # should show expirationDateTime advanced
-hermes teams-pipeline maintain-subscriptions --dry-run   # should show "0 expiring soon" most of the time
-```
-
-If you ever see your Graph webhook mysteriously "stop working" after exactly ~72 hours, this is the first thing to check: did the renewal job actually run?
-
-### Inspect recent jobs
+### Inspect jobs / manual replay
 
 ```bash
 hermes teams-pipeline list
 hermes teams-pipeline list --status failed
 hermes teams-pipeline show <job-id>
+# --organizer-user-id REQUIRED: Microsoft Entra object ID UUID (not UPN/email)
+hermes teams-pipeline run <job-id> --organizer-user-id <entra-object-id-uuid>
+# alias: hermes teams-pipeline replay <job-id> --organizer-user-id <entra-object-id-uuid>
 ```
 
-### Replay a stored job
-
-```bash
-hermes teams-pipeline run <job-id>
-```
+Jobs exist only if something already wrote them to the local store (manual seed, tests, or a **non-Rust** orchestrator). The Rust gateway does not enqueue jobs from live Graph webhooks. `run`/`replay` produce a **local** summary only — external Teams delivery remains unsupported in this Rust release (optional source plugin not packaged/verified).
 
 ### Dry-run meeting artifact fetches
 
 ```bash
-hermes teams-pipeline fetch --meeting-id <meeting-id>
-hermes teams-pipeline fetch --join-web-url "<join-url>"
+hermes teams-pipeline fetch --organizer-user-id <entra-object-id-uuid> --meeting-id <meeting-id>
+hermes teams-pipeline fetch --organizer-user-id <entra-object-id-uuid> --join-web-url "<join-url>"
 ```
 
-## Routine Runbook
+`--organizer-user-id` is **required** and must be a non-blank Microsoft Entra **object ID UUID** (not UPN/email). Fetches transcript/recording metadata via Graph. Manual local path only — no sink delivery; sink keys under `meeting_pipeline` are config-rejected, not soft-ignored.
 
-### After first setup
+## Routine runbook (Rust)
 
-Run these in order:
+### After install
 
 ```bash
 hermes teams-pipeline validate
 hermes teams-pipeline token-health --force-refresh
-hermes teams-pipeline subscriptions
+hermes teams-pipeline fetch --organizer-user-id <entra-object-id-uuid> --meeting-id <known-meeting-id>   # optional smoke
 ```
 
-Then trigger or wait for a real meeting event and confirm:
+Do **not** wait for “a real meeting event” to appear automatically in `list` on the Rust release — that path is not shipped.
 
-```bash
-hermes teams-pipeline list
-hermes teams-pipeline show <job-id>
-```
+### Periodic checks
 
-### Daily or periodic checks
+- `hermes teams-pipeline maintain-subscriptions --dry-run` — only if you manage remote subscriptions
+- `hermes teams-pipeline list --status failed` — only if you have jobs in the store
+- Re-check Graph credentials after rotation
 
-- run `hermes teams-pipeline maintain-subscriptions --dry-run`
-- inspect `hermes teams-pipeline list --status failed`
-- verify the Teams delivery target is still the correct chat or channel
+### Before changing Graph credentials
 
-### Before changing webhook URLs or delivery targets
+- update `MSGRAPH_*`
+- `hermes teams-pipeline token-health --force-refresh`
+- `hermes teams-pipeline validate`
 
-- update the public notification URL or Teams target config
-- run `hermes teams-pipeline validate`
-- renew or recreate affected subscriptions
-- confirm new events land in the expected sink
-
-## Failure Triage
+## Failure triage (Rust contract)
 
 ### No jobs are being created
 
-Check:
-- `msgraph_webhook` is enabled
-- the public notification URL points to `/msgraph/webhook`
-- the client state in the subscription matches `MSGRAPH_WEBHOOK_CLIENT_STATE`
-- subscriptions still exist remotely and are not expired
+**Expected** on Rust release if you only started the gateway. There is no webhook consumer.
 
-### Jobs stay in retry or fail before summarization
+To get a job you must seed/run via CLI (or a separate orchestrator you maintain outside the package).
+
+### “I enabled msgraph_webhook / ran hermes gateway run”
+
+Neither starts a Graph meeting notification consumer in Rust. See [msgraph-webhook](/docs/user-guide/messaging/msgraph-webhook) (upstream/source reference only).
+
+### Jobs fail before summarization
 
 Check:
+
 - transcript permissions and availability
 - recording permissions and artifact availability
-- `ffmpeg` availability if recording fallback is enabled
+- `ffmpeg` if recording → STT fallback is enabled
+- media limits (512 MiB recording, 8 MiB transcript, ~24 MB STT segment) — [Teams Meetings](/docs/user-guide/messaging/teams-meetings#verified-media--graph-limits-rust)
 - Graph token health
 
-### Summaries are produced but not delivered to Teams
+### Config rejected for Notion / Linear / Teams delivery keys
 
-Check:
-- `platforms.teams.enabled: true`
-- `delivery_mode`
-- `incoming_webhook_url` for webhook mode
-- `chat_id` or `team_id` plus `channel_id` for Graph mode
-- Teams auth config if Graph posting is used
+Rust `TeamsPipelineConfig::from_value` **rejects** the presence of `notion`, `linear`, or `teams_delivery` under `meeting_pipeline` — even when set to `enabled: false`. Remove those keys. This is fail-closed unsupported-config, not a silent skip.
+
+The separate Teams **messaging** adapter (chat bot) is unrelated outbound chat — not pipeline sink wiring. Any automatic sinks live only in optional **out-of-tree Python/source** plugins, not the Rust release package.
 
 ### Duplicate or unexpected replays
 
-Check:
-- whether you manually replayed a job with `hermes teams-pipeline run`
-- whether the sink record already exists for that meeting
-- whether you intentionally enabled a resend path in your local config
+Usually a manual `hermes teams-pipeline run <job-id> --organizer-user-id <entra-object-id-uuid>`. There is no automatic webhook replay loop in Rust.
 
-## Go-Live Checklist
+## Go-live checklist (Rust)
 
-- [ ] Graph credentials are present and correct
-- [ ] `msgraph_webhook` is enabled and reachable from the public internet
-- [ ] `MSGRAPH_WEBHOOK_CLIENT_STATE` is set and matches subscriptions
-- [ ] transcript subscription is created
-- [ ] recording subscription is created if STT fallback is required
-- [ ] `ffmpeg` is installed if recording fallback is enabled
-- [ ] Teams outbound delivery target is configured and verified
-- [ ] Notion and Linear sinks are configured only if actually needed
-- [ ] `hermes teams-pipeline validate` returns an OK snapshot
+- [ ] Graph app-only credentials present (`MSGRAPH_TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET`)
+- [ ] `hermes teams-pipeline validate` understood as Graph env + meeting_pipeline parse + store only (does **not** read webhook enablement or Teams delivery mode)
 - [ ] `hermes teams-pipeline token-health --force-refresh` succeeds
-- [ ] **`maintain-subscriptions` is scheduled** (Hermes cron, systemd timer, or crontab — see [Automating subscription renewal](#automating-subscription-renewal-required-for-production)). Without this, Graph subscriptions silently expire within 72 hours.
-- [ ] a real end-to-end meeting event has produced a stored job
-- [ ] at least one summary has reached the intended delivery sink
+- [ ] `ffmpeg` installed if you will use recording STT fallback
+- [ ] You accept **manual** `fetch` / `run|replay` with required `--organizer-user-id` (Entra object ID UUID, not UPN/email) as the shipped path
+- [ ] You do **not** expect automatic Graph → summary from `hermes gateway run`
+- [ ] Rust `meeting_pipeline` has **no** `notion` / `linear` / `teams_delivery` keys (presence fails closed)
+- [ ] If you create Graph subscriptions at all: renewal is scheduled **and** a non-Rust notification URL consumer exists
+- [ ] Optional: document any out-of-tree orchestrator you run yourself (not part of the Rust package)
 
-## Delivery-Mode Decision Guide
+## Delivery-mode / sink notes
 
-| Mode | Use when | Tradeoff |
-|------|----------|----------|
-| `incoming_webhook` | you only need simple posting into Teams | simplest setup, less control |
-| `graph` | you need channel or chat posting through Graph | more control, more auth and target config |
+| Topic | Rust reality |
+|-------|----------------|
+| Teams `delivery_mode` / channel fields on `platforms.teams` | **Not read** by `build_pipeline_runtime_config` or `validate` |
+| `notion` / `linear` / `teams_delivery` under `meeting_pipeline` | **Rejected** by `TeamsPipelineConfig::from_value` (fail closed, including `enabled: false`) |
+| Optional Python/source plugin sinks | Separate surface if you build that tree yourself — **not** the Rust release binary; do not put those keys in the Rust config object |
 
-## Operator Worksheet
-
-Fill this out before rollout:
+## Operator worksheet
 
 | Item | Value |
 |------|-------|
-| Public notification URL | |
 | Graph tenant ID | |
 | Graph client ID | |
-| Webhook client state | |
-| Transcript resource subscription | |
-| Recording resource subscription | |
-| Teams delivery mode | |
-| Teams chat ID or team/channel | |
-| Notion database ID | |
-| Linear team ID | |
 | Store path override, if any | |
-| Owner for daily checks | |
+| Manual test meeting ID / join URL | |
+| Out-of-tree orchestrator (if any) | none / describe |
+| Owner for credential rotation | |
 
-## Change Review Worksheet
+## Related docs
 
-Use this before changing the deployment:
-
-| Question | Answer |
-|----------|--------|
-| Are we changing the public webhook URL? | |
-| Are we rotating Graph credentials? | |
-| Are we changing Teams delivery mode? | |
-| Are we moving to a new Teams chat or channel? | |
-| Do subscriptions need to be recreated or renewed? | |
-| Do we need a fresh end-to-end verification run? | |
-
-## Related Docs
-
-- [Teams Meetings setup](/docs/user-guide/messaging/teams-meetings)
+- [Teams Meetings (Rust contract)](/docs/user-guide/messaging/teams-meetings)
+- [Microsoft Graph Webhook Listener](/docs/user-guide/messaging/msgraph-webhook) — upstream/source reference only
 - [Microsoft Teams bot setup](/docs/user-guide/messaging/teams)

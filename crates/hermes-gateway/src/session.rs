@@ -13,7 +13,13 @@ use uuid::Uuid;
 
 use chrono::Timelike;
 use hermes_config::session::{SessionResetPolicy, SessionType};
-use hermes_core::types::Message;
+use hermes_core::types::{Message, MessageRole};
+
+const DEFAULT_MAX_CONTEXT_MESSAGES: usize = 2048;
+const HARD_MAX_CONTEXT_MESSAGES: usize = 4096;
+const HARD_MAX_CONTEXT_BYTES: usize = 16 * 1024 * 1024;
+const HARD_MAX_RETAINED_CONTEXT_BYTES: usize = 256 * 1024 * 1024;
+const MAX_SESSION_TITLE_CHARS: usize = 256;
 
 // ---------------------------------------------------------------------------
 // Re-export session types from hermes-config for convenience
@@ -22,6 +28,52 @@ use hermes_core::types::Message;
 pub use hermes_config::session::{
     DailyReset, IdleReset, SessionConfig, SessionResetPolicy as ResetPolicy,
 };
+
+/// Explicit platform ingress identity used to select one conversation session.
+///
+/// `parent_chat_id` is the channel or chat whose authorization policy applies;
+/// `thread_id` is the platform-native reply target when the message belongs to
+/// a threaded conversation. Adapters must construct this from authenticated
+/// ingress metadata rather than inferring semantics from identifier strings.
+#[derive(Debug, Clone, Copy)]
+pub struct ConversationScope<'a> {
+    pub platform: &'a str,
+    pub parent_chat_id: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub user_id: &'a str,
+    pub is_dm: bool,
+}
+
+impl<'a> ConversationScope<'a> {
+    pub fn new(
+        platform: &'a str,
+        parent_chat_id: &'a str,
+        thread_id: Option<&'a str>,
+        user_id: &'a str,
+        is_dm: bool,
+    ) -> Self {
+        Self {
+            platform,
+            parent_chat_id,
+            thread_id,
+            user_id,
+            is_dm,
+        }
+    }
+
+    fn session_type(self) -> SessionType {
+        if self
+            .thread_id
+            .is_some_and(|thread_id| !thread_id.trim().is_empty())
+        {
+            SessionType::Thread
+        } else if self.is_dm {
+            SessionType::Dm
+        } else {
+            SessionType::Group
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Session
@@ -38,6 +90,10 @@ pub struct Session {
 
     /// Chat or channel identifier on the platform.
     pub chat_id: String,
+    /// Platform-native thread or topic identifier, if this session is scoped
+    /// to a threaded conversation beneath `chat_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
 
     /// User identifier on the platform.
     pub user_id: String,
@@ -76,6 +132,7 @@ impl Session {
             id: Uuid::new_v4().to_string(),
             platform: platform.into(),
             chat_id: chat_id.into(),
+            thread_id: None,
             user_id: user_id.into(),
             messages: Vec::new(),
             title: None,
@@ -84,6 +141,34 @@ impl Session {
             reset_policy,
             session_type,
         }
+    }
+
+    /// Create a session from explicit ingress conversation scope.
+    fn new_for_scope(scope: ConversationScope<'_>, reset_policy: SessionResetPolicy) -> Self {
+        let mut session = Self::new(
+            scope.platform,
+            scope.parent_chat_id,
+            scope.user_id,
+            scope.session_type(),
+            reset_policy,
+        );
+        session.thread_id = scope
+            .thread_id
+            .map(str::trim)
+            .filter(|thread_id| !thread_id.is_empty())
+            .map(str::to_string);
+        session
+    }
+
+    /// Recover this session's explicit conversation boundary.
+    pub fn conversation_scope(&self) -> ConversationScope<'_> {
+        ConversationScope::new(
+            &self.platform,
+            &self.chat_id,
+            self.thread_id.as_deref(),
+            &self.user_id,
+            self.session_type == SessionType::Dm,
+        )
     }
 
     /// Touch the session, updating `last_active_at` to now.
@@ -250,44 +335,211 @@ pub fn redact_pii(text: &str, rules: &[RedactionRule]) -> String {
     result
 }
 
+fn json_retained_bytes(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            std::mem::size_of_val(value)
+        }
+        serde_json::Value::String(value) => value.capacity(),
+        serde_json::Value::Array(values) => {
+            values.capacity() * std::mem::size_of::<serde_json::Value>()
+                + values.iter().map(json_retained_bytes).sum::<usize>()
+        }
+        serde_json::Value::Object(values) => values
+            .iter()
+            .map(|(key, value)| key.capacity() + json_retained_bytes(value))
+            .sum(),
+    }
+}
+
+fn message_retained_bytes(message: &Message) -> usize {
+    let mut bytes = 0;
+    bytes += message.content.as_ref().map_or(0, String::capacity);
+    bytes += message.tool_call_id.as_ref().map_or(0, String::capacity);
+    bytes += message.name.as_ref().map_or(0, String::capacity);
+    bytes += message
+        .reasoning_content
+        .as_ref()
+        .map_or(0, String::capacity);
+    if let Some(tool_calls) = message.tool_calls.as_ref() {
+        bytes += tool_calls.capacity() * std::mem::size_of::<hermes_core::types::ToolCall>();
+        for tool_call in tool_calls {
+            bytes += tool_call.id.capacity();
+            bytes += tool_call.function.name.capacity();
+            bytes += tool_call.function.arguments.capacity();
+            bytes += tool_call
+                .extra_content
+                .as_ref()
+                .map_or(0, json_retained_bytes);
+        }
+    }
+    if let Some(blocks) = message.anthropic_content_blocks.as_ref() {
+        bytes += blocks.capacity() * std::mem::size_of::<serde_json::Value>();
+        bytes += blocks.iter().map(json_retained_bytes).sum::<usize>();
+    }
+    bytes
+}
+fn messages_live_bytes(messages: &[Message]) -> usize {
+    messages
+        .len()
+        .saturating_mul(std::mem::size_of::<Message>())
+        .saturating_add(
+            messages
+                .iter()
+                .map(message_retained_bytes)
+                .fold(0usize, usize::saturating_add),
+        )
+}
+
+fn messages_retained_bytes(messages: &Vec<Message>) -> usize {
+    messages
+        .capacity()
+        .saturating_mul(std::mem::size_of::<Message>())
+        .saturating_add(
+            messages
+                .iter()
+                .map(message_retained_bytes)
+                .fold(0usize, usize::saturating_add),
+        )
+}
+fn compact_messages(messages: &mut Vec<Message>) {
+    if messages.is_empty() {
+        *messages = Vec::new();
+    } else {
+        *messages = std::mem::take(messages).into_boxed_slice().into_vec();
+    }
+}
+
+fn remove_oldest_context_turn(messages: &mut Vec<Message>) -> bool {
+    let Some(first_user) = messages
+        .iter()
+        .position(|message| message.role == MessageRole::User)
+    else {
+        if messages.is_empty() {
+            return false;
+        }
+        messages.remove(0);
+        return true;
+    };
+    let next_user = messages[first_user + 1..]
+        .iter()
+        .position(|message| message.role == MessageRole::User)
+        .map(|offset| first_user + 1 + offset)
+        .unwrap_or(messages.len());
+    if first_user > 0 && next_user == messages.len() {
+        messages.remove(0);
+    } else {
+        messages.drain(first_user..next_user);
+    }
+    true
+}
+
 // ---------------------------------------------------------------------------
 // SessionManager
 // ---------------------------------------------------------------------------
 
 /// Manages all active sessions, providing creation, retrieval, and
 /// cross-platform session continuity.
+#[derive(Default)]
+struct SessionStore {
+    sessions: HashMap<String, Session>,
+    retained_message_bytes: usize,
+}
+
 pub struct SessionManager {
-    sessions: RwLock<HashMap<String, Session>>,
+    store: RwLock<SessionStore>,
     config: SessionConfig,
-
-    /// Index: (user_id) -> Set of session IDs for cross-platform continuity.
-    /// This allows the same user on different platforms to share context.
-    user_sessions: RwLock<HashMap<String, Vec<String>>>,
-
-    /// Whether group sessions use per-user isolation.
-    group_sessions_per_user: bool,
+    resource_limits_enabled: bool,
 }
 
 impl SessionManager {
     /// Create a new `SessionManager` with the given config.
     pub fn new(config: SessionConfig) -> Self {
-        let group_sessions_per_user = false; // Will be overridden per-platform
-        Self {
-            sessions: RwLock::new(HashMap::new()),
-            config,
-            user_sessions: RwLock::new(HashMap::new()),
-            group_sessions_per_user,
-        }
+        Self::with_group_isolation_and_resource_limits(config, false, false)
     }
 
-    /// Create a `SessionManager` with explicit group_sessions_per_user setting.
-    pub fn with_group_isolation(config: SessionConfig, group_sessions_per_user: bool) -> Self {
+    /// Create a manager with the implicit hard resource ceilings enabled or disabled.
+    pub fn with_resource_limits(config: SessionConfig, resource_limits_enabled: bool) -> Self {
+        Self::with_group_isolation_and_resource_limits(config, false, resource_limits_enabled)
+    }
+
+    /// Construct a manager for callers retaining the historical constructor.
+    ///
+    /// Authenticated ingress now always scopes group and threaded traffic by
+    /// its verified user and optional thread, so `group_sessions_per_user`
+    /// cannot weaken conversation isolation.
+    pub fn with_group_isolation(config: SessionConfig, _group_sessions_per_user: bool) -> Self {
+        Self::with_group_isolation_and_resource_limits(config, false, false)
+    }
+
+    /// Construct a manager with explicit resource-limit settings.
+    ///
+    /// The group-isolation argument is retained for source compatibility but
+    /// explicit ingress scope is always user-isolated.
+    pub fn with_group_isolation_and_resource_limits(
+        config: SessionConfig,
+        _group_sessions_per_user: bool,
+        resource_limits_enabled: bool,
+    ) -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            store: RwLock::new(SessionStore::default()),
             config,
-            user_sessions: RwLock::new(HashMap::new()),
-            group_sessions_per_user,
+            resource_limits_enabled,
         }
+    }
+    fn context_message_limit(&self) -> usize {
+        match (
+            self.resource_limits_enabled,
+            self.config.max_context_messages,
+        ) {
+            (true, configured) => configured
+                .unwrap_or(DEFAULT_MAX_CONTEXT_MESSAGES)
+                .min(HARD_MAX_CONTEXT_MESSAGES),
+            (false, Some(configured)) => configured,
+            (false, None) => usize::MAX,
+        }
+    }
+    fn context_byte_budget(&self, store: &SessionStore, old_bytes: usize) -> (usize, usize) {
+        let retained_without_session = store.retained_message_bytes.saturating_sub(old_bytes);
+        let available = if self.resource_limits_enabled {
+            HARD_MAX_RETAINED_CONTEXT_BYTES
+                .saturating_sub(retained_without_session)
+                .min(HARD_MAX_CONTEXT_BYTES)
+        } else {
+            usize::MAX
+        };
+        (retained_without_session, available)
+    }
+
+    fn enforce_message_limits(messages: &mut Vec<Message>, max_messages: usize, max_bytes: usize) {
+        if max_messages == 0 || max_bytes == 0 {
+            *messages = Vec::new();
+            return;
+        }
+
+        while messages.len() > max_messages || messages_live_bytes(messages) > max_bytes {
+            if !remove_oldest_context_turn(messages) {
+                break;
+            }
+        }
+
+        let material_capacity = max_messages.max(messages.len()).max(4);
+        if messages.capacity() > material_capacity.saturating_mul(2)
+            || messages_retained_bytes(messages) > max_bytes
+        {
+            compact_messages(messages);
+        }
+
+        while messages_retained_bytes(messages) > max_bytes {
+            if !remove_oldest_context_turn(messages) {
+                *messages = Vec::new();
+                break;
+            }
+            compact_messages(messages);
+        }
+
+        debug_assert!(messages.len() <= max_messages);
+        debug_assert!(messages_retained_bytes(messages) <= max_bytes);
     }
 
     /// Determine the effective reset policy for a session, applying
@@ -309,66 +561,134 @@ impl SessionManager {
         self.config.reset_policy.clone()
     }
 
-    /// Compose the canonical session key for platform/chat/user.
-    pub fn compose_session_key(&self, platform: &str, chat_id: &str, user_id: &str) -> String {
-        // Keep Slack shared channels per-user isolated to avoid command/runtime
-        // state bleed between users in the same channel.
-        if is_slack_shared_channel(platform, chat_id) && !user_id.trim().is_empty() {
-            return format!("{}:{}:{}", platform, chat_id, user_id);
+    /// Compose the canonical key for explicit platform ingress scope.
+    ///
+    /// Every dimension is length-delimited so a platform identifier, parent
+    /// chat, thread/topic, or user ID cannot collide through delimiters. This
+    /// is the only key API used by routed ingress.
+    pub fn compose_session_key_for_scope(&self, scope: ConversationScope<'_>) -> String {
+        fn append_component(key: &mut String, value: &str) {
+            key.push(':');
+            key.push_str(&value.len().to_string());
+            key.push(':');
+            key.push_str(value);
         }
-        let session_type = Self::infer_session_type(chat_id);
-        if self.group_sessions_per_user && session_type == SessionType::Group {
-            format!("{}:{}:{}", platform, chat_id, user_id)
-        } else {
-            format!("{}:{}", platform, chat_id)
-        }
+
+        let mut key = String::from("scope:v1");
+        append_component(&mut key, scope.platform);
+        append_component(&mut key, scope.parent_chat_id);
+        append_component(
+            &mut key,
+            scope
+                .thread_id
+                .map(str::trim)
+                .filter(|thread_id| !thread_id.is_empty())
+                .unwrap_or_default(),
+        );
+        append_component(&mut key, scope.user_id);
+        key
     }
 
-    /// Get or create a session for the given platform, chat, and user.
-    ///
-    /// If a session exists for this (platform, chat_id, user_id) triple,
-    /// return it (after checking whether it should be reset).
-    /// Otherwise, create a new session.
+    /// Compose a direct-message key for callers that have no explicit
+    /// platform conversation metadata. Production ingress must use
+    /// [`Self::compose_session_key_for_scope`] instead.
+    pub fn compose_session_key(&self, platform: &str, chat_id: &str, user_id: &str) -> String {
+        self.compose_session_key_for_scope(ConversationScope::new(
+            platform, chat_id, None, user_id, true,
+        ))
+    }
+
+    /// Get or create a session for explicit, authenticated ingress scope.
+    pub async fn get_or_create_session_for_scope(&self, scope: ConversationScope<'_>) -> Session {
+        self.try_get_or_create_session_for_scope(scope, usize::MAX)
+            .await
+            .expect("unbounded session creation cannot be rejected")
+    }
+
+    /// Get or create an explicit ingress session without exceeding the
+    /// retained-session cap.
+    pub async fn try_get_or_create_session_for_scope(
+        &self,
+        scope: ConversationScope<'_>,
+        max_sessions: usize,
+    ) -> Option<Session> {
+        let session_key = self.compose_session_key_for_scope(scope);
+        self.try_get_or_create_session_with_key(scope, session_key, max_sessions)
+            .await
+    }
+
+    /// Get or create a legacy direct-message session. Callers that receive a
+    /// platform event must use [`Self::get_or_create_session_for_scope`] so
+    /// `is_dm` and thread identity are never guessed from string IDs.
     pub async fn get_or_create_session(
         &self,
         platform: &str,
         chat_id: &str,
         user_id: &str,
     ) -> Session {
-        let session_type = Self::infer_session_type(chat_id);
-        let reset_policy = self.effective_reset_policy(platform, session_type);
+        self.try_get_or_create_session(platform, chat_id, user_id, usize::MAX)
+            .await
+            .expect("unbounded session creation cannot be rejected")
+    }
 
+    /// Legacy direct-message session creation without exceeding the retained
+    /// session cap. New platform ingress must use the scope variant above.
+    pub async fn try_get_or_create_session(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+        max_sessions: usize,
+    ) -> Option<Session> {
+        let scope = ConversationScope::new(platform, chat_id, None, user_id, true);
         let session_key = self.compose_session_key(platform, chat_id, user_id);
+        self.try_get_or_create_session_with_key(scope, session_key, max_sessions)
+            .await
+    }
 
-        let mut sessions = self.sessions.write().await;
-
-        if let Some(session) = sessions.get_mut(&session_key) {
-            // Check if reset is needed
-            if session.should_reset() {
-                // Reset: clear messages but keep the session alive
-                session.messages.clear();
-                session.created_at = Utc::now();
-                session.last_active_at = Utc::now();
-            } else {
-                session.touch();
+    async fn try_get_or_create_session_with_key(
+        &self,
+        scope: ConversationScope<'_>,
+        session_key: String,
+        max_sessions: usize,
+    ) -> Option<Session> {
+        let reset_policy = self.effective_reset_policy(scope.platform, scope.session_type());
+        let mut store = self.store.write().await;
+        if store.sessions.contains_key(&session_key) {
+            let old_bytes = store
+                .sessions
+                .get(&session_key)
+                .map(|session| messages_retained_bytes(&session.messages))
+                .unwrap_or(0);
+            let (session, reset) = {
+                let session = store
+                    .sessions
+                    .get_mut(&session_key)
+                    .expect("existing session disappeared under write lock");
+                let reset = session.should_reset();
+                if reset {
+                    session.messages = Vec::new();
+                    session.created_at = Utc::now();
+                    session.last_active_at = Utc::now();
+                } else {
+                    session.touch();
+                }
+                (session.clone(), reset)
+            };
+            if reset {
+                store.retained_message_bytes =
+                    store.retained_message_bytes.saturating_sub(old_bytes);
             }
-            return session.clone();
+            return Some(session);
+        }
+        if store.sessions.len() >= max_sessions {
+            return None;
         }
 
-        // Create new session
-        let session = Session::new(platform, chat_id, user_id, session_type, reset_policy);
+        let session = Session::new_for_scope(scope, reset_policy);
         let session_clone = session.clone();
-
-        sessions.insert(session_key.clone(), session);
-
-        // Track user -> session mapping for cross-platform continuity
-        let mut user_sessions = self.user_sessions.write().await;
-        user_sessions
-            .entry(user_id.to_string())
-            .or_default()
-            .push(session_key.clone());
-
-        session_clone
+        store.sessions.insert(session_key, session);
+        Some(session_clone)
     }
 
     /// Reset a session by key, clearing all messages and rotating the logical
@@ -377,16 +697,22 @@ impl SessionManager {
         &self,
         session_id: &str,
     ) -> Option<(Session, Session)> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
+        let mut store = self.store.write().await;
+        let old_bytes = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))?;
+        let snapshots = {
+            let session = store.sessions.get_mut(session_id)?;
             let old = session.clone();
-            session.messages.clear();
+            session.messages = Vec::new();
             session.id = Uuid::new_v4().to_string();
             session.created_at = Utc::now();
             session.last_active_at = Utc::now();
-            return Some((old, session.clone()));
-        }
-        None
+            (old, session.clone())
+        };
+        store.retained_message_bytes = store.retained_message_bytes.saturating_sub(old_bytes);
+        Some(snapshots)
     }
 
     /// Reset a session by key, clearing all messages.
@@ -394,33 +720,108 @@ impl SessionManager {
         let _ = self.reset_session_with_snapshots(session_id).await;
     }
 
-    /// Add a message to a session.
+    /// Add a message, applying any configured or opted-in retention policy.
     pub async fn add_message(&self, session_id: &str, message: Message) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            session.messages.push(message);
-            session.last_active_at = Utc::now();
+        let _ = self.try_add_message(session_id, message).await;
+    }
+
+    /// Add an ingress user message only when the current turn can be retained.
+    pub async fn try_add_user_message(&self, session_id: &str, message: Message) -> bool {
+        if message.role != MessageRole::User {
+            return false;
         }
+        self.try_add_message(session_id, message).await
+    }
+
+    async fn try_add_message(&self, session_id: &str, message: Message) -> bool {
+        let max_messages = self.context_message_limit();
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return false;
+        };
+        let (retained_without_session, max_bytes) = self.context_byte_budget(&store, old_bytes);
+        let message_bytes =
+            std::mem::size_of::<Message>().saturating_add(message_retained_bytes(&message));
+        if max_messages == 0 || message_bytes > max_bytes {
+            return false;
+        }
+        let new_bytes = {
+            let session = store
+                .sessions
+                .get_mut(session_id)
+                .expect("existing session disappeared under write lock");
+            session.messages.push(message);
+            Self::enforce_message_limits(&mut session.messages, max_messages, max_bytes);
+            session.last_active_at = Utc::now();
+            messages_retained_bytes(&session.messages)
+        };
+        store.retained_message_bytes = retained_without_session.saturating_add(new_bytes);
+        true
     }
 
     /// Retrieve all messages for a session.
     pub async fn get_messages(&self, session_id: &str) -> Vec<Message> {
-        let sessions = self.sessions.read().await;
-        sessions
+        let store = self.store.read().await;
+        store
+            .sessions
             .get(session_id)
             .map(|s| s.messages.clone())
             .unwrap_or_default()
     }
 
     /// Replace all messages for a session.
-    pub async fn replace_messages(&self, session_id: &str, messages: Vec<Message>) -> bool {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            session.messages = messages;
-            session.last_active_at = Utc::now();
-            return true;
+    pub async fn replace_messages(&self, session_id: &str, mut messages: Vec<Message>) -> bool {
+        let max_messages = self.context_message_limit();
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return false;
+        };
+        let (retained_without_session, max_bytes) = self.context_byte_budget(&store, old_bytes);
+        Self::enforce_message_limits(&mut messages, max_messages, max_bytes);
+        let new_bytes = messages_retained_bytes(&messages);
+        let session = store
+            .sessions
+            .get_mut(session_id)
+            .expect("existing session disappeared under write lock");
+        session.messages = messages;
+        session.last_active_at = Utc::now();
+        store.retained_message_bytes = retained_without_session.saturating_add(new_bytes);
+        true
+    }
+
+    pub(crate) async fn restore_session_snapshot(
+        &self,
+        session_key: &str,
+        snapshot: Option<Session>,
+    ) {
+        let max_messages = self.context_message_limit();
+        let mut store = self.store.write().await;
+        let old_bytes = store
+            .sessions
+            .get(session_key)
+            .map(|session| messages_retained_bytes(&session.messages))
+            .unwrap_or(0);
+        let (retained_without_session, max_bytes) = self.context_byte_budget(&store, old_bytes);
+        match snapshot {
+            Some(mut session) => {
+                Self::enforce_message_limits(&mut session.messages, max_messages, max_bytes);
+                let new_bytes = messages_retained_bytes(&session.messages);
+                store.sessions.insert(session_key.to_string(), session);
+                store.retained_message_bytes = retained_without_session.saturating_add(new_bytes);
+            }
+            None => {
+                store.sessions.remove(session_key);
+                store.retained_message_bytes = retained_without_session;
+            }
         }
-        false
     }
 
     /// Replace messages and title metadata when switching the active chat
@@ -428,24 +829,37 @@ impl SessionManager {
     pub async fn replace_messages_and_title(
         &self,
         session_id: &str,
-        messages: Vec<Message>,
+        mut messages: Vec<Message>,
         title: Option<String>,
     ) -> bool {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            session.messages = messages;
-            session.title = normalize_session_title(title.as_deref());
-            session.last_active_at = Utc::now();
-            return true;
-        }
-        false
+        let max_messages = self.context_message_limit();
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return false;
+        };
+        let (retained_without_session, max_bytes) = self.context_byte_budget(&store, old_bytes);
+        Self::enforce_message_limits(&mut messages, max_messages, max_bytes);
+        let new_bytes = messages_retained_bytes(&messages);
+        let session = store
+            .sessions
+            .get_mut(session_id)
+            .expect("existing session disappeared under write lock");
+        session.messages = messages;
+        session.title = normalize_session_title(title.as_deref());
+        session.last_active_at = Utc::now();
+        store.retained_message_bytes = retained_without_session.saturating_add(new_bytes);
+        true
     }
 
     /// Set or clear the user-visible title for a session.
     pub async fn set_title(&self, session_id: &str, title: impl AsRef<str>) -> Option<String> {
-        let mut sessions = self.sessions.write().await;
+        let mut store = self.store.write().await;
         let normalized = normalize_session_title(Some(title.as_ref()));
-        let session = sessions.get_mut(session_id)?;
+        let session = store.sessions.get_mut(session_id)?;
         session.title = normalized.clone();
         session.last_active_at = Utc::now();
         normalized
@@ -453,40 +867,125 @@ impl SessionManager {
 
     /// Return the user-visible title for a session, if one is set.
     pub async fn get_title(&self, session_id: &str) -> Option<String> {
-        let sessions = self.sessions.read().await;
-        sessions.get(session_id).and_then(|s| s.title.clone())
+        let store = self.store.read().await;
+        store.sessions.get(session_id).and_then(|s| s.title.clone())
     }
 
     /// Pop the latest message from a session.
     pub async fn pop_last_message(&self, session_id: &str) -> Option<Message> {
-        let mut sessions = self.sessions.write().await;
-        sessions.get_mut(session_id).and_then(|s| {
-            let popped = s.messages.pop();
+        let mut store = self.store.write().await;
+        let old_bytes = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))?;
+        let (popped, new_bytes) = {
+            let session = store.sessions.get_mut(session_id)?;
+            let popped = session.messages.pop();
             if popped.is_some() {
-                s.last_active_at = Utc::now();
+                session.last_active_at = Utc::now();
             }
-            popped
-        })
+            let new_bytes = messages_retained_bytes(&session.messages);
+            (popped, new_bytes)
+        };
+        store.retained_message_bytes = store
+            .retained_message_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+        popped
+    }
+
+    /// Remove up to `count` latest messages under one write lock.
+    pub(crate) async fn remove_last_messages(&self, session_id: &str, count: usize) -> usize {
+        if count == 0 {
+            return 0;
+        }
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return 0;
+        };
+        let (removed, new_bytes) = {
+            let session = store
+                .sessions
+                .get_mut(session_id)
+                .expect("existing session disappeared under write lock");
+            let removed = count.min(session.messages.len());
+            session.messages.truncate(session.messages.len() - removed);
+            if removed > 0 {
+                session.last_active_at = Utc::now();
+            }
+            (removed, messages_retained_bytes(&session.messages))
+        };
+        store.retained_message_bytes = store
+            .retained_message_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+        removed
+    }
+
+    /// Undo the latest message and its predecessor when the latest is an assistant reply.
+    pub(crate) async fn undo_last_exchange(&self, session_id: &str) -> usize {
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return 0;
+        };
+        let (removed, new_bytes) = {
+            let session = store
+                .sessions
+                .get_mut(session_id)
+                .expect("existing session disappeared under write lock");
+            let mut removed = 0;
+            if let Some(last) = session.messages.pop() {
+                removed = 1;
+                if last.role == MessageRole::Assistant
+                    && session
+                        .messages
+                        .last()
+                        .is_some_and(|previous| previous.role == MessageRole::User)
+                {
+                    session.messages.pop();
+                    removed += 1;
+                }
+                session.last_active_at = Utc::now();
+            }
+            (removed, messages_retained_bytes(&session.messages))
+        };
+        store.retained_message_bytes = store
+            .retained_message_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+        removed
     }
 
     /// Get a session by its ID.
     pub async fn get_session(&self, session_id: &str) -> Option<Session> {
-        let sessions = self.sessions.read().await;
-        sessions.get(session_id).cloned()
+        let store = self.store.read().await;
+        store.sessions.get(session_id).cloned()
     }
 
     /// Find all sessions for a given user across all platforms
     /// (cross-platform session continuity).
     pub async fn get_user_sessions(&self, user_id: &str) -> Vec<Session> {
-        let user_sessions = self.user_sessions.read().await;
-        let session_ids = user_sessions.get(user_id).cloned().unwrap_or_default();
-        drop(user_sessions);
-
-        let sessions = self.sessions.read().await;
-        session_ids
-            .iter()
-            .filter_map(|id| sessions.get(id).cloned())
-            .collect()
+        let store = self.store.read().await;
+        let mut sessions = store
+            .sessions
+            .values()
+            .filter(|session| session.user_id == user_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        sessions
     }
 
     /// Search a user's visible sessions by title, UUID id, or canonical gateway key.
@@ -507,8 +1006,7 @@ impl SessionManager {
         let mut matches = user_sessions
             .into_iter()
             .filter(|session| {
-                let key =
-                    self.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+                let key = self.compose_session_key_for_scope(session.conversation_scope());
                 session_matches_query(session, &key, &needle, &normalized_needle)
             })
             .collect::<Vec<_>>();
@@ -531,41 +1029,47 @@ impl SessionManager {
 
     /// Remove a session entirely.
     pub async fn remove_session(&self, session_id: &str) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.remove(session_id) {
-            // Clean up user_sessions index
-            let mut user_sessions = self.user_sessions.write().await;
-            if let Some(ids) = user_sessions.get_mut(&session.user_id) {
-                ids.retain(|id| id != session_id);
-            }
+        let mut store = self.store.write().await;
+        if let Some(session) = store.sessions.remove(session_id) {
+            store.retained_message_bytes = store
+                .retained_message_bytes
+                .saturating_sub(messages_retained_bytes(&session.messages));
         }
     }
 
     /// Return the number of active sessions.
     pub async fn session_count(&self) -> usize {
-        self.sessions.read().await.len()
+        self.store.read().await.sessions.len()
     }
 
     /// Check whether a session should be reset and perform reset if needed.
     /// Called periodically or before each interaction.
     pub async fn check_and_reset_if_needed(&self, session_id: &str) -> bool {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            if session.should_reset() {
-                session.messages.clear();
-                session.created_at = Utc::now();
-                session.last_active_at = Utc::now();
-                return true;
-            }
-        }
-        false
+        let mut store = self.store.write().await;
+        let Some(old_bytes) = store
+            .sessions
+            .get(session_id)
+            .filter(|session| session.should_reset())
+            .map(|session| messages_retained_bytes(&session.messages))
+        else {
+            return false;
+        };
+        let session = store
+            .sessions
+            .get_mut(session_id)
+            .expect("existing session disappeared under write lock");
+        session.messages = Vec::new();
+        session.created_at = Utc::now();
+        session.last_active_at = Utc::now();
+        store.retained_message_bytes = store.retained_message_bytes.saturating_sub(old_bytes);
+        true
     }
 
     /// Build a `SessionContext` for the given session, populating it with
     /// metadata from the session's state.
     pub async fn build_session_context(&self, session_id: &str) -> Option<SessionContext> {
-        let sessions = self.sessions.read().await;
-        sessions.get(session_id).map(|session| {
+        let store = self.store.read().await;
+        store.sessions.get(session_id).map(|session| {
             let mut ctx = SessionContext::new(session);
             ctx.set_metadata("session_type", format!("{:?}", session.session_type));
             ctx.set_metadata("message_count", session.messages.len().to_string());
@@ -581,52 +1085,62 @@ impl SessionManager {
     ///
     /// Returns all sessions that were flushed.
     pub async fn flush_memories(&self) -> Vec<Session> {
-        let mut sessions = self.sessions.write().await;
-        let all: Vec<Session> = sessions.values().cloned().collect();
-        sessions.clear();
-
-        let mut user_sessions = self.user_sessions.write().await;
-        user_sessions.clear();
-
+        let mut store = self.store.write().await;
+        let all: Vec<Session> = store.sessions.values().cloned().collect();
+        store.sessions.clear();
+        store.retained_message_bytes = 0;
         all
     }
 
     /// Return all current session snapshots with their canonical keys.
     pub async fn all_sessions(&self) -> Vec<(String, Session)> {
-        let sessions = self.sessions.read().await;
-        sessions
+        let store = self.store.read().await;
+        store
+            .sessions
             .iter()
             .map(|(key, session)| (key.clone(), session.clone()))
             .collect()
+    }
+
+    /// Return canonical keys for sessions currently eligible for idle expiry.
+    pub async fn idle_session_keys(&self) -> Vec<String> {
+        self.store
+            .read()
+            .await
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.should_reset())
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// Remove one session only if it is still eligible for idle expiry.
+    pub async fn expire_idle_session_snapshot(&self, session_key: &str) -> Option<Session> {
+        let mut store = self.store.write().await;
+        if !store
+            .sessions
+            .get(session_key)
+            .is_some_and(Session::should_reset)
+        {
+            return None;
+        }
+        let session = store.sessions.remove(session_key)?;
+        store.retained_message_bytes = store
+            .retained_message_bytes
+            .saturating_sub(messages_retained_bytes(&session.messages));
+        Some(session)
     }
 
     /// Expire idle sessions according to their reset policy.
     ///
     /// Returns the removed session snapshots with their canonical keys.
     pub async fn expire_idle_session_snapshots(&self) -> Vec<(String, Session)> {
-        let mut sessions = self.sessions.write().await;
-        let stale_ids: Vec<String> = sessions
-            .iter()
-            .filter(|(_, s)| s.should_reset())
-            .map(|(id, _)| id.clone())
-            .collect();
         let mut expired = Vec::new();
-        for id in stale_ids {
-            if let Some(session) = sessions.remove(&id) {
-                expired.push((id, session));
+        for session_key in self.idle_session_keys().await {
+            if let Some(session) = self.expire_idle_session_snapshot(&session_key).await {
+                expired.push((session_key, session));
             }
         }
-        drop(sessions);
-
-        if !expired.is_empty() {
-            let mut user_sessions = self.user_sessions.write().await;
-            for (id, session) in &expired {
-                if let Some(ids) = user_sessions.get_mut(&session.user_id) {
-                    ids.retain(|existing| existing != id);
-                }
-            }
-        }
-
         expired
     }
 
@@ -636,41 +1150,13 @@ impl SessionManager {
     pub async fn expire_idle_sessions(&self) -> usize {
         self.expire_idle_session_snapshots().await.len()
     }
-
-    /// Infer the session type from the chat_id format.
-    /// By convention, DMs have negative or small numeric IDs,
-    /// groups have positive IDs. Override as needed.
-    fn infer_session_type(chat_id: &str) -> SessionType {
-        // Simple heuristic: if the chat_id starts with a '-' or contains
-        // a group-like prefix, treat as group; otherwise DM.
-        if chat_id.starts_with('-') || chat_id.contains("group") {
-            SessionType::Group
-        } else {
-            SessionType::Dm
-        }
-    }
-}
-
-fn is_slack_shared_channel(platform: &str, chat_id: &str) -> bool {
-    if !platform.eq_ignore_ascii_case("slack") {
-        return false;
-    }
-    let id = chat_id.trim();
-    if id.is_empty() {
-        return false;
-    }
-    let Some(first) = id.chars().next() else {
-        return false;
-    };
-    matches!(first, 'C' | 'c' | 'G' | 'g')
 }
 
 fn normalize_session_title(raw: Option<&str>) -> Option<String> {
     raw.map(str::trim)
         .filter(|title| !title.is_empty())
-        .map(ToOwned::to_owned)
+        .map(|title| title.chars().take(MAX_SESSION_TITLE_CHARS).collect())
 }
-
 fn normalize_session_search_text(text: &str) -> String {
     text.chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
@@ -690,6 +1176,9 @@ fn session_matches_query(
         session.chat_id.as_str(),
         key,
     ];
+    if let Some(thread_id) = &session.thread_id {
+        haystacks.push(thread_id.as_str());
+    }
     if let Some(title) = &session.title {
         haystacks.push(title.as_str());
     }
@@ -747,14 +1236,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_scope_isolates_numeric_group_users_and_sibling_threads() {
+        let manager = SessionManager::with_resource_limits(SessionConfig::default(), true);
+        let thread_a = ConversationScope::new(
+            "discord",
+            "123456789012345678",
+            Some("thread-a"),
+            "human-a",
+            false,
+        );
+        let thread_b = ConversationScope::new(
+            "discord",
+            "123456789012345678",
+            Some("thread-b"),
+            "human-a",
+            false,
+        );
+        let other_user = ConversationScope::new(
+            "discord",
+            "123456789012345678",
+            Some("thread-a"),
+            "human-b",
+            false,
+        );
+        let parent_group =
+            ConversationScope::new("discord", "123456789012345678", None, "human-a", false);
+
+        let thread_a_key = manager.compose_session_key_for_scope(thread_a);
+        let thread_b_key = manager.compose_session_key_for_scope(thread_b);
+        let other_user_key = manager.compose_session_key_for_scope(other_user);
+        let parent_group_key = manager.compose_session_key_for_scope(parent_group);
+        assert_ne!(thread_a_key, thread_b_key);
+        assert_ne!(thread_a_key, other_user_key);
+        assert_ne!(thread_a_key, parent_group_key);
+
+        let session = manager.get_or_create_session_for_scope(thread_a).await;
+        assert_eq!(session.session_type, SessionType::Thread);
+        assert_eq!(session.chat_id, "123456789012345678");
+        assert_eq!(session.thread_id.as_deref(), Some("thread-a"));
+        assert_eq!(session.user_id, "human-a");
+        assert_eq!(
+            manager
+                .get_or_create_session_for_scope(thread_b)
+                .await
+                .session_type,
+            SessionType::Thread
+        );
+        assert_eq!(
+            manager
+                .get_or_create_session_for_scope(parent_group)
+                .await
+                .session_type,
+            SessionType::Group
+        );
+    }
+
+    #[tokio::test]
     async fn session_manager_add_and_get_messages() {
         let config = SessionConfig::default();
         let manager = SessionManager::new(config);
         let session = manager
             .get_or_create_session("telegram", "chat1", "user1")
             .await;
-        // SessionManager uses "platform:chat_id" as the map key, not the UUID id
-        let sid = format!("{}:{}", session.platform, session.chat_id);
+        let sid =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
 
         manager.add_message(&sid, Message::user("hello")).await;
         manager
@@ -763,6 +1308,67 @@ mod tests {
 
         let msgs = manager.get_messages(&sid).await;
         assert_eq!(msgs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn batched_history_removal_preserves_non_user_undo_predecessors() {
+        let manager = SessionManager::new(SessionConfig::default());
+        let session = manager
+            .get_or_create_session("telegram", "chat1", "user1")
+            .await;
+        let sid =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+
+        assert!(
+            manager
+                .replace_messages(
+                    &sid,
+                    vec![Message::system("policy"), Message::assistant("answer")],
+                )
+                .await
+        );
+        assert_eq!(manager.undo_last_exchange(&sid).await, 1);
+        assert_eq!(
+            manager.get_messages(&sid).await,
+            vec![Message::system("policy")]
+        );
+
+        assert!(
+            manager
+                .replace_messages(
+                    &sid,
+                    vec![
+                        Message::system("policy"),
+                        Message::user("question"),
+                        Message::assistant("answer"),
+                    ],
+                )
+                .await
+        );
+        assert_eq!(manager.undo_last_exchange(&sid).await, 2);
+        assert_eq!(
+            manager.get_messages(&sid).await,
+            vec![Message::system("policy")]
+        );
+
+        assert!(
+            manager
+                .replace_messages(
+                    &sid,
+                    vec![
+                        Message::system("policy"),
+                        Message::user("one"),
+                        Message::assistant("two"),
+                        Message::user("three"),
+                    ],
+                )
+                .await
+        );
+        assert_eq!(manager.remove_last_messages(&sid, 3).await, 3);
+        assert_eq!(
+            manager.get_messages(&sid).await,
+            vec![Message::system("policy")]
+        );
     }
 
     #[test]
@@ -830,7 +1436,8 @@ mod tests {
         let session = manager
             .get_or_create_session("telegram", "chat1", "user1")
             .await;
-        let sid = format!("{}:{}", session.platform, session.chat_id);
+        let sid =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
 
         let ctx = manager.build_session_context(&sid).await;
         assert!(ctx.is_some());
@@ -846,7 +1453,8 @@ mod tests {
         let session = manager
             .get_or_create_session("telegram", "chat1", "user1")
             .await;
-        let sid = format!("{}:{}", session.platform, session.chat_id);
+        let sid =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
 
         manager.add_message(&sid, Message::user("hello")).await;
         assert_eq!(manager.get_messages(&sid).await.len(), 1);
@@ -952,9 +1560,7 @@ mod tests {
         assert_eq!(by_id.len(), 1);
         assert_eq!(by_id[0].id, target.id);
 
-        let by_key = manager
-            .search_user_sessions("user1", "telegram:chat-target", 10)
-            .await;
+        let by_key = manager.search_user_sessions("user1", &target_key, 10).await;
         assert_eq!(by_key.len(), 1);
         assert_eq!(by_key[0].chat_id, "chat-target");
 
@@ -987,19 +1593,145 @@ mod tests {
     }
 
     #[test]
-    fn compose_session_key_slack_shared_channels_are_per_user() {
+    fn legacy_direct_key_delegates_to_explicit_scope_without_id_heuristics() {
         let manager = SessionManager::new(SessionConfig::default());
-        assert_eq!(
-            manager.compose_session_key("slack", "C123ABC", "U999"),
-            "slack:C123ABC:U999"
+        let direct = manager.compose_session_key("slack", "C123ABC", "U999");
+        let scoped = manager.compose_session_key_for_scope(ConversationScope::new(
+            "slack", "C123ABC", None, "U999", true,
+        ));
+        assert_eq!(direct, scoped);
+        assert_ne!(
+            direct,
+            manager.compose_session_key_for_scope(ConversationScope::new(
+                "slack", "C123ABC", None, "U998", true,
+            ))
         );
+    }
+    #[tokio::test]
+    async fn implicit_message_limits_are_opt_in_but_explicit_limit_is_always_honored() {
+        let unlimited = SessionManager::new(SessionConfig::default());
+        let session = unlimited
+            .get_or_create_session("test", "unlimited", "user")
+            .await;
+        let key =
+            unlimited.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+        let messages = (0..=DEFAULT_MAX_CONTEXT_MESSAGES)
+            .map(|index| Message::assistant(format!("message-{index}")))
+            .collect::<Vec<_>>();
+        assert!(unlimited.replace_messages(&key, messages).await);
         assert_eq!(
-            manager.compose_session_key("slack", "G123ABC", "U999"),
-            "slack:G123ABC:U999"
+            unlimited.get_messages(&key).await.len(),
+            DEFAULT_MAX_CONTEXT_MESSAGES + 1
         );
+
+        let limited = SessionManager::with_resource_limits(SessionConfig::default(), true);
+        let session = limited
+            .get_or_create_session("test", "limited", "user")
+            .await;
+        let key =
+            limited.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+        let messages = (0..=DEFAULT_MAX_CONTEXT_MESSAGES)
+            .map(|index| Message::assistant(format!("message-{index}")))
+            .collect::<Vec<_>>();
+        assert!(limited.replace_messages(&key, messages).await);
         assert_eq!(
-            manager.compose_session_key("slack", "D123ABC", "U999"),
-            "slack:D123ABC"
+            limited.get_messages(&key).await.len(),
+            DEFAULT_MAX_CONTEXT_MESSAGES
+        );
+
+        let explicit = SessionManager::new(SessionConfig {
+            max_context_messages: Some(2),
+            ..SessionConfig::default()
+        });
+        let session = explicit
+            .get_or_create_session("test", "explicit", "user")
+            .await;
+        let key =
+            explicit.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+        assert!(
+            explicit
+                .replace_messages(
+                    &key,
+                    vec![
+                        Message::assistant("one"),
+                        Message::assistant("two"),
+                        Message::assistant("three"),
+                    ],
+                )
+                .await
+        );
+        assert_eq!(explicit.get_messages(&key).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn user_message_admission_fails_without_dropping_the_current_turn() {
+        let manager = SessionManager::with_resource_limits(SessionConfig::default(), true);
+        let session = manager
+            .get_or_create_session("test", "capacity", "user")
+            .await;
+        let key =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+        manager.add_message(&key, Message::user("prior turn")).await;
+        manager
+            .add_message(&key, Message::assistant("prior response"))
+            .await;
+        let before_messages = manager.get_messages(&key).await;
+        let before_bytes = manager.store.read().await.retained_message_bytes;
+
+        assert!(
+            !manager
+                .try_add_user_message(&key, Message::user("x".repeat(HARD_MAX_CONTEXT_BYTES)),)
+                .await
+        );
+        assert_eq!(manager.get_messages(&key).await, before_messages);
+        assert_eq!(
+            manager.store.read().await.retained_message_bytes,
+            before_bytes
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_message_limit_trimming_retains_the_newest_user_turn() {
+        let manager = SessionManager::new(SessionConfig {
+            max_context_messages: Some(2),
+            ..SessionConfig::default()
+        });
+        let session = manager.get_or_create_session("test", "trim", "user").await;
+        let key =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+        manager.add_message(&key, Message::user("old turn")).await;
+        manager
+            .add_message(&key, Message::assistant("old response"))
+            .await;
+
+        assert!(
+            manager
+                .try_add_user_message(&key, Message::user("newest turn"))
+                .await
+        );
+        let messages = manager.get_messages(&key).await;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content.as_deref(), Some("newest turn"));
+    }
+
+    #[tokio::test]
+    async fn bounded_session_creation_keeps_existing_sessions_addressable() {
+        let manager = SessionManager::new(SessionConfig::default());
+        let first = manager
+            .try_get_or_create_session("test", "first", "user", 1)
+            .await
+            .expect("first session should fit");
+        assert!(manager
+            .try_get_or_create_session("test", "second", "user", 1)
+            .await
+            .is_none());
+        assert_eq!(
+            manager
+                .try_get_or_create_session("test", "first", "user", 1)
+                .await
+                .expect("existing session remains available")
+                .id,
+            first.id
         );
     }
 }

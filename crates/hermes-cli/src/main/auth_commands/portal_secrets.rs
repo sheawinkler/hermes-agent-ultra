@@ -68,13 +68,22 @@ async fn run_auth(
     api_key: Option<String>,
     qr: bool,
 ) -> Result<(), AgentError> {
+    let action = action.as_deref().unwrap_or("status");
     let provider = resolve_auth_provider(provider);
     let auth_store_path = secret_vault_path_for_cli(&cli);
-    let token_store = FileTokenStore::new(auth_store_path).await?;
+    let token_store = if action == "verify" {
+        FileTokenStore::open_read_only(&auth_store_path)?
+    } else {
+        FileTokenStore::new(&auth_store_path).await?
+    };
     let manager = AuthManager::new(token_store.clone());
     let pool_path = auth_pool_path_for_cli(&cli);
-    let mut pool_store = load_auth_pool_store(&pool_path)?;
-    match action.as_deref().unwrap_or("status") {
+    let mut pool_store = if action == "verify" {
+        AuthPoolStore::default()
+    } else {
+        load_auth_pool_store(&pool_path, &manager, &token_store).await?
+    };
+    match action {
         "add" => {
             let provider = normalize_auth_provider(provider.trim());
             let mut auth_type = resolve_auth_type_for_provider(&provider, auth_type.as_deref());
@@ -84,23 +93,36 @@ async fn run_auth(
                     "nous" => {
                         let (resolved, auth_path, _imported_existing, state) =
                             resolve_or_fresh_login_nous(&manager, true).await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or(default_label),
-                            auth_type: "oauth".to_string(),
-                            source: state
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
+                        };
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or(default_label),
+                            "oauth".to_string(),
+                            state
                                 .agent_key_obtained_at
                                 .as_deref()
                                 .map(|_| "device_code".to_string())
                                 .unwrap_or_else(|| "discovered_session".to_string()),
-                            access_token: resolved.api_key,
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
-                        };
-                        entries.push(entry.clone());
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: resolved.api_key.clone(),
+                                refresh_token: resolved.refresh_token.clone(),
+                                token_type: resolved.token_type.clone(),
+                                scope: resolved.scope.clone(),
+                                expires_at: parse_rfc3339_utc(resolved.expires_at.as_deref()),
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added Nous OAuth credential (label='{}', id={}).",
@@ -134,25 +156,38 @@ async fn run_auth(
                                 refresh_token: state.tokens.refresh_token.clone(),
                                 token_type: "bearer".to_string(),
                                 scope: None,
-                                expires_at,
+                                expires_at: expires_at.clone(),
                             })
                             .await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or(default_label),
-                            auth_type: "oauth".to_string(),
-                            source: state
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
+                        };
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or(default_label),
+                            "oauth".to_string(),
+                            state
                                 .source
                                 .clone()
                                 .unwrap_or_else(|| "device_code".to_string()),
-                            access_token: state.tokens.access_token.clone(),
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
-                        };
-                        entries.push(entry.clone());
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: state.tokens.access_token.clone(),
+                                refresh_token: state.tokens.refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at,
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added OpenAI Codex OAuth credential (label='{}', id={}).",
@@ -185,25 +220,38 @@ async fn run_auth(
                                 refresh_token: state.tokens.refresh_token.clone(),
                                 token_type: "bearer".to_string(),
                                 scope: None,
-                                expires_at,
+                                expires_at: expires_at.clone(),
                             })
                             .await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or(default_label),
-                            auth_type: "oauth".to_string(),
-                            source: state
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
+                        };
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or(default_label),
+                            "oauth".to_string(),
+                            state
                                 .source
                                 .clone()
                                 .unwrap_or_else(|| "device_code".to_string()),
-                            access_token: state.tokens.access_token.clone(),
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
-                        };
-                        entries.push(entry.clone());
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: state.tokens.access_token.clone(),
+                                refresh_token: state.tokens.refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at,
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added OpenAI OAuth credential (label='{}', id={}).",
@@ -247,19 +295,32 @@ async fn run_auth(
                                 expires_at: parse_unix_millis_utc(expires_at_ms),
                             })
                             .await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or(default_label),
-                            auth_type: "oauth".to_string(),
-                            source: source_label,
-                            access_token: access_token.clone(),
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
                         };
-                        entries.push(entry.clone());
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or(default_label),
+                            "oauth".to_string(),
+                            source_label.clone(),
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: access_token.clone(),
+                                refresh_token: refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(expires_at_ms),
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added Anthropic OAuth credential (label='{}', id={}).",
@@ -288,19 +349,32 @@ async fn run_auth(
                                 expires_at: parse_unix_millis_utc(creds.expires_at_ms),
                             })
                             .await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or(default_label),
-                            auth_type: "oauth".to_string(),
-                            source: creds.source.clone(),
-                            access_token: creds.api_key.clone(),
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
                         };
-                        entries.push(entry.clone());
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or(default_label),
+                            "oauth".to_string(),
+                            creds.source.clone(),
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: creds.api_key.clone(),
+                                refresh_token: creds.refresh_token.clone(),
+                                token_type: creds.token_type.clone(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(creds.expires_at_ms),
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added Qwen OAuth credential (label='{}', id={}).",
@@ -339,19 +413,32 @@ async fn run_auth(
                                 expires_at: parse_unix_millis_utc(expires_at_ms),
                             })
                             .await?;
-                        let entries = pool_store.providers.entry(provider.clone()).or_default();
-                        let default_label = format!("{provider}-{}", entries.len() + 1);
-                        let entry = AuthPoolEntry {
-                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                            label: label.unwrap_or_else(|| email.clone().unwrap_or(default_label)),
-                            auth_type: "oauth".to_string(),
-                            source: source,
-                            access_token: access_token.clone(),
-                            last_status: None,
-                            last_status_at: None,
-                            last_error_code: None,
+                        let default_label = {
+                            let entries =
+                                pool_store.providers.entry(provider.clone()).or_default();
+                            format!("{provider}-{}", entries.len() + 1)
                         };
-                        entries.push(entry.clone());
+                        let entry = create_auth_pool_entry(
+                            &manager,
+                            &provider,
+                            label.unwrap_or_else(|| email.clone().unwrap_or(default_label)),
+                            "oauth".to_string(),
+                            source.clone(),
+                            OAuthCredential {
+                                provider: provider.clone(),
+                                access_token: access_token.clone(),
+                                refresh_token: refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(expires_at_ms),
+                            },
+                        )
+                        .await?;
+                        pool_store
+                            .providers
+                            .entry(provider.clone())
+                            .or_default()
+                            .push(entry.clone());
                         save_auth_pool_store(&pool_path, &pool_store)?;
                         println!(
                             "Added Google Gemini OAuth credential (label='{}', id={}).",
@@ -379,30 +466,42 @@ async fn run_auth(
             if token.is_empty() {
                 return Err(AgentError::Config("auth add: empty credential".into()));
             }
-            let entries = pool_store.providers.entry(provider.clone()).or_default();
-            let default_label = format!("{provider}-{}", entries.len() + 1);
-            let entry = AuthPoolEntry {
-                id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
-                label: label.unwrap_or(default_label),
-                auth_type,
-                source: "manual".to_string(),
-                access_token: token.clone(),
-                last_status: None,
-                last_status_at: None,
-                last_error_code: None,
-            };
-            entries.push(entry.clone());
-            save_auth_pool_store(&pool_path, &pool_store)?;
             manager
                 .save_credential(OAuthCredential {
                     provider: provider.clone(),
-                    access_token: entry.access_token.clone(),
+                    access_token: token.clone(),
                     refresh_token: None,
                     token_type: "bearer".to_string(),
                     scope: None,
                     expires_at: None,
                 })
                 .await?;
+            let default_label = {
+                let entries = pool_store.providers.entry(provider.clone()).or_default();
+                format!("{provider}-{}", entries.len() + 1)
+            };
+            let entry = create_auth_pool_entry(
+                &manager,
+                &provider,
+                label.unwrap_or(default_label),
+                auth_type,
+                "manual".to_string(),
+                OAuthCredential {
+                    provider: provider.clone(),
+                    access_token: token,
+                    refresh_token: None,
+                    token_type: "bearer".to_string(),
+                    scope: None,
+                    expires_at: None,
+                },
+            )
+            .await?;
+            pool_store
+                .providers
+                .entry(provider.clone())
+                .or_default()
+                .push(entry.clone());
+            save_auth_pool_store(&pool_path, &pool_store)?;
             println!(
                 "Added pooled credential for provider '{}' (label='{}', id={}).",
                 provider, entry.label, entry.id
@@ -442,36 +541,45 @@ async fn run_auth(
                     "auth remove usage: hermes auth remove <provider> <index|id|label>".into(),
                 )
             })?;
-            let Some(entries) = pool_store.providers.get_mut(&provider) else {
-                return Err(AgentError::Config(format!(
-                    "No pooled credentials for provider '{}'",
-                    provider
-                )));
+            let (removed, replacement_ref, remove_provider) = {
+                let Some(entries) = pool_store.providers.get_mut(&provider) else {
+                    return Err(AgentError::Config(format!(
+                        "No pooled credentials for provider '{}'",
+                        provider
+                    )));
+                };
+                let Some(index) = resolve_pool_target(entries, &target) else {
+                    return Err(AgentError::Config(format!(
+                        "Could not resolve auth remove target '{}' for provider '{}'",
+                        target, provider
+                    )));
+                };
+                let removed = entries.remove(index);
+                (
+                    removed,
+                    entries.first().map(|entry| entry.credential_ref.clone()),
+                    entries.is_empty(),
+                )
             };
-            let Some(index) = resolve_pool_target(entries, &target) else {
-                return Err(AgentError::Config(format!(
-                    "Could not resolve auth remove target '{}' for provider '{}'",
-                    target, provider
-                )));
-            };
-            let removed = entries.remove(index);
-            if entries.is_empty() {
+            token_store.remove(&removed.credential_ref).await?;
+            if remove_provider {
                 pool_store.providers.remove(&provider);
                 token_store.remove(&provider).await?;
                 if provider_supports_oauth(&provider) {
                     let _ = clear_provider_auth_state(&provider)?;
                 }
-            } else if let Some(next) = entries.first() {
-                manager
-                    .save_credential(OAuthCredential {
-                        provider: provider.clone(),
-                        access_token: next.access_token.clone(),
-                        refresh_token: None,
-                        token_type: "bearer".to_string(),
-                        scope: None,
-                        expires_at: None,
-                    })
-                    .await?;
+            } else if let Some(replacement_ref) = replacement_ref {
+                let mut replacement = token_store
+                    .get(&replacement_ref)
+                    .await
+                    .ok_or_else(|| {
+                        AgentError::AuthFailed(format!(
+                            "pooled credential unavailable for provider '{}'; run `hermes auth login {}`",
+                            provider, provider
+                        ))
+                    })?;
+                replacement.provider = provider.clone();
+                manager.save_credential(replacement).await?;
             }
             save_auth_pool_store(&pool_path, &pool_store)?;
             println!(
@@ -501,8 +609,34 @@ async fn run_auth(
             );
             return Ok(());
         }
+        "refresh" => {
+            match refresh_oauth_store_credential(&provider, &manager).await? {
+                hermes_auth::RefreshResolution::NotConfigured => {
+                    return Err(AgentError::AuthFailed(format!(
+                        "OAuth credential unavailable for provider '{}'; run `hermes auth login {}`",
+                        provider, provider
+                    )));
+                }
+                hermes_auth::RefreshResolution::Current => {
+                    println!(
+                        "OAuth credential for provider '{}' is current; no refresh was sent.",
+                        provider
+                    );
+                }
+                hermes_auth::RefreshResolution::Refreshed { expires_at } => {
+                    let expiry = expires_at
+                        .map(|value| format!(" expires_at={}", value.to_rfc3339()))
+                        .unwrap_or_default();
+                    println!(
+                        "OAuth credential for provider '{}' refreshed and stored encrypted.{}",
+                        provider, expiry
+                    );
+                }
+            }
+            return Ok(());
+        }
         "verify" => {
-            run_auth_verify(&provider, &token_store, &manager).await?;
+            run_auth_verify(&provider, &token_store).await?;
             return Ok(());
         }
         "login" => {

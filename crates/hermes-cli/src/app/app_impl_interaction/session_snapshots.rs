@@ -208,6 +208,9 @@ impl App {
             personality: self.current_personality.clone(),
             message_count: self.messages.len(),
             created_at: chrono::Utc::now().to_rfc3339(),
+            cwd: std::env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned()),
         }
     }
 

@@ -3,6 +3,26 @@
 // Event
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone)]
+pub enum StreamUiEvent {
+    Thinking(String),
+    ToolStarted { name: String, args_preview: String },
+    ToolCompleted { name: String, result_preview: String },
+    Status { kind: String, message: String },
+    Phase {
+        phase: String,
+        label: String,
+        progress_pct: u8,
+    },
+    Lifecycle(String),
+    MoaReference {
+        index: u64,
+        count: u64,
+        label: String,
+        text: String,
+    },
+}
+
 /// Events that the TUI can process.
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -12,10 +32,14 @@ pub enum Event {
     Resize(u16, u16),
     /// An asynchronous message (e.g. from agent streaming).
     Message(String),
-    /// Agent produced a streaming delta.
-    StreamDelta(String),
-    /// Agent produced a full stream chunk (including control metadata).
-    StreamChunk(StreamChunk),
+    /// Agent produced a bounded render-only stream delta.
+    StreamRender(hermes_agent::AgentRenderDelta),
+    /// Agent produced typed token usage.
+    StreamUsage(hermes_core::UsageStats),
+    /// One or more stream observations were dropped under bounded backpressure.
+    StreamOverflow(u64),
+    /// Bounded, typed UI progress emitted outside the model stream.
+    StreamUi(StreamUiEvent),
     /// Agent finished processing.
     AgentDone,
     /// Background agent run completed.
@@ -272,12 +296,12 @@ pub struct Tui {
     pub terminal: ratatui::Terminal<CrosstermBackend<Stdout>>,
     /// Channel receiver for control/UI events (keys, mouse, resize, app control).
     pub events: mpsc::UnboundedReceiver<Event>,
-    /// Channel receiver for high-volume stream events (tokens/chunks).
-    pub stream_events: mpsc::UnboundedReceiver<Event>,
+    /// Bounded channel receiver for high-volume stream events.
+    pub stream_events: mpsc::Receiver<Event>,
     /// Channel sender for control/UI events.
     event_sender: mpsc::UnboundedSender<Event>,
-    /// Channel sender for stream events.
-    stream_sender: mpsc::UnboundedSender<Event>,
+    /// Bounded channel sender for high-volume stream events.
+    stream_sender: mpsc::Sender<Event>,
     /// The active color theme.
     theme: Theme,
     /// Whether terminal cleanup has already run.
@@ -296,7 +320,7 @@ impl Tui {
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
-        let (stream_sender, stream_receiver) = mpsc::unbounded_channel();
+        let (stream_sender, stream_receiver) = mpsc::channel(256);
         let requested_theme =
             std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-sunburst".to_string());
         Ok(Self {
@@ -349,8 +373,8 @@ impl Tui {
         self.event_sender.clone()
     }
 
-    /// Get a sender for injecting high-volume stream events.
-    pub fn stream_sender(&self) -> mpsc::UnboundedSender<Event> {
+    /// Get a bounded sender for injecting high-volume stream events.
+    pub fn stream_sender(&self) -> mpsc::Sender<Event> {
         self.stream_sender.clone()
     }
 

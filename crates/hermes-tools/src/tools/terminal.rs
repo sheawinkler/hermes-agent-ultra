@@ -6,13 +6,20 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use hermes_core::{
     tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
 };
+use hermes_environments::{
+    ContainmentCommandRequest, ContainmentExecutionError, ContainmentInvocation,
+    ExecutionContainmentContext,
+};
+use parking_lot::Mutex;
 
-use crate::approval::{ApprovalDecision, ApprovalManager};
+use crate::approval::{ApprovalDecision, ApprovalManager, CommandExecutionEnvironment};
+use crate::credential_guard::CredentialGuard;
+use crate::registry::ContainmentSensitiveToolHandler;
 
 const DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
 
@@ -137,6 +144,26 @@ fn terminal_verification_recording_enabled() -> bool {
             })
 }
 
+fn containment_execution_tool_error(error: ContainmentExecutionError) -> ToolError {
+    match error {
+        ContainmentExecutionError::LaunchFailed { launch, .. } => ToolError::ExecutionFailed(
+            json!({
+                "error": "certified containment launch failed without host fallback",
+                "containment_launch_receipt": launch,
+            })
+            .to_string(),
+        ),
+        ContainmentExecutionError::ExecutionFailed { launch, .. } => ToolError::ExecutionFailed(
+            json!({
+                "error": "certified containment command failed without host fallback",
+                "containment_launch_receipt": launch,
+            })
+            .to_string(),
+        ),
+        other => ToolError::ExecutionFailed(other.to_string()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TerminalHandler
 // ---------------------------------------------------------------------------
@@ -145,15 +172,61 @@ fn terminal_verification_recording_enabled() -> bool {
 pub struct TerminalHandler {
     backend: Arc<dyn TerminalBackend>,
     approval: ApprovalManager,
+    execution_environment: CommandExecutionEnvironment,
+    containment_context: Arc<ExecutionContainmentContext>,
     task_cwds: Arc<Mutex<HashMap<String, String>>>,
+    skill_trust_guard: CredentialGuard,
 }
 
 impl TerminalHandler {
+    /// Construct with an explicit manual-host containment context. A backend
+    /// label alone remains host-sensitive.
     pub fn new(backend: Arc<dyn TerminalBackend>) -> Self {
+        Self::with_execution_environment(
+            backend,
+            CommandExecutionEnvironment::from_configured_environment(),
+        )
+    }
+
+    pub fn with_execution_environment(
+        backend: Arc<dyn TerminalBackend>,
+        execution_environment: CommandExecutionEnvironment,
+    ) -> Self {
+        let context = Arc::new(
+            ExecutionContainmentContext::manual(hermes_core::ResolvedExecutionMode::default())
+                .expect("the default execution mode is manual"),
+        );
+        Self::with_context_and_environment(backend, execution_environment, context)
+    }
+
+    /// Construct a terminal handler whose containment-sensitive dispatches are
+    /// forced through this exact executable context.
+    pub(crate) fn with_execution_context(
+        backend: Arc<dyn TerminalBackend>,
+        containment_context: Arc<ExecutionContainmentContext>,
+    ) -> Self {
+        let execution_environment =
+            CommandExecutionEnvironment::from_containment_context(&containment_context);
+        Self::with_context_and_environment(backend, execution_environment, containment_context)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_containment_context(&self) -> Arc<ExecutionContainmentContext> {
+        Arc::clone(&self.containment_context)
+    }
+
+    fn with_context_and_environment(
+        backend: Arc<dyn TerminalBackend>,
+        execution_environment: CommandExecutionEnvironment,
+        containment_context: Arc<ExecutionContainmentContext>,
+    ) -> Self {
         Self {
             backend,
             approval: ApprovalManager::new(),
+            execution_environment,
+            containment_context,
             task_cwds: Arc::new(Mutex::new(HashMap::new())),
+            skill_trust_guard: CredentialGuard::new(),
         }
     }
 
@@ -163,44 +236,37 @@ impl TerminalHandler {
         if task_id.trim().is_empty() || cwd.trim().is_empty() {
             return;
         }
-        self.task_cwds
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(task_id, cwd);
+        self.task_cwds.lock().insert(task_id, cwd);
     }
 
     pub fn clear_task_cwd(&self, task_id: &str) {
-        self.task_cwds
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(task_id);
+        self.task_cwds.lock().remove(task_id);
     }
 
     fn task_cwd(&self, task_id: &str) -> Option<String> {
         if task_id.trim().is_empty() {
             return None;
         }
-        self.task_cwds
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(task_id)
-            .cloned()
+        self.task_cwds.lock().get(task_id).cloned()
     }
 }
 
-#[async_trait]
-impl ToolHandler for TerminalHandler {
-    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+impl TerminalHandler {
+    async fn execute_with_invocation(
+        &self,
+        params: Value,
+        invocation: Option<ContainmentInvocation>,
+    ) -> Result<String, ToolError> {
         let command = params
             .get("command")
-            .and_then(|v| v.as_str())
+            .and_then(|value| value.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'command' parameter".into()))?;
-
-        let timeout = params.get("timeout").and_then(|v| v.as_u64());
+        let timeout = params.get("timeout").and_then(|value| value.as_u64());
         let background = params
             .get("background")
-            .and_then(|v| v.as_bool())
+            .and_then(|value| value.as_bool())
             .unwrap_or(false);
+        self.skill_trust_guard.check_effect_text(command)?;
         if !background {
             if let Some(timeout) = timeout {
                 let max_timeout = foreground_max_timeout_secs();
@@ -218,11 +284,14 @@ impl ToolHandler for TerminalHandler {
             }
         }
 
-        match self.approval.check_approval_from_env(command, "local") {
+        match self.approval.check_approval_for_execution(
+            command,
+            self.execution_environment.clone(),
+            None,
+        ) {
             ApprovalDecision::Denied => {
                 return Err(ToolError::ExecutionFailed(format!(
-                    "Command denied by security policy: {}",
-                    command
+                    "Command denied by security policy: {command}"
                 )));
             }
             ApprovalDecision::RequiresConfirmation => {
@@ -237,13 +306,13 @@ impl ToolHandler for TerminalHandler {
             ApprovalDecision::Approved => {}
         }
 
-        let explicit_workdir = params.get("workdir").and_then(|v| v.as_str());
+        let explicit_workdir = params.get("workdir").and_then(|value| value.as_str());
         let task_workdir = explicit_workdir
             .is_none()
             .then(|| {
                 params
                     .get("task_id")
-                    .and_then(|v| v.as_str())
+                    .and_then(|value| value.as_str())
                     .and_then(|task_id| self.task_cwd(task_id))
             })
             .flatten();
@@ -254,44 +323,79 @@ impl ToolHandler for TerminalHandler {
         let workdir = explicit_workdir
             .or(task_workdir.as_deref())
             .or(env_workdir.as_deref());
-
-        let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
-        let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
-
+        let pty = params
+            .get("pty")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let stdin_data = params.get("stdin_data").and_then(|value| value.as_str());
         let transformed_command = transform_sudo_command(command);
 
-        match self
-            .backend
-            .execute_command_with_stdin(
-                &transformed_command,
-                timeout,
-                workdir,
-                background,
-                pty,
-                stdin_data,
-            )
-            .await
-        {
-            Ok(output) => {
-                let rendered = format_command_output(&output);
-                if !background && terminal_verification_recording_enabled() {
-                    let session_id = params
-                        .get("session_id")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string)
-                        .or_else(|| std::env::var("HERMES_SESSION_KEY").ok());
-                    let _ = crate::verification_evidence::record_terminal_result(
-                        command,
-                        workdir.map(Path::new),
-                        session_id.as_deref(),
-                        output.exit_code,
-                        &rendered,
-                    );
-                }
-                Ok(rendered)
+        let (output, receipt) = match invocation {
+            Some(invocation) => self
+                .containment_context
+                .execute_host_sensitive(
+                    invocation,
+                    ContainmentCommandRequest {
+                        command: transformed_command,
+                        timeout,
+                        workdir: workdir.map(ToOwned::to_owned),
+                        background,
+                        pty,
+                        stdin_data: stdin_data.map(ToOwned::to_owned),
+                    },
+                )
+                .await
+                .map(|result| (result.output, Some(result.receipt)))
+                .map_err(containment_execution_tool_error)?,
+            None if self.containment_context.is_certified_dispatch_context() => {
+                return Err(ToolError::ExecutionFailed(
+                    "Certified terminal dispatch requires a registry-issued containment invocation; host fallback is refused".into(),
+                ));
             }
-            Err(e) => Err(ToolError::ExecutionFailed(e.to_string())),
+            None => self
+                .backend
+                .execute_command_with_stdin(
+                    &transformed_command,
+                    timeout,
+                    workdir,
+                    background,
+                    pty,
+                    stdin_data,
+                )
+                .await
+                .map(|output| (output, None))
+                .map_err(|error| ToolError::ExecutionFailed(error.to_string()))?,
+        };
+        let rendered = format_command_output(&output);
+        if !background && terminal_verification_recording_enabled() {
+            let session_id = params
+                .get("session_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .or_else(|| std::env::var("HERMES_SESSION_KEY").ok());
+            let _ = crate::verification_evidence::record_terminal_result(
+                command,
+                workdir.map(Path::new),
+                session_id.as_deref(),
+                output.exit_code,
+                &rendered,
+            );
         }
+        match receipt {
+            Some(receipt) => serde_json::to_string(&json!({
+                "result": rendered,
+                "containment_receipt": receipt,
+            }))
+            .map_err(|error| ToolError::ExecutionFailed(error.to_string())),
+            None => Ok(rendered),
+        }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for TerminalHandler {
+    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+        self.execute_with_invocation(params, None).await
     }
 
     fn schema(&self) -> ToolSchema {
@@ -356,6 +460,17 @@ impl ToolHandler for TerminalHandler {
             "Execute a terminal command. Returns stdout, stderr, and exit code. Use direct commands; shell-string wrappers such as `bash -lc` are approval-gated.",
             JsonSchema::object(props, vec!["command".into()]),
         )
+    }
+}
+
+#[async_trait]
+impl ContainmentSensitiveToolHandler for TerminalHandler {
+    async fn execute_with_containment(
+        &self,
+        params: Value,
+        invocation: ContainmentInvocation,
+    ) -> Result<String, ToolError> {
+        self.execute_with_invocation(params, Some(invocation)).await
     }
 }
 
@@ -911,10 +1026,7 @@ mod tests {
             _pty: bool,
             _stdin_data: Option<&str>,
         ) -> Result<CommandOutput, AgentError> {
-            self.calls
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(workdir.map(ToString::to_string));
+            self.calls.lock().push(workdir.map(ToString::to_string));
             Ok(CommandOutput {
                 exit_code: 0,
                 stdout: "ok".to_string(),
@@ -1013,7 +1125,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_execute() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1024,7 +1136,7 @@ mod tests {
 
     #[test]
     fn terminal_handler_records_verification_evidence_when_enabled_in_tests() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         let tmp = tempfile::tempdir().unwrap();
@@ -1064,7 +1176,7 @@ mod tests {
 
     #[test]
     fn terminal_handler_surfaces_backend_stdout_as_user_visible_output() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1077,7 +1189,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_uses_registered_task_cwd_when_workdir_omitted() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
         let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/env");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
@@ -1094,13 +1206,13 @@ mod tests {
         })))
         .unwrap();
 
-        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = calls.lock();
         assert_eq!(calls.as_slice(), [Some("/workspace/acp".to_string())]);
     }
 
     #[test]
     fn terminal_handler_uses_non_local_terminal_cwd_without_host_validation() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
         let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/worktree");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
@@ -1112,13 +1224,13 @@ mod tests {
 
         block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
 
-        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = calls.lock();
         assert_eq!(calls.as_slice(), [Some("/remote/worktree".to_string())]);
     }
 
     #[test]
     fn terminal_handler_does_not_apply_terminal_cwd_for_local_backend() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
         let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/host/worktree");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
@@ -1130,13 +1242,13 @@ mod tests {
 
         block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
 
-        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = calls.lock();
         assert_eq!(calls.as_slice(), [None]);
     }
 
     #[test]
     fn terminal_handler_task_cwds_are_isolated_by_task_id() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1150,7 +1262,7 @@ mod tests {
         block_on(handler.execute(json!({"command": "pwd", "task_id": "task-b"}))).unwrap();
         block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
 
-        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = calls.lock();
         assert_eq!(
             calls.as_slice(),
             [
@@ -1163,7 +1275,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_explicit_workdir_wins_over_task_cwd() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
         let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/worktree");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
@@ -1181,13 +1293,13 @@ mod tests {
         })))
         .unwrap();
 
-        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = calls.lock();
         assert_eq!(calls.as_slice(), [Some("/explicit/workdir".to_string())]);
     }
 
     #[test]
     fn test_terminal_handler_rejects_foreground_timeout_above_cap() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
@@ -1204,7 +1316,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_allows_background_timeout_above_cap() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
@@ -1222,7 +1334,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_rejects_shell_background_wrappers_in_foreground() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1239,7 +1351,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_rejects_long_lived_server_foreground() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1253,7 +1365,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_allows_help_variant_for_server_command() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1265,7 +1377,7 @@ mod tests {
 
     #[test]
     fn test_terminal_handler_execute_with_stdin_data() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -1276,58 +1388,90 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_handler_denies_confirmation_without_consent() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+    fn test_terminal_handler_denies_confirmation_without_an_explicit_token() {
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
-        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
         let err = block_on(handler.execute(json!({"command": "sudo apt update"}))).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("Do NOT retry"));
         assert!(msg.contains("rephrase"));
         assert!(msg.contains("same outcome"));
         assert!(msg.contains("Silence is not consent"));
+        assert!(calls.lock().is_empty());
     }
 
     #[test]
-    fn test_terminal_handler_yolo_bypasses_recoverable_confirmation() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+    fn test_terminal_handler_yolo_cannot_substitute_for_explicit_confirmation() {
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::set("HERMES_YOLO_MODE", "1");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
-        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
-        let result =
-            block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"}))).unwrap();
-        assert!(result.contains("rm -rf /tmp/hermes-safe-test"));
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        let err = block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"})))
+            .unwrap_err();
+        assert!(err.to_string().contains("explicit user approval"));
+        assert!(calls.lock().is_empty());
     }
 
     #[test]
     fn test_terminal_handler_yolo_does_not_bypass_hardline() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::set("HERMES_YOLO_MODE", "1");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
-        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
         let err = block_on(handler.execute(json!({"command": "rm -rf /"}))).unwrap_err();
         assert!(err.to_string().contains("denied by security policy"));
+        assert!(calls.lock().is_empty());
     }
 
     #[test]
-    fn test_terminal_handler_session_yolo_bypasses_recoverable_confirmation() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap();
+    fn test_terminal_handler_session_yolo_cannot_substitute_for_explicit_confirmation() {
+        let _lock = TEST_ENV_LOCK.lock();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::set("HERMES_SESSION_KEY", "terminal-session-yolo");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         crate::approval::clear_session("terminal-session-yolo");
         crate::approval::enable_session_yolo("terminal-session-yolo");
 
-        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
-        let result =
-            block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"}))).unwrap();
-        assert!(result.contains("rm -rf /tmp/hermes-safe-test"));
-
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        let result = block_on(handler.execute(json!({
+            "command": "rm -rf /tmp/hermes-safe-test"
+        })));
         crate::approval::clear_session("terminal-session-yolo");
+
+        let err = result.expect_err("execution must not accept session yolo as approval");
+        assert!(err.to_string().contains("explicit user approval"));
+        assert!(calls.lock().is_empty());
+    }
+
+    #[test]
+    fn terminal_handler_treats_host_mounted_docker_as_host_sensitive() {
+        let _lock = TEST_ENV_LOCK.lock();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::with_execution_environment(
+            backend,
+            CommandExecutionEnvironment::host_sensitive("docker"),
+        );
+
+        let err = block_on(handler.execute(json!({"command": "rm -rf /"}))).unwrap_err();
+        assert!(err.to_string().contains("denied by security policy"));
+        assert!(calls.lock().is_empty());
     }
 
     #[tokio::test]
@@ -1435,7 +1579,7 @@ mod tests {
 
     #[test]
     fn terminal_handler_nonzero_exit_code_is_output_not_tool_failure() {
-        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock");
+        let _env_lock = TEST_ENV_LOCK.lock();
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         let handler = TerminalHandler::new(Arc::new(NonzeroExitBackend));
 

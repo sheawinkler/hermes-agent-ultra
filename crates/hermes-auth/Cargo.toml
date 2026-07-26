@@ -21,6 +21,7 @@ tracing = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
+fs2 = "0.4"
 
 [dev-dependencies]
 wiremock = "0.6"

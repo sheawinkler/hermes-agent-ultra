@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate SOTA harness hardening artifacts for parity release review."""
+"""Generate fixture-reference harness hygiene artifacts for parity review."""
 
 from __future__ import annotations
 
@@ -17,6 +17,24 @@ REPLAY_JSON = "docs/parity/contextlattice-replay-evidence-index.json"
 REPLAY_MD = "docs/parity/contextlattice-replay-evidence-index.md"
 BUDGET_JSON = "docs/parity/harness-budget.json"
 BUDGET_MD = "docs/parity/harness-budget.md"
+
+FIXTURE_REFERENCE_AUTHORITY = {
+    "capability_promotion_authoritative": False,
+    "production_complete": False,
+}
+FIXTURE_REFERENCE_SCOPE = {
+    "coverage_kind": "fixture_reference_regression",
+    "authoritative_for": [
+        "fixture/reference regression coverage",
+        "referenced Rust test existence",
+    ],
+    "not_evidence_of": [
+        "implemented production capability",
+        "executable protocol behavior",
+        "executable client behavior",
+        "executable chaos behavior",
+    ],
+}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -71,7 +89,7 @@ def source_artifacts() -> dict[str, str]:
         "global_parity_proof": "docs/parity/global-parity-proof.json",
         "harness_budget": BUDGET_JSON,
         "harness_trend_ledger": TREND_JSON,
-        "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
+        "fixture_reference_matrix": "docs/parity/sota-harness-matrix.json",
         "test_coverage_audit": "docs/parity/test-coverage-audit.json",
         "upstream_missing_queue": "docs/parity/upstream-missing-queue.json",
     }
@@ -115,19 +133,25 @@ def build_snapshot(
         "missing_rust_test_refs": as_int(
             metric(coverage, "summary", "missing_rust_test_refs", default=0)
         ),
-        "sota_domain_coverage_ratio": as_float(
+        "fixture_reference_category_coverage_ratio": as_float(
             metric(sota, "summary", "domain_coverage_ratio", default=0.0)
         ),
-        "sota_direct_rust_tests": as_int(
+        "fixture_reference_rust_tests": as_int(
             metric(sota, "summary", "direct_rust_tests", default=0)
         ),
-        "sota_workflow_replay_steps": as_int(
+        "fixture_reference_workflow_replay_steps": as_int(
             metric(sota, "summary", "workflow_replay_steps", default=0)
         ),
-        "sota_protocol_cases": as_int(metric(sota, "summary", "protocol_cases", default=0)),
-        "sota_fault_scenarios": as_int(metric(sota, "summary", "fault_scenarios", default=0)),
-        "sota_critical_gaps": as_int(metric(sota, "gate", "critical_gaps", default=0)),
-        "sota_missing_rust_test_refs": as_int(
+        "fixture_reference_protocol_cases": as_int(
+            metric(sota, "summary", "protocol_cases", default=0)
+        ),
+        "fixture_reference_fault_scenarios": as_int(
+            metric(sota, "summary", "fault_scenarios", default=0)
+        ),
+        "fixture_reference_critical_gaps": as_int(
+            metric(sota, "gate", "critical_gaps", default=0)
+        ),
+        "fixture_reference_missing_rust_test_refs": as_int(
             metric(sota, "gate", "missing_rust_test_refs", default=0)
         ),
     }
@@ -153,16 +177,18 @@ def build_trend_ledger(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, A
             "covered_behavior_rows",
             "rust_test_functions",
             "coverage_manifest_entries",
-            "sota_direct_rust_tests",
-            "sota_workflow_replay_steps",
-            "sota_protocol_cases",
-            "sota_fault_scenarios",
+            "fixture_reference_rust_tests",
+            "fixture_reference_workflow_replay_steps",
+            "fixture_reference_protocol_cases",
+            "fixture_reference_fault_scenarios",
         ]:
             deltas[key] = as_float(snapshot.get(key)) - as_float(previous.get(key))
     return {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "schema_version": 1,
-        "purpose": "Track parity coverage and SOTA harness movement over time.",
+        "schema_version": 2,
+        "purpose": "Track parity coverage and fixture-reference harness hygiene over time.",
+        "authority": dict(FIXTURE_REFERENCE_AUTHORITY),
+        "scope": dict(FIXTURE_REFERENCE_SCOPE),
         "source_artifacts": source_artifacts(),
         "latest": snapshot,
         "delta_from_previous_entry": deltas,
@@ -189,27 +215,32 @@ def build_replay_index(
                 "why": str(domain.get("why", "")),
                 "fixtures": domain.get("fixtures", []),
                 "rust_tests": domain.get("rust_tests", []),
-                "required_capabilities": domain.get("required_capabilities", []),
+                "fixture_reference_categories": domain.get(
+                    "fixture_reference_categories", []
+                ),
                 "contextlattice_topic": f"hermes-agent-ultra/parity/sota/{domain_id}",
                 "retrieval_query": (
-                    f"Hermes Agent Ultra SOTA harness evidence for {domain_id} "
-                    "including fixtures, Rust tests, failures, and queue status"
+                    f"Hermes Agent Ultra fixture/reference regression artifacts for {domain_id} "
+                    "including fixture references, Rust tests, failures, and queue status"
                 ),
             }
         )
     return {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": (
-            "Index replay, protocol, and fault-injection evidence so ContextLattice "
-            "checkpoints can point to exact local artifacts."
+            "Index fixture/reference regression artifacts so ContextLattice checkpoints can "
+            "locate local references without treating them as capability-promotion evidence."
         ),
+        "authority": dict(FIXTURE_REFERENCE_AUTHORITY),
+        "scope": dict(FIXTURE_REFERENCE_SCOPE),
         "source_artifacts": source_artifacts(),
         "latest_gate_state": {
             "release_gate_pass": bool(metric(proof, "release_gate", "pass", default=False)),
             "ci_gate_pass": bool(metric(proof, "ci_gate", "pass", default=False)),
             "test_coverage_gate_pass": bool(metric(coverage, "audit_gate", "pass", default=False)),
-            "sota_harness_gate_pass": bool(metric(sota, "gate", "pass", default=False)),
+            "fixture_reference_gate_pass": bool(metric(sota, "gate", "pass", default=False)),
+            "production_complete": False,
             "queue_pending": as_int(
                 metric(queue, "summary", "by_disposition", "pending", default=0)
             ),
@@ -251,11 +282,15 @@ def build_budget(snapshot: dict[str, Any], thresholds: dict[str, Any]) -> dict[s
             "reason": "all tracked behavior rows must remain covered",
         },
         {
-            "id": "sota_domain_coverage_ratio",
-            "actual": snapshot["sota_domain_coverage_ratio"],
-            "limit": as_float(release_values.get("min_sota_harness_domain_coverage_ratio", 1.0)),
+            "id": "fixture_reference_category_coverage_ratio",
+            "actual": snapshot["fixture_reference_category_coverage_ratio"],
+            "limit": as_float(
+                release_values.get(
+                    "min_fixture_reference_category_coverage_ratio", 1.0
+                )
+            ),
             "operator": ">=",
-            "reason": "all SOTA harness domains must remain represented",
+            "reason": "all declared fixture-reference categories must remain represented",
         },
         {
             "id": "rust_test_functions",
@@ -272,25 +307,25 @@ def build_budget(snapshot: dict[str, Any], thresholds: dict[str, Any]) -> dict[s
             "reason": "coverage manifest growth must stay reviewable across releases",
         },
         {
-            "id": "sota_workflow_replay_steps",
-            "actual": snapshot["sota_workflow_replay_steps"],
+            "id": "fixture_reference_workflow_replay_steps",
+            "actual": snapshot["fixture_reference_workflow_replay_steps"],
             "limit": 12,
             "operator": "<=",
-            "reason": "workflow replay growth needs explicit review before it becomes slow",
+            "reason": "workflow fixture growth needs explicit review before it becomes slow",
         },
         {
-            "id": "sota_protocol_cases",
-            "actual": snapshot["sota_protocol_cases"],
+            "id": "fixture_reference_protocol_cases",
+            "actual": snapshot["fixture_reference_protocol_cases"],
             "limit": 20,
             "operator": "<=",
             "reason": "protocol fixture cases should remain bounded and auditable",
         },
         {
-            "id": "sota_fault_scenarios",
-            "actual": snapshot["sota_fault_scenarios"],
+            "id": "fixture_reference_fault_scenarios",
+            "actual": snapshot["fixture_reference_fault_scenarios"],
             "limit": 16,
             "operator": "<=",
-            "reason": "fault-injection expansion should stay deterministic",
+            "reason": "fault-fixture expansion should stay deterministic",
         },
     ]
     for item in budgets:
@@ -300,8 +335,10 @@ def build_budget(snapshot: dict[str, Any], thresholds: dict[str, Any]) -> dict[s
             item["pass"] = as_float(item["actual"]) >= as_float(item["limit"])
     return {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "schema_version": 1,
-        "purpose": "Cross-version review budget for SOTA harness and coverage growth.",
+        "schema_version": 2,
+        "purpose": "Cross-version review budget for fixture-reference harness hygiene and coverage growth.",
+        "authority": dict(FIXTURE_REFERENCE_AUTHORITY),
+        "scope": dict(FIXTURE_REFERENCE_SCOPE),
         "source_artifacts": source_artifacts(),
         "snapshot": snapshot,
         "budgets": budgets,
@@ -315,9 +352,16 @@ def build_budget(snapshot: dict[str, Any], thresholds: dict[str, Any]) -> dict[s
 def render_trend_md(payload: dict[str, Any]) -> str:
     latest = payload["latest"]
     lines = [
-        "# Harness Trend Ledger",
+        "# Fixture-Reference Harness Hygiene Trend Ledger",
         "",
         f"Generated: `{payload['generated_at_utc']}`",
+        "",
+        "## Authority and Scope",
+        "",
+        f"- Coverage scope: `{payload['scope']['coverage_kind']}`",
+        "- Capability-promotion authority: `false`",
+        "- Production complete: `false`",
+        "- Registry/fixture entries and their referenced Rust tests preserve regression coverage only. They do not establish an implemented product capability.",
         "",
         "## Latest",
         "",
@@ -332,14 +376,21 @@ def render_trend_md(payload: dict[str, Any]) -> str:
         "covered_behavior_rows",
         "rust_test_functions",
         "coverage_manifest_entries",
-        "sota_domain_coverage_ratio",
-        "sota_direct_rust_tests",
-        "sota_workflow_replay_steps",
-        "sota_protocol_cases",
-        "sota_fault_scenarios",
+        "fixture_reference_category_coverage_ratio",
+        "fixture_reference_rust_tests",
+        "fixture_reference_workflow_replay_steps",
+        "fixture_reference_protocol_cases",
+        "fixture_reference_fault_scenarios",
     ]:
         lines.append(f"| `{key}` | {latest.get(key, 0)} |")
-    lines.extend(["", "## Entries", "", "| Recorded | Local head | Queue pending | Coverage | SOTA domains |"])
+    lines.extend(
+        [
+            "",
+            "## Entries",
+            "",
+            "| Recorded | Local head | Queue pending | Coverage | Fixture categories |",
+        ]
+    )
     lines.append("| --- | --- | ---: | ---: | ---: |")
     for entry in payload["entries"]:
         head = str(entry.get("local_head", ""))[:12]
@@ -347,7 +398,7 @@ def render_trend_md(payload: dict[str, Any]) -> str:
             f"| `{entry.get('recorded_at_utc', '')}` | `{head}` | "
             f"{entry.get('queue_pending', 0)} | "
             f"{entry.get('tracked_behavior_coverage_ratio', 0)} | "
-            f"{entry.get('sota_domain_coverage_ratio', 0)} |"
+            f"{entry.get('fixture_reference_category_coverage_ratio', 0)} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -355,22 +406,32 @@ def render_trend_md(payload: dict[str, Any]) -> str:
 
 def render_replay_md(payload: dict[str, Any]) -> str:
     gate = payload["latest_gate_state"]
+    authority = payload["authority"]
+    scope = payload["scope"]
     lines = [
-        "# ContextLattice Replay Evidence Index",
+        "# ContextLattice Fixture-Reference Evidence Index",
         "",
         f"Generated: `{payload['generated_at_utc']}`",
+        "",
+        "## Authority and Scope",
+        "",
+        f"- Coverage scope: `{scope['coverage_kind']}`",
+        f"- Capability-promotion authority: `{str(authority['capability_promotion_authoritative']).lower()}`",
+        f"- Production complete: `{str(authority['production_complete']).lower()}`",
+        "- Registry/fixture entries and their referenced Rust tests preserve regression coverage only. They do not establish an implemented product capability or executable protocol, client, or chaos evidence.",
         "",
         "## Gate State",
         "",
         f"- Release gate: **{'PASS' if gate['release_gate_pass'] else 'FAIL'}**",
         f"- CI gate: **{'PASS' if gate['ci_gate_pass'] else 'FAIL'}**",
         f"- Test coverage gate: **{'PASS' if gate['test_coverage_gate_pass'] else 'FAIL'}**",
-        f"- SOTA harness gate: **{'PASS' if gate['sota_harness_gate_pass'] else 'FAIL'}**",
+        f"- Fixture/reference regression gate: **{'PASS' if gate['fixture_reference_gate_pass'] else 'FAIL'}**",
+        f"- Production complete: `{str(gate['production_complete']).lower()}`",
         f"- Queue pending: `{gate['queue_pending']}`",
         "",
-        "## Replay Evidence Groups",
+        "## Fixture-Reference Evidence Groups",
         "",
-        "| Domain | Status | Fixtures | Rust tests | ContextLattice topic |",
+        "| Domain | Regression status | Fixture references | Rust tests | ContextLattice topic |",
         "| --- | --- | ---: | ---: | --- |",
     ]
     for group in payload["replay_evidence_groups"]:
@@ -393,10 +454,19 @@ def render_replay_md(payload: dict[str, Any]) -> str:
 
 def render_budget_md(payload: dict[str, Any]) -> str:
     gate = payload["gate"]
+    authority = payload["authority"]
+    scope = payload["scope"]
     lines = [
-        "# Harness Budget",
+        "# Fixture-Reference Harness Hygiene Budget",
         "",
         f"Generated: `{payload['generated_at_utc']}`",
+        "",
+        "## Authority and Scope",
+        "",
+        f"- Coverage scope: `{scope['coverage_kind']}`",
+        f"- Capability-promotion authority: `{str(authority['capability_promotion_authoritative']).lower()}`",
+        f"- Production complete: `{str(authority['production_complete']).lower()}`",
+        "- Registry/fixture entries and their referenced Rust tests preserve regression coverage only. They do not establish an implemented product capability.",
         "",
         f"Budget gate: **{'PASS' if gate['pass'] else 'FAIL'}**",
         "",

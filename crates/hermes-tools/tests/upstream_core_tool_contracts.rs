@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use hermes_core::{
-    tool_schema, AgentError, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler,
-    ToolSchema,
+    tool_schema, AgentError, CommandOutput, JsonSchema, MemorySubject, MemorySubjectDerivationKey,
+    MemorySubjectStorageKey, MemorySurface, TerminalBackend, ToolError, ToolHandler, ToolSchema,
 };
 use hermes_tools::{
     ClarifyBackend, ClarifyHandler, CodeExecutionBackend, CronjobBackend, CronjobHandler,
@@ -344,9 +344,20 @@ struct CaptureMemoryBackend {
     calls: Mutex<Vec<String>>,
 }
 
+fn memory_filter() -> MemorySubjectStorageKey {
+    let subject =
+        MemorySubject::local_owner(MemorySurface::Local, "upstream-contract").expect("subject");
+    subject.storage_key(&MemorySubjectDerivationKey::from_bytes([47_u8; 32]))
+}
+
 #[async_trait]
 impl MemoryBackend for CaptureMemoryBackend {
-    async fn add(&self, target: &str, content: &str) -> Result<String, ToolError> {
+    async fn add(
+        &self,
+        _filter: &MemorySubjectStorageKey,
+        target: &str,
+        content: &str,
+    ) -> Result<String, ToolError> {
         self.calls
             .lock()
             .expect("calls")
@@ -356,6 +367,7 @@ impl MemoryBackend for CaptureMemoryBackend {
 
     async fn replace(
         &self,
+        _filter: &MemorySubjectStorageKey,
         target: &str,
         old_text: &str,
         new_content: &str,
@@ -367,7 +379,12 @@ impl MemoryBackend for CaptureMemoryBackend {
         Ok("replaced".to_string())
     }
 
-    async fn remove(&self, target: &str, old_text: &str) -> Result<String, ToolError> {
+    async fn remove(
+        &self,
+        _filter: &MemorySubjectStorageKey,
+        target: &str,
+        old_text: &str,
+    ) -> Result<String, ToolError> {
         self.calls
             .lock()
             .expect("calls")
@@ -379,7 +396,7 @@ impl MemoryBackend for CaptureMemoryBackend {
 #[tokio::test]
 async fn memory_contract_validates_targets_and_dispatches_actions() {
     let backend = Arc::new(CaptureMemoryBackend::default());
-    let handler = MemoryHandler::new(backend.clone());
+    let handler = MemoryHandler::with_subject_filter(backend.clone(), memory_filter());
 
     assert_eq!(
         handler
@@ -907,16 +924,21 @@ fn core_runtime_tool_schemas_cover_terminal_process_todo_and_tts_parity() {
         "\"provider\"",
         "\"output_path\"",
         "\"speed\"",
-        "\"elevenlabs\"",
-        "\"openai\"",
-        "\"minimax\"",
-        "\"piper\"",
+        "tts.providers",
     ] {
         assert!(
             tts_schema.contains(expected),
             "tts schema should include {expected}"
         );
     }
+    assert!(
+        !tts_schema.contains("\"enum\""),
+        "configured command provider names must remain schema-valid"
+    );
+    assert!(
+        !tts_schema.contains("\"default\""),
+        "omitting provider must honor the configured tts.provider default"
+    );
 }
 
 #[tokio::test]

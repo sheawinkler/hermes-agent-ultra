@@ -387,8 +387,27 @@ mod tests {
     use crate::cli_support::cron_scheduler_for_data_dir;
 
     fn make_backend() -> ScheduledCronjobBackend {
-        let dir = tempdir().expect("tempdir");
-        let scheduler = Arc::new(cron_scheduler_for_data_dir(dir.path().to_path_buf()));
+        let root = tempdir().expect("tempdir").keep();
+        let run_runtime = Arc::new(
+            crate::RunRuntime::open_for_ephemeral_testing(&root).expect("ephemeral run runtime"),
+        );
+        let execution_mode = hermes_core::ResolvedExecutionMode::default();
+        let execution_containment = Arc::new(
+            hermes_environments::ExecutionContainmentContext::manual(execution_mode)
+                .expect("default mode must admit manual containment"),
+        );
+        let tool_registry = Arc::new(hermes_agent::agent_loop::ToolRegistry::new());
+        tool_registry.set_execution_containment_context(Arc::clone(&execution_containment));
+        let scheduler = Arc::new(
+            cron_scheduler_for_data_dir(
+                root.join("cron"),
+                tool_registry,
+                run_runtime,
+                execution_mode,
+                execution_containment,
+            )
+            .expect("test cron scheduler"),
+        );
         ScheduledCronjobBackend::new(scheduler)
     }
 

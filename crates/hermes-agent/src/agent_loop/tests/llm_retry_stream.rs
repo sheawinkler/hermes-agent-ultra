@@ -64,8 +64,7 @@
         let mut ctx = ContextManager::new(32);
         ctx.add_message(Message::user("hello"));
 
-        let resp = agent
-            .call_llm_with_retry_inner(&ctx, &[], None, None)
+        let resp = agent.call_llm_with_retry_inner(&ctx, &[], None, None, None)
             .await
             .expect("fallback should recover");
         assert_eq!(resp.message.content.as_deref(), Some("ok"));
@@ -177,8 +176,7 @@
         let mut ctx = ContextManager::new(32);
         ctx.add_message(Message::user("hello"));
 
-        let _ = agent
-            .call_llm_with_retry_inner(&ctx, &[], None, None)
+        let _ = agent.call_llm_with_retry_inner(&ctx, &[], None, None, None)
             .await
             .expect("probe should recover");
         let seen = seen_models.lock().expect("seen model lock").clone();
@@ -455,8 +453,7 @@
             Vec::new()
         };
 
-        match agent
-            .call_llm_with_retry_inner(&ctx, &tool_schemas, None, None)
+        match agent.call_llm_with_retry_inner(&ctx, &tool_schemas, None, None, None)
             .await
         {
             Ok(_) => ChaosHarnessRun {
@@ -627,7 +624,7 @@
         ctx.add_message(Message::user("hit turn limit"));
 
         let _ = agent
-            .handle_max_iterations(&mut ctx)
+            .handle_max_iterations(&mut ctx, None)
             .await
             .expect("max iterations summary should succeed");
         let seen = seen_model.lock().expect("seen model lock").clone();
@@ -635,7 +632,7 @@
     }
 
     #[tokio::test]
-    async fn status_callback_receives_empty_response_retry_notice() {
+    async fn status_observer_receives_empty_response_retry_notice() {
         use futures::stream::BoxStream;
 
         #[derive(Default)]
@@ -687,33 +684,25 @@
             }
         }
 
-        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
-        let cap_ref = captured.clone();
-        let callbacks = AgentCallbacks {
-            status_callback: Some(Arc::new(move |kind, msg| {
-                cap_ref
-                    .lock()
-                    .expect("status callback lock")
-                    .push((kind.to_string(), msg.to_string()));
-            })),
-            ..Default::default()
-        };
+        let (callbacks, mut observer) = observer_callbacks();
 
         let cfg = AgentConfig {
             max_turns: 1,
             empty_content_max_retries: 1,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(
-            cfg,
-            Arc::new(ToolRegistry::new()),
-            Arc::new(RetryDummyProvider::default()),
-        )
-        .with_callbacks(callbacks);
+        let (agent, _run_state) = attach_test_run_runtime(
+            AgentLoop::new(
+                cfg,
+                Arc::new(ToolRegistry::new()),
+                Arc::new(RetryDummyProvider::default()),
+            )
+            .with_callbacks(callbacks),
+        );
 
         let result = agent.run(vec![Message::user("hello")], None).await;
         assert!(result.is_ok());
-        let rows = captured.lock().expect("captured lock");
+        let rows = drain_status_events(&mut observer);
         assert!(rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
         }));
@@ -762,17 +751,7 @@
             }
         }
 
-        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
-        let cap_ref = captured.clone();
-        let callbacks = AgentCallbacks {
-            status_callback: Some(Arc::new(move |kind, msg| {
-                cap_ref
-                    .lock()
-                    .expect("status callback lock")
-                    .push((kind.to_string(), msg.to_string()));
-            })),
-            ..Default::default()
-        };
+        let (callbacks, mut observer) = observer_callbacks();
 
         let provider = Arc::new(EmptyStopProvider::default());
         let cfg = AgentConfig {
@@ -780,13 +759,15 @@
             empty_content_max_retries: 3,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone())
-            .with_callbacks(callbacks);
+        let (agent, _run_state) = attach_test_run_runtime(
+            AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone())
+                .with_callbacks(callbacks),
+        );
 
         let result = agent.run(vec![Message::user("hello")], None).await;
         assert!(result.is_ok());
         assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
-        let rows = captured.lock().expect("captured lock");
+        let rows = drain_status_events(&mut observer);
         assert!(!rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
         }));
@@ -853,8 +834,10 @@
     #[derive(Clone, Copy)]
     enum StreamRetryScenario {
         RecoverOnSecondAttempt,
-        AlwaysFailMidToolCall,
-        TextOnlyDrop,
+        EmptyEof,
+        PartialTextEof,
+        PartialToolArgsEof,
+        TerminalFrame,
         MemoryContextLeak,
         MalformedToolArgs,
     }
@@ -903,17 +886,12 @@
             let events: Vec<Result<StreamChunk, AgentError>> = match self.scenario {
                 StreamRetryScenario::RecoverOnSecondAttempt => {
                     if attempt == 1 {
-                        vec![
-                            Ok(stream_chunk_content("Let me write the audit: ")),
-                            Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
-                            Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/x\",")),
-                            Err(AgentError::LlmApi(
-                                "Stream read error: peer closed connection".to_string(),
-                            )),
-                        ]
+                        vec![Err(AgentError::LlmApi(
+                            "Stream read error: connection closed before provider response"
+                                .to_string(),
+                        ))]
                     } else {
                         vec![
-                            Ok(stream_chunk_content("Let me write the audit: ")),
                             Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
                             Ok(stream_chunk_tool_args(
                                 0,
@@ -923,19 +901,30 @@
                         ]
                     }
                 }
-                StreamRetryScenario::AlwaysFailMidToolCall => vec![
-                    Ok(stream_chunk_content("Working...")),
-                    Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
-                    Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
-                    Err(AgentError::LlmApi(
-                        "Stream read error: connection reset by peer".to_string(),
-                    )),
-                ],
-                StreamRetryScenario::TextOnlyDrop => vec![
-                    Ok(stream_chunk_content("Partial text")),
-                    Err(AgentError::LlmApi(
-                        "Stream read error: connection lost".to_string(),
-                    )),
+                StreamRetryScenario::EmptyEof => vec![],
+                StreamRetryScenario::PartialTextEof => {
+                    vec![Ok(stream_chunk_content("Partial text"))]
+                }
+                StreamRetryScenario::PartialToolArgsEof => {
+                    if attempt == 1 {
+                        vec![
+                            Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
+                            Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
+                        ]
+                    } else {
+                        vec![
+                            Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
+                            Ok(stream_chunk_tool_args(
+                                0,
+                                "{\"path\":\"/tmp/y\",\"content\":\"recovered\"}",
+                            )),
+                            Ok(stream_chunk_finish("tool_calls")),
+                        ]
+                    }
+                }
+                StreamRetryScenario::TerminalFrame => vec![
+                    Ok(stream_chunk_content("complete")),
+                    Ok(stream_chunk_finish("stop")),
                 ],
                 StreamRetryScenario::MemoryContextLeak => vec![
                     Ok(stream_chunk_content("Hello\n")),
@@ -958,84 +947,88 @@
         }
     }
 
+    fn assert_premature_stream_close(err: AgentError, chunk_count: u64) {
+        match err {
+            AgentError::Io(message) => {
+                assert!(
+                    message.contains("connection closed before terminal finish reason"),
+                    "unexpected premature-close error: {message}"
+                );
+                assert!(
+                    message.contains(&format!("received {chunk_count} chunks")),
+                    "unexpected chunk count in premature-close error: {message}"
+                );
+            }
+            other => panic!("expected typed premature stream-close error, got {other:?}"),
+        }
+    }
+
+    fn stream_test_context() -> ContextManager {
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+        ctx
+    }
+
     #[test]
-    fn normalize_tool_call_arguments_repairs_malformed_json_without_retry_error() {
-        let mut tc = ToolCall {
-            id: "call_1".to_string(),
+    fn malformed_tool_call_arguments_are_rejected_without_repair() {
+        let malformed = ToolCall {
+            id: "call_bad".to_string(),
             function: hermes_core::FunctionCall {
                 name: "terminal".to_string(),
                 arguments: "{\"command\":\"ls -la\",\"timeout\":30".to_string(),
             },
             extra_content: None,
         };
+        let scalar = ToolCall {
+            id: "call_scalar".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: "\"not-an-object\"".to_string(),
+            },
+            extra_content: None,
+        };
+        let valid = ToolCall {
+            id: "call_good".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: "{\"command\":\"pwd\"}".to_string(),
+            },
+            extra_content: None,
+        };
 
-        AgentLoop::normalize_tool_call_arguments(&mut tc).expect("repairable arguments");
-        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
-        assert_eq!(parsed["command"], "ls -la");
-        assert_eq!(parsed["timeout"], 30);
+        let (valid_calls, invalid_calls) =
+            AgentLoop::partition_valid_tool_call_arguments(vec![malformed, scalar, valid]);
+
+        assert_eq!(valid_calls.len(), 1);
+        assert_eq!(valid_calls[0].id, "call_good");
+        assert_eq!(valid_calls[0].function.arguments, "{\"command\":\"pwd\"}");
+        assert_eq!(invalid_calls.len(), 2);
+        assert_eq!(invalid_calls[0].0.id, "call_bad");
+        assert_eq!(invalid_calls[1].0.id, "call_scalar");
+        for (_, error) in invalid_calls {
+            assert!(error.contains("valid JSON object"));
+            assert!(error.contains("not executed"));
+        }
     }
 
     #[tokio::test]
-    async fn stream_tool_call_arguments_are_repaired_before_truncation_retry_gate() {
-        let provider = Arc::new(StreamRetryProvider::new(
-            StreamRetryScenario::MalformedToolArgs,
-        ));
-        let cfg = AgentConfig {
-            stream_read_max_retries: 0,
-            ..AgentConfig::default()
-        };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider);
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-
-        let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &|_| {})
-            .await
-            .expect("stream should collect");
-
-        let StreamCollectOutcome::Complete(resp) = out else {
-            panic!("expected complete response");
-        };
-        assert_eq!(resp.finish_reason.as_deref(), Some("tool_calls"));
-        let tc = resp
-            .message
-            .tool_calls
-            .as_ref()
-            .and_then(|calls| calls.first())
-            .expect("tool call");
-        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
-        assert_eq!(parsed["command"], "ls -la");
-        assert_eq!(parsed["timeout"], 30);
-    }
-
-    #[tokio::test]
-    async fn stream_mid_tool_call_silent_retry_recovers_tool_call() {
+    async fn stream_retry_before_visible_output_recovers() {
         let provider = Arc::new(StreamRetryProvider::new(
             StreamRetryScenario::RecoverOnSecondAttempt,
         ));
         let cfg = AgentConfig {
-            stream_read_max_retries: 2,
+            stream_read_max_retries: 1,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let seen_ref = seen.clone();
+        let ctx = stream_test_context();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
-                    }
-                }
-            })
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
             .await;
 
-        let StreamCollectOutcome::Complete(resp) = out.expect("stream should recover") else {
+        let StreamCollectOutcome::Complete(resp) = out.expect("safe retry should recover") else {
             panic!("expected complete response");
         };
         let tc = resp
@@ -1046,84 +1039,232 @@
             .expect("missing tool call");
         assert_eq!(tc.function.name, "write_file");
         assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
-        assert!(seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
     }
 
     #[tokio::test]
-    async fn stream_mid_tool_call_exhausted_retries_returns_error() {
+    async fn stream_empty_eof_is_typed_premature_close() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let cfg = AgentConfig {
+            stream_read_max_retries: 0,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("empty EOF must not synthesize a response"),
+        };
+
+        assert_premature_stream_close(err, 0);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_partial_text_eof_is_typed_premature_close() {
         let provider = Arc::new(StreamRetryProvider::new(
-            StreamRetryScenario::AlwaysFailMidToolCall,
+            StreamRetryScenario::PartialTextEof,
+        ));
+        let cfg = AgentConfig {
+            stream_read_max_retries: 2,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
+        let ctx = stream_test_context();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_ref = seen.clone();
+
+        let err = match agent
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                None,
+                &move |chunk| {
+                    if let Some(delta) = chunk.delta {
+                        if let Some(text) = delta.content {
+                            seen_ref.lock().expect("seen lock").push(text);
+                        }
+                    }
+                },
+            )
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("partial text EOF must not synthesize a response"),
+        };
+
+        assert_premature_stream_close(err, 1);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+        assert_eq!(seen.lock().expect("seen lock").join(""), "Partial text");
+    }
+
+    #[tokio::test]
+    async fn stream_partial_tool_args_eof_retries_and_recovers() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::PartialToolArgsEof,
         ));
         let cfg = AgentConfig {
             stream_read_max_retries: 1,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let seen_ref = seen.clone();
+        let ctx = stream_test_context();
+        let emitted_content = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let emitted_content_ref = emitted_content.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                None,
+                &move |chunk| {
+                    if let Some(content) = chunk.delta.and_then(|delta| delta.content) {
+                        emitted_content_ref
+                            .lock()
+                            .expect("emitted content lock")
+                            .push(content);
                     }
-                }
-            })
-            .await;
+                },
+            )
+            .await
+            .expect("partial tool-call stream should recover");
 
-        let err = match out {
-            Err(err) => err,
-            Ok(_) => panic!("should fail after retries"),
+        let StreamCollectOutcome::Complete(response) = out else {
+            panic!("expected complete response");
         };
-        assert!(err.to_string().contains("Stream read error"));
+        let tool_call = response
+            .message
+            .tool_calls
+            .as_ref()
+            .and_then(|calls| calls.first())
+            .expect("recovered tool call");
+        let arguments: Value =
+            serde_json::from_str(&tool_call.function.arguments).expect("valid tool arguments");
+        assert_eq!(tool_call.id, "call_2");
+        assert_eq!(tool_call.function.name, "write_file");
+        assert_eq!(arguments["path"], "/tmp/y");
+        assert_eq!(arguments["content"], "recovered");
         assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
-        assert!(seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
+        assert!(
+            emitted_content
+                .lock()
+                .expect("emitted content lock")
+                .join("")
+                .contains("[connection dropped mid tool-call; reconnecting...]"),
+            "retry notice was not emitted"
+        );
     }
 
     #[tokio::test]
-    async fn stream_text_only_drop_does_not_retry() {
-        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::TextOnlyDrop));
+    async fn stream_terminal_frame_completes_successfully() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::TerminalFrame,
+        ));
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+        let ctx = stream_test_context();
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+            .expect("terminal frame should complete the stream");
+
+        let StreamCollectOutcome::Complete(resp) = out else {
+            panic!("expected complete response");
+        };
+        assert_eq!(resp.message.content.as_deref(), Some("complete"));
+        assert_eq!(resp.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_empty_eof_retries_until_budget_exhausted() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
         let cfg = AgentConfig {
-            stream_read_max_retries: 2,
+            stream_read_max_retries: 1,
             ..AgentConfig::default()
         };
         let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
-        let mut ctx = ContextManager::default_budget();
-        ctx.add_message(Message::system("system"));
-        ctx.add_message(Message::user("run"));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let seen_ref = seen.clone();
+        let ctx = stream_test_context();
 
-        let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
-                    }
-                }
-            })
-            .await;
-
-        let err = match out {
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
             Err(err) => err,
-            Ok(_) => panic!("text-only stream drops should not retry silently"),
+            Ok(_) => panic!("retry exhaustion must not synthesize a response"),
         };
-        assert!(err.to_string().contains("Stream read error"));
+
+        assert_premature_stream_close(err, 0);
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
+    }
+
+    #[tokio::test]
+    async fn stream_cancellation_wins_over_simultaneous_eof() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let interrupt = InterruptController::new();
+        interrupt.interrupt(Some("cancel stream".to_string()));
+        let agent = AgentLoop::with_interrupt(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+            interrupt,
+        );
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("cancellation must win over EOF"),
+        };
+
+        assert!(matches!(
+            err,
+            AgentError::Interrupted { message } if message.as_deref() == Some("cancel stream")
+        ));
         assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
-        assert!(!seen.lock().expect("seen lock").iter().any(|text| {
-            text.to_lowercase()
-                .contains("connection dropped mid tool-call; reconnecting")
-        }));
+    }
+
+    #[tokio::test]
+    async fn stream_timeout_wins_over_simultaneous_eof() {
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::EmptyEof));
+        let interrupt = InterruptController::new();
+        interrupt.interrupt_timeout(Some("stream deadline".to_string()));
+        let agent = AgentLoop::with_interrupt(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+            interrupt,
+        );
+        let ctx = stream_test_context();
+
+        let err = match agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &|_| {})
+            .await
+        {
+            Err(err) => err,
+            Ok(_) => panic!("timeout must win over EOF"),
+        };
+
+        assert!(matches!(
+            err,
+            AgentError::Timeout(message) if message == "stream deadline"
+        ));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
     }
 
     #[tokio::test]
@@ -1143,7 +1284,7 @@
         let seen_ref = seen.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, None, &move |chunk| {
                 if let Some(delta) = chunk.delta {
                     if let Some(text) = delta.content {
                         seen_ref.lock().expect("seen lock").push(text);
@@ -1161,4 +1302,339 @@
         assert_eq!(joined, "Hello\n world");
         assert!(!joined.contains("secret"));
         assert!(!joined.contains("memory-context"));
+    }
+
+    #[tokio::test]
+    async fn output_cap_error_retries_with_provider_bounded_max_tokens() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct OutputCapProvider {
+            calls: AtomicUsize,
+            seen_max_tokens: Arc<std::sync::Mutex<Vec<Option<u32>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for OutputCapProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.seen_max_tokens
+                    .lock()
+                    .expect("max-token recording lock")
+                    .push(max_tokens);
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(AgentError::LlmApi(
+                        "HTTP 400: max_tokens: 1000 > maximum context length: 200000 - input_tokens: 0 = available_tokens: 128"
+                            .to_string(),
+                    ));
+                }
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("recovered"),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let seen_max_tokens = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = AgentConfig::default();
+        config.model = "dummy-model".to_string();
+        config.max_tokens = Some(1000);
+        config.retry.max_retries = 0;
+        let provider = Arc::new(OutputCapProvider {
+            calls: AtomicUsize::new(0),
+            seen_max_tokens: seen_max_tokens.clone(),
+        });
+        let agent = AgentLoop::new(config, Arc::new(ToolRegistry::new()), provider);
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::user("hello"));
+
+        let response = agent
+            .call_llm_with_retry_inner(&ctx, &[], None, None, None)
+            .await
+            .expect("output-cap retry should recover");
+
+        assert_eq!(response.message.content.as_deref(), Some("recovered"));
+        assert_eq!(
+            seen_max_tokens.lock().expect("max-token recording lock").as_slice(),
+            &[Some(1000), Some(64)],
+            "the retry must use the provider budget minus the safety margin"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_tool_call_response_reprompts_and_does_not_persist_scaffolding() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct DroppedToolCallProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for DroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (content, finish_reason) = if call == 0 {
+                    ("Let me inspect the requested files.", "tool_calls")
+                } else {
+                    ("The requested inspection is complete.", "stop")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant(content),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some(finish_reason.to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let provider = Arc::new(DroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let config = AgentConfig {
+            max_turns: 8,
+            ..AgentConfig::default()
+        };
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+
+        let result = agent
+            .run(vec![Message::user("inspect the files")], None)
+            .await
+            .expect("a dropped tool-call response should be re-prompted");
+
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            2,
+            "the mismatch must produce one recovery call"
+        );
+        assert_eq!(
+            result.messages.last().and_then(|message| message.content.as_deref()),
+            Some("The requested inspection is complete.")
+        );
+        assert!(
+            !result.messages.iter().any(|message| {
+                message.content.as_deref() == Some("Let me inspect the requested files.")
+                    || message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)
+            }),
+            "the narration/nudge recovery pair is transient scaffolding"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_dropped_tool_calls_are_bounded() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct AlwaysDroppedToolCallProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for AlwaysDroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("I will call a tool."),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some("tool_calls".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let provider = Arc::new(AlwaysDroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let config = AgentConfig {
+            max_turns: 8,
+            ..AgentConfig::default()
+        };
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+
+        let result = agent
+            .run(vec![Message::user("do the work")], None)
+            .await
+            .expect("the bounded recovery path should terminate");
+
+        assert!(result.finished_naturally);
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            (DROPPED_TOOL_CALL_MAX_RETRIES + 1) as usize,
+            "the loop must stop re-prompting after its consecutive-stall budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_dropped_tool_call_reprompts_and_removes_scaffolding() {
+        use futures::stream::BoxStream;
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct StreamedDroppedToolCallProvider {
+            calls: AtomicUsize,
+            requests: std::sync::Mutex<Vec<Vec<Message>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for StreamedDroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Err(AgentError::LlmApi(
+                    "streaming provider should not use non-stream completion".to_string(),
+                ))
+            }
+
+            fn chat_completion_stream(
+                &self,
+                messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                self.requests
+                    .lock()
+                    .expect("stream request recording lock")
+                    .push(messages.to_vec());
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (content, finish_reason) = if call == 0 {
+                    ("Let me inspect the requested files.", "tool_calls")
+                } else {
+                    ("The streamed inspection is complete.", "stop")
+                };
+                futures::stream::iter(vec![
+                    Ok(StreamChunk {
+                        delta: Some(hermes_core::StreamDelta {
+                            content: Some(content.to_string()),
+                            tool_calls: None,
+                            extra: None,
+                        }),
+                        finish_reason: None,
+                        usage: None,
+                    }),
+                    Ok(StreamChunk {
+                        delta: None,
+                        finish_reason: Some(finish_reason.to_string()),
+                        usage: None,
+                    }),
+                ])
+                .boxed()
+            }
+        }
+
+        let provider = Arc::new(StreamedDroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            AgentConfig {
+                max_turns: 8,
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+        let (sink, _receiver) = AgentObserverSink::channel(8);
+
+        let result = agent
+            .run_stream(vec![Message::user("inspect the files")], None, sink)
+            .await
+            .expect("a streamed dropped tool call should be re-prompted");
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        let requests = provider
+            .requests
+            .lock()
+            .expect("stream request recording lock");
+        assert!(
+            requests[1]
+                .iter()
+                .any(|message| message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)),
+            "the retry request must retain its one-turn recovery instruction"
+        );
+        assert_eq!(
+            result.messages.last().and_then(|message| message.content.as_deref()),
+            Some("The streamed inspection is complete.")
+        );
+        assert!(!result.messages.iter().any(|message| {
+            message.content.as_deref() == Some("Let me inspect the requested files.")
+                || message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)
+        }));
     }

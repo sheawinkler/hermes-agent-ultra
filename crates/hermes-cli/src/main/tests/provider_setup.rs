@@ -934,7 +934,7 @@
         let previous = std::env::var("NOUS_API_KEY").ok();
         std::env::set_var("NOUS_API_KEY", "env-stale-key");
 
-        hydrate_provider_env_from_vault_for_cli_with_options(&cli, false)
+        hydrate_provider_env_from_vault_for_cli(&cli)
             .await
             .expect("hydrate env");
         assert_eq!(
@@ -949,7 +949,7 @@
     }
 
     #[tokio::test]
-    async fn hydrate_provider_env_prefers_current_nous_oauth_over_stale_vault() {
+    async fn hydrate_provider_env_uses_encrypted_vault_without_reading_external_oauth_state() {
         let _guard = env_lock();
         use clap::Parser;
 
@@ -963,12 +963,11 @@
         ]);
 
         let vault_path = secret_vault_path_for_cli(&cli);
-        let store = FileTokenStore::new(vault_path).await.expect("vault store");
-        let manager = AuthManager::new(store);
-        manager
+        let store = FileTokenStore::new(&vault_path).await.expect("vault store");
+        AuthManager::new(store)
             .save_credential(OAuthCredential {
                 provider: "nous".to_string(),
-                access_token: "vault-stale-key".to_string(),
+                access_token: "vault-encrypted-key".to_string(),
                 refresh_token: None,
                 token_type: "bearer".to_string(),
                 scope: None,
@@ -976,40 +975,26 @@
             })
             .await
             .expect("save vault credential");
-
-        let oauth_token = test_nous_invoke_jwt(900);
+        let vault_before = std::fs::read(&vault_path).expect("read encrypted vault");
 
         let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
         let previous_nous_key = std::env::var("NOUS_API_KEY").ok();
         let auth_path = tmp.path().join("auth.json");
+        std::fs::write(&auth_path, "external-oauth-state-sentinel")
+            .expect("write external OAuth state fixture");
         std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
         std::env::set_var("NOUS_API_KEY", "env-stale-key");
-        save_nous_auth_state(&NousAuthState {
-            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
-            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
-            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
-            scope: Some("inference:invoke".to_string()),
-            token_type: "Bearer".to_string(),
-            access_token: oauth_token.clone(),
-            refresh_token: None,
-            obtained_at: chrono::Utc::now().to_rfc3339(),
-            expires_at: None,
-            expires_in: None,
-            agent_key: None,
-            agent_key_id: None,
-            agent_key_expires_at: None,
-            agent_key_expires_in: None,
-            agent_key_reused: None,
-            agent_key_obtained_at: None,
-        })
-        .expect("save nous oauth state");
 
         hydrate_provider_env_from_vault_for_cli(&cli)
             .await
-            .expect("hydrate env");
+            .expect("read-only hydrate env");
         assert_eq!(
             std::env::var("NOUS_API_KEY").as_deref(),
-            Ok(oauth_token.as_str())
+            Ok("vault-encrypted-key")
+        );
+        assert_eq!(
+            std::fs::read(&vault_path).expect("read encrypted vault after hydrate"),
+            vault_before
         );
 
         match previous_auth_file {
@@ -1023,7 +1008,7 @@
     }
 
     #[tokio::test]
-    async fn hydrate_provider_env_rejects_stale_nous_vault_when_oauth_state_is_unusable() {
+    async fn hydrate_provider_env_requires_explicit_legacy_migration() {
         let _guard = env_lock();
         use clap::Parser;
 
@@ -1035,65 +1020,79 @@
             "--config-dir",
             config_dir.to_str().expect("cfg path utf8"),
         ]);
-
         let vault_path = secret_vault_path_for_cli(&cli);
-        let store = FileTokenStore::new(vault_path).await.expect("vault store");
-        let manager = AuthManager::new(store);
-        manager
-            .save_credential(OAuthCredential {
+        let credential_sentinel = "legacy-credential-sentinel-must-not-leak";
+        let legacy = serde_json::json!({
+            "nous": {
+                "provider": "nous",
+                "access_token": credential_sentinel,
+                "refresh_token": null,
+                "token_type": "Bearer",
+                "scope": null,
+                "expires_at": null
+            }
+        });
+        std::fs::create_dir_all(vault_path.parent().expect("vault parent"))
+            .expect("create vault parent");
+        let legacy_bytes = serde_json::to_vec(&legacy).expect("encode legacy vault");
+        std::fs::write(&vault_path, &legacy_bytes).expect("write legacy vault");
+
+        let previous_nous_key = std::env::var("NOUS_API_KEY").ok();
+        std::env::set_var("NOUS_API_KEY", "unchanged-env-key");
+        let error = hydrate_provider_env_from_vault_for_cli(&cli)
+            .await
+            .expect_err("startup hydration must not migrate plaintext credentials");
+        assert!(matches!(error, AgentError::AuthFailed(_)));
+        assert!(error.to_string().contains("migration is required"));
+        assert!(!error.to_string().contains(credential_sentinel));
+        assert_eq!(
+            std::fs::read(&vault_path).expect("read untouched legacy vault"),
+            legacy_bytes
+        );
+        assert!(!vault_path.with_extension("key").exists());
+        assert_eq!(
+            std::env::var("NOUS_API_KEY").as_deref(),
+            Ok("unchanged-env-key")
+        );
+
+        match previous_nous_key {
+            Some(value) => std::env::set_var("NOUS_API_KEY", value),
+            None => std::env::remove_var("NOUS_API_KEY"),
+        }
+    }
+
+    #[tokio::test]
+    async fn scrub_unusable_nous_api_key_uses_canonical_vault_and_never_rewrites_it() {
+        let _guard = env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let vault_path = secret_vault_path_for_cli(&cli);
+        let store = FileTokenStore::new(&vault_path).await.expect("vault store");
+        store
+            .upsert(OAuthCredential {
                 provider: "nous".to_string(),
-                access_token: "vault-stale-key".to_string(),
+                access_token: "canonical-unusable-nous-token".to_string(),
                 refresh_token: None,
-                token_type: "bearer".to_string(),
-                scope: None,
+                token_type: "Bearer".to_string(),
+                scope: Some("profile".to_string()),
                 expires_at: None,
             })
             .await
-            .expect("save vault credential");
+            .expect("save canonical vault credential");
+        let vault_before = std::fs::read(&vault_path).expect("read encrypted vault");
+        assert!(!String::from_utf8_lossy(&vault_before).contains("canonical-unusable-nous-token"));
 
-        let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
-        let previous_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
         let previous_nous_key = std::env::var("NOUS_API_KEY").ok();
-        let auth_path = tmp.path().join("auth.json");
-        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
-        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
-        std::env::set_var("NOUS_API_KEY", "env-stale-key");
-        save_nous_auth_state(&NousAuthState {
-            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
-            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
-            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
-            scope: Some("profile".to_string()),
-            token_type: "Bearer".to_string(),
-            access_token: "header.eyJzY29wZSI6InByb2ZpbGUiLCJleHAiOjQ3Mzk4NTYwMDB9.sig".to_string(),
-            refresh_token: None,
-            obtained_at: chrono::Utc::now().to_rfc3339(),
-            expires_at: None,
-            expires_in: None,
-            agent_key: None,
-            agent_key_id: None,
-            agent_key_expires_at: None,
-            agent_key_expires_in: None,
-            agent_key_reused: None,
-            agent_key_obtained_at: None,
-        })
-        .expect("save unusable nous oauth state");
+        std::env::set_var("NOUS_API_KEY", "config-stale-key");
+        scrub_unusable_nous_api_key_for_vault_credential(&cli).expect("scrub nous api key");
 
-        hydrate_provider_env_from_vault_for_cli(&cli)
-            .await
-            .expect("hydrate env");
-        assert!(
-            std::env::var("NOUS_API_KEY").is_err(),
-            "stale vault/env Nous key must not hide an unusable OAuth state"
+        assert!(std::env::var("NOUS_API_KEY").is_err());
+        assert_eq!(
+            std::fs::read(&vault_path).expect("read encrypted vault"),
+            vault_before,
+            "scrub must not rewrite canonical credentials"
         );
 
-        match previous_auth_file {
-            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
-            None => std::env::remove_var("HERMES_AUTH_FILE"),
-        }
-        match previous_nous_file {
-            Some(value) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", value),
-            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
-        }
         match previous_nous_key {
             Some(value) => std::env::set_var("NOUS_API_KEY", value),
             None => std::env::remove_var("NOUS_API_KEY"),
@@ -1101,47 +1100,24 @@
     }
 
     #[test]
-    fn scrub_unusable_nous_api_key_removes_config_rehydrated_key() {
+    fn scrub_unusable_nous_api_key_fails_closed_when_canonical_vault_is_malformed() {
         let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
-        let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
-        let previous_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        let cli = cli_for_temp_state_root(tmp.path());
+        let vault_path = secret_vault_path_for_cli(&cli);
+        std::fs::create_dir_all(vault_path.parent().expect("vault parent"))
+            .expect("create vault parent");
+        std::fs::write(&vault_path, "not-valid-token-store-json").expect("write malformed vault");
+
         let previous_nous_key = std::env::var("NOUS_API_KEY").ok();
-        let auth_path = tmp.path().join("auth.json");
-        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
-        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
         std::env::set_var("NOUS_API_KEY", "config-stale-key");
-        save_nous_auth_state(&NousAuthState {
-            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
-            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
-            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
-            scope: Some("profile".to_string()),
-            token_type: "Bearer".to_string(),
-            access_token: "header.eyJzY29wZSI6InByb2ZpbGUiLCJleHAiOjQ3Mzk4NTYwMDB9.sig".to_string(),
-            refresh_token: None,
-            obtained_at: chrono::Utc::now().to_rfc3339(),
-            expires_at: None,
-            expires_in: None,
-            agent_key: None,
-            agent_key_id: None,
-            agent_key_expires_at: None,
-            agent_key_expires_in: None,
-            agent_key_reused: None,
-            agent_key_obtained_at: None,
-        })
-        .expect("save unusable nous oauth state");
+        let error = scrub_unusable_nous_api_key_for_vault_credential(&cli)
+            .expect_err("malformed canonical vault must fail closed");
 
-        scrub_unusable_nous_api_key_for_oauth_state().expect("scrub nous api key");
+        assert!(matches!(error, AgentError::AuthFailed(_)));
         assert!(std::env::var("NOUS_API_KEY").is_err());
+        assert!(!error.to_string().contains("config-stale-key"));
 
-        match previous_auth_file {
-            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
-            None => std::env::remove_var("HERMES_AUTH_FILE"),
-        }
-        match previous_nous_file {
-            Some(value) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", value),
-            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
-        }
         match previous_nous_key {
             Some(value) => std::env::set_var("NOUS_API_KEY", value),
             None => std::env::remove_var("NOUS_API_KEY"),
@@ -1150,9 +1126,12 @@
 
     #[tokio::test]
     async fn verify_nous_runtime_credentials_live_rejects_unauthorized_probe() {
-        let base_url =
-            spawn_nous_live_probe_server("401 Unauthorized", r#"{"message":"invalid or blocked"}"#)
-                .await;
+        let response_secret = "response-credential-sentinel-must-not-leak";
+        let base_url = spawn_nous_live_probe_server(
+            "401 Unauthorized",
+            &format!(r#"{{"message":"{response_secret}"}}"#),
+        )
+        .await;
         let err = verify_nous_runtime_credentials_live(&NousRuntimeCredentials {
             provider: "nous".to_string(),
             base_url,
@@ -1167,10 +1146,8 @@
         })
         .await
         .expect_err("401 probe should reject credentials");
-        assert!(
-            err.contains("HTTP 401 Unauthorized") && err.contains("invalid or blocked"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("HTTP 401 Unauthorized"), "unexpected error: {err}");
+        assert!(!err.contains(response_secret));
     }
 
     #[tokio::test]
@@ -1229,8 +1206,7 @@
         let store = FileTokenStore::new(tmp.path().join("tokens.json"))
             .await
             .expect("token store");
-        let manager = AuthManager::new(store.clone());
-        let result = verify_single_oauth_provider("nous", &store, &manager)
+        let result = verify_single_oauth_provider("nous", &store)
             .await
             .expect("verify nous");
         assert_eq!(result.outcome, AuthVerifyOutcome::Missing);
@@ -1295,10 +1271,11 @@
         std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
         std::env::set_var("NOUS_INFERENCE_BASE_URL", probe_base_url);
 
-        let result = verify_single_oauth_provider("nous", &store, &manager)
+        let vault_before = std::fs::read(&vault_path).expect("read encrypted vault");
+        let result = verify_single_oauth_provider("nous", &store)
             .await
             .expect("verify nous");
-        assert_eq!(result.outcome, AuthVerifyOutcome::RefreshFailed);
+        assert_eq!(result.outcome, AuthVerifyOutcome::ProbeFailed);
         assert!(
             result
                 .detail
@@ -1312,7 +1289,12 @@
             read_provider_auth_state("nous")
                 .expect("read provider state")
                 .is_none(),
-            "failed live vault repair must not persist Nous auth state"
+            "verification must not persist Nous auth state"
+        );
+        assert_eq!(
+            std::fs::read(&vault_path).expect("read encrypted vault"),
+            vault_before,
+            "verification must not rewrite the encrypted vault"
         );
 
         match previous_auth_file {
@@ -1338,7 +1320,7 @@
     }
 
     #[tokio::test]
-    async fn auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt() {
+    async fn auth_verify_nous_does_not_repair_singleton_from_vault_invoke_jwt() {
         let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("auth.json");
@@ -1386,21 +1368,24 @@
             agent_key_obtained_at: None,
         })
         .expect("save stale nous state");
+        let auth_before = std::fs::read(&auth_path).expect("read auth state");
+        let vault_before = std::fs::read(&vault_path).expect("read encrypted vault");
 
-        let result = verify_single_oauth_provider("nous", &store, &manager)
+        let result = verify_single_oauth_provider("nous", &store)
             .await
             .expect("verify nous");
-        assert_eq!(result.outcome, AuthVerifyOutcome::ValidRefreshed);
-        assert_eq!(result.source, "vault_invoke_jwt");
+        assert_eq!(result.outcome, AuthVerifyOutcome::Valid);
+        assert_eq!(result.source, "token_store");
 
-        let repaired = read_provider_auth_state("nous")
-            .expect("read repaired state")
-            .expect("repaired state");
         assert_eq!(
-            repaired
-                .get("agent_key")
-                .and_then(serde_json::Value::as_str),
-            Some(oauth_token.as_str())
+            std::fs::read(&auth_path).expect("read auth state"),
+            auth_before,
+            "verification must not repair or rewrite provider auth state"
+        );
+        assert_eq!(
+            std::fs::read(&vault_path).expect("read encrypted vault"),
+            vault_before,
+            "verification must not rewrite the encrypted vault"
         );
 
         match previous_auth_file {

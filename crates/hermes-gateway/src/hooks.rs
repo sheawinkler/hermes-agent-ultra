@@ -44,11 +44,13 @@
 //! `boot_md` hook (read `~/.hermes/BOOT.md` on `gateway:startup`).
 
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::FutureExt;
 use hermes_core::subprocess::CommandNoWindowExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -168,6 +170,11 @@ impl HookRegistry {
         self.handlers.values().map(Vec::len).sum()
     }
 
+    fn handler_name(handler: &dyn HookHandler) -> String {
+        std::panic::catch_unwind(AssertUnwindSafe(|| handler.name().to_string()))
+            .unwrap_or_else(|_| "<panicking hook name>".to_string())
+    }
+
     /// Register an in-process handler for a single event type. Use
     /// `"foo:*"` to wildcard-match any `"foo:..."` event.
     pub fn register_in_process(
@@ -176,7 +183,8 @@ impl HookRegistry {
         handler: Arc<dyn HookHandler>,
     ) {
         let evt = event_type.into();
-        tracing::info!(event = %evt, hook = %handler.name(), "Registered in-process gateway hook");
+        let name = Self::handler_name(handler.as_ref());
+        tracing::info!(event = %evt, hook = %name, "Registered in-process gateway hook");
         self.handlers.entry(evt).or_default().push(handler);
     }
 
@@ -306,11 +314,15 @@ impl HookRegistry {
     /// swallowed.
     pub async fn emit(&self, event: &HookEvent) {
         for handler in self.matching_handlers(&event.event_type) {
-            let name = handler.name().to_string();
-            let evt_for_call = event.clone();
-            match tokio::spawn(async move { handler.handle(&evt_for_call).await }).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
+            let name = Self::handler_name(handler.as_ref());
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(DEFAULT_HOOK_TIMEOUT_SECS),
+                AssertUnwindSafe(async { handler.handle(event).await }).catch_unwind(),
+            )
+            .await;
+            match outcome {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(e))) => {
                     tracing::warn!(
                         hook = %name,
                         event = %event.event_type,
@@ -318,12 +330,19 @@ impl HookRegistry {
                         "Hook handler returned error"
                     );
                 }
-                Err(join_error) => {
+                Ok(Err(_)) => {
                     tracing::warn!(
                         hook = %name,
                         event = %event.event_type,
-                        error = %join_error,
                         "Hook handler panicked"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        hook = %name,
+                        event = %event.event_type,
+                        timeout_secs = DEFAULT_HOOK_TIMEOUT_SECS,
+                        "Hook handler timed out"
                     );
                 }
             }
@@ -338,12 +357,16 @@ impl HookRegistry {
     pub async fn emit_collect(&self, event: &HookEvent) -> Vec<Value> {
         let mut collected = Vec::new();
         for handler in self.matching_handlers(&event.event_type) {
-            let name = handler.name().to_string();
-            let evt_for_call = event.clone();
-            match tokio::spawn(async move { handler.handle_collect(&evt_for_call).await }).await {
-                Ok(Ok(Some(value))) => collected.push(value),
-                Ok(Ok(None)) => {}
-                Ok(Err(e)) => {
+            let name = Self::handler_name(handler.as_ref());
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(DEFAULT_HOOK_TIMEOUT_SECS),
+                AssertUnwindSafe(async { handler.handle_collect(event).await }).catch_unwind(),
+            )
+            .await;
+            match outcome {
+                Ok(Ok(Ok(Some(value)))) => collected.push(value),
+                Ok(Ok(Ok(None))) => {}
+                Ok(Ok(Err(e))) => {
                     tracing::warn!(
                         hook = %name,
                         event = %event.event_type,
@@ -351,12 +374,19 @@ impl HookRegistry {
                         "Hook handler returned error while collecting"
                     );
                 }
-                Err(join_error) => {
+                Ok(Err(_)) => {
                     tracing::warn!(
                         hook = %name,
                         event = %event.event_type,
-                        error = %join_error,
                         "Hook handler panicked while collecting"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        hook = %name,
+                        event = %event.event_type,
+                        timeout_secs = DEFAULT_HOOK_TIMEOUT_SECS,
+                        "Hook handler timed out while collecting"
                     );
                 }
             }
@@ -448,7 +478,8 @@ impl HookHandler for CommandHookHandler {
             .env("HERMES_HOOK_EVENT", &event.event_type)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
         cmd.suppress_windows_console();
 
         let mut child = cmd

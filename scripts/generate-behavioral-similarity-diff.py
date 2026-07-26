@@ -14,6 +14,8 @@ from typing import Any
 
 RUST_TEST_ATTR_RE = re.compile(r"#\[\s*(?:tokio::)?test(?:\([^]]*\))?\s*\]")
 RUST_FN_RE = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+RUST_INCLUDE_RE = re.compile(r'^\s*include!\("([^"]+)"\);\s*$')
+RUST_MOD_RE = re.compile(r"^\s*(?:pub\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$")
 PASSING_CLASSIFICATIONS = {"equivalent", "superior", "intentional_divergence"}
 FAILING_CLASSIFICATIONS = {"regression", "gap"}
 ALLOWED_CLASSIFICATIONS = PASSING_CLASSIFICATIONS | FAILING_CLASSIFICATIONS | {"unverified"}
@@ -69,30 +71,104 @@ def has_attached_test_attr(text: str, fn_start: int) -> bool:
     for line in reversed(prefix_lines):
         stripped = line.strip()
         if not stripped:
-            break
+            continue
         if not stripped.startswith("#["):
-            break
+            return False
         if RUST_TEST_ATTR_RE.fullmatch(stripped):
             return True
     return False
 
 
+def sidecar_test_candidates(path: Path) -> list[Path]:
+    if path.name == "mod.rs":
+        return [path.parent / "tests.rs", path.parent / "tests" / "mod.rs"]
+    return [
+        path.parent / path.stem / "tests.rs",
+        path.parent / path.stem / "tests" / "mod.rs",
+    ]
+
+
+def sidecar_module_candidates(path: Path, module_name: str) -> list[Path]:
+    if path.name == "mod.rs":
+        return [
+            path.parent / f"{module_name}.rs",
+            path.parent / module_name / "mod.rs",
+        ]
+    return [
+        path.parent / f"{module_name}.rs",
+        path.parent / module_name / "mod.rs",
+        path.parent / path.stem / f"{module_name}.rs",
+        path.parent / path.stem / module_name / "mod.rs",
+        path.parent / "tests" / f"{module_name}.rs",
+        path.parent / "tests" / module_name / "mod.rs",
+    ]
+
+
+def source_children(path: Path, text: str) -> list[Path]:
+    children: list[Path] = []
+    for line in text.splitlines():
+        if include := RUST_INCLUDE_RE.fullmatch(line):
+            candidate = (path.parent / include.group(1)).resolve()
+            if candidate.is_file():
+                children.append(candidate)
+            continue
+        if line.strip() == "mod tests;":
+            candidate = next(
+                (item for item in sidecar_test_candidates(path) if item.is_file()),
+                None,
+            )
+            if candidate is not None:
+                children.append(candidate.resolve())
+            continue
+        if module := RUST_MOD_RE.fullmatch(line):
+            candidate = next(
+                (
+                    item
+                    for item in sidecar_module_candidates(path, module.group(1))
+                    if item.is_file()
+                ),
+                None,
+            )
+            if candidate is not None:
+                children.append(candidate.resolve())
+    return children
+
+
 def scan_rust_tests(repo_root: Path) -> dict[str, set[str]]:
-    tests_by_file: dict[str, set[str]] = {}
     candidates = sorted((repo_root / "crates").glob("**/*.rs")) + sorted(
         (repo_root / "tests").glob("**/*.rs")
     )
-    for path in candidates:
-        if not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        names: set[str] = set()
-        for match in RUST_FN_RE.finditer(text):
-            if has_attached_test_attr(text, match.start()):
-                names.add(match.group(1))
-        if names:
-            tests_by_file[rel(path, repo_root)] = names
-    return tests_by_file
+    source_by_path = {
+        path.resolve(): path.read_text(encoding="utf-8", errors="replace")
+        for path in candidates
+        if path.is_file()
+    }
+    nested_tests_by_path: dict[Path, set[str]] = {}
+
+    def collect_tests(path: Path, visiting: set[Path]) -> set[str]:
+        path = path.resolve()
+        if path in visiting:
+            return set()
+        if path in nested_tests_by_path:
+            return nested_tests_by_path[path]
+        text = source_by_path.get(path)
+        if text is None:
+            return set()
+        names = {
+            match.group(1)
+            for match in RUST_FN_RE.finditer(text)
+            if has_attached_test_attr(text, match.start())
+        }
+        for child in source_children(path, text):
+            names.update(collect_tests(child, visiting | {path}))
+        nested_tests_by_path[path] = names
+        return names
+
+    return {
+        rel(path, repo_root): names
+        for path in source_by_path
+        if (names := collect_tests(path, set()))
+    }
 
 
 def rust_test_exists(tests_by_file: dict[str, set[str]], file: str, name: str) -> bool:
@@ -163,6 +239,28 @@ def validate_case(
     for field in text_fields:
         if not str(case.get(field, "")).strip():
             issues.append(case_issue(case_id, "schema", f"{field} is required"))
+    evidence_scope = case.get("evidence_scope")
+    if evidence_scope is not None:
+        if not isinstance(evidence_scope, dict):
+            issues.append(case_issue(case_id, "schema", "evidence_scope must be an object"))
+        else:
+            if evidence_scope.get("coverage_kind") == "fixture_reference_regression":
+                if evidence_scope.get("capability_promotion_authoritative") is not False:
+                    issues.append(
+                        case_issue(
+                            case_id,
+                            "schema",
+                            "fixture-reference evidence must not authorize capability promotion",
+                        )
+                    )
+                if evidence_scope.get("production_complete") is not False:
+                    issues.append(
+                        case_issue(
+                            case_id,
+                            "schema",
+                            "fixture-reference evidence must not claim production completeness",
+                        )
+                    )
 
     score = 1.0 if classification in PASSING_CLASSIFICATIONS else 0.0
     row = dict(case)

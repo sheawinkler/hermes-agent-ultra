@@ -5,7 +5,7 @@ mod tests {
     use futures::stream::{self, BoxStream};
     use futures::StreamExt;
     use hermes_config::LlmProviderConfig;
-    use hermes_core::{LlmResponse, StreamChunk};
+    use hermes_core::{ExecutionMode, ExecutionModeSource, LlmResponse, ResolvedExecutionMode, StreamChunk};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -62,12 +62,56 @@ mod tests {
         );
         cfg.llm_providers = providers;
 
-        let agent_cfg = build_agent_config(&cfg, "custom:some-model");
+        let agent_cfg = build_agent_config(&cfg, "custom:some-model", ResolvedExecutionMode::default());
         let runtime = agent_cfg
             .runtime_providers
             .get("custom")
             .expect("runtime provider should exist");
         assert_eq!(runtime.api_key_env.as_deref(), Some("MY_FALLBACK_KEY"));
+    }
+
+    #[test]
+    fn test_build_agent_config_retains_resolved_execution_mode() {
+        let resolved = ResolvedExecutionMode {
+            mode: ExecutionMode::RemoteWorker,
+            source: ExecutionModeSource::Cli,
+        };
+
+        let agent_config = build_agent_config(&GatewayConfig::default(), "openai:gpt-4o", resolved);
+
+        assert_eq!(agent_config.execution_mode, resolved);
+    }
+
+    #[test]
+    fn test_build_agent_config_uses_desktop_surface_only_for_desktop_chat() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_DESKTOP", "HERMES_DESKTOP_TERMINAL"]);
+        std::env::remove_var("HERMES_DESKTOP");
+        std::env::remove_var("HERMES_DESKTOP_TERMINAL");
+
+        let config = GatewayConfig::default();
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("cli")
+        );
+
+        std::env::set_var("HERMES_DESKTOP", "yes");
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("desktop")
+        );
+
+        std::env::set_var("HERMES_DESKTOP_TERMINAL", "1");
+        assert_eq!(
+            build_agent_config(&config, "openai:gpt-4o", ResolvedExecutionMode::default())
+                .platform
+                .as_deref(),
+            Some("cli")
+        );
     }
 
     #[test]
@@ -88,7 +132,7 @@ mod tests {
             ..GatewayConfig::default()
         };
 
-        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.prefill_messages.len(), 2);
         assert_eq!(
             agent_cfg.prefill_messages[0].content.as_deref(),
@@ -112,7 +156,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "anthropic:claude-sonnet-4.5");
+        let agent_cfg = build_agent_config(&cfg, "anthropic:claude-sonnet-4.5", ResolvedExecutionMode::default());
         let runtime = agent_cfg
             .runtime_providers
             .get("anthropic")
@@ -125,11 +169,11 @@ mod tests {
     fn test_build_agent_config_maps_delegation_max_spawn_depth_without_legacy_ceiling() {
         let mut cfg = GatewayConfig::default();
         cfg.delegation.max_spawn_depth = Some(99);
-        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.max_delegate_depth, 99);
 
         cfg.delegation.max_spawn_depth = Some(0);
-        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.max_delegate_depth, 1);
     }
 
@@ -141,7 +185,7 @@ mod tests {
         cfg.delegation.base_url = Some(" http://localhost:1234/v1 ".to_string());
         cfg.delegation.api_key = Some(" local-key ".to_string());
 
-        let agent_cfg = build_agent_config(&cfg, "nous:hermes-3");
+        let agent_cfg = build_agent_config(&cfg, "nous:hermes-3", ResolvedExecutionMode::default());
 
         assert_eq!(
             agent_cfg.delegation_model.as_deref(),
@@ -177,7 +221,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5");
+        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5", ResolvedExecutionMode::default());
         let codex = agent_cfg
             .runtime_providers
             .get("codex")
@@ -213,7 +257,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "beans:my-model");
+        let agent_cfg = build_agent_config(&cfg, "beans:my-model", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.provider.as_deref(), Some("beans"));
         let runtime = agent_cfg
             .runtime_providers
@@ -245,7 +289,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6", ResolvedExecutionMode::default());
 
         assert_eq!(agent_cfg.max_tokens, Some(4096));
     }
@@ -265,7 +309,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5");
+        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5", ResolvedExecutionMode::default());
 
         assert_eq!(agent_cfg.max_tokens, Some(1234));
     }
@@ -285,15 +329,15 @@ mod tests {
         );
 
         std::env::set_var("HERMES_MAX_TOKENS", "8192");
-        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.max_tokens, Some(8192));
 
         std::env::set_var("HERMES_MAX_TOKENS", "not-a-number");
-        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.max_tokens, Some(4096));
 
         std::env::set_var("HERMES_MAX_TOKENS", "0");
-        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.max_tokens, Some(4096));
     }
 
@@ -310,7 +354,7 @@ mod tests {
                 ..LlmProviderConfig::default()
             },
         );
-        let agent_cfg = build_agent_config(&cfg, "nous:moonshotai/kimi-k2.6");
+        let agent_cfg = build_agent_config(&cfg, "nous:moonshotai/kimi-k2.6", ResolvedExecutionMode::default());
         assert_eq!(
             agent_cfg
                 .extra_body
@@ -335,7 +379,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "nous:moonshotai/kimi-k2.6");
+        let agent_cfg = build_agent_config(&cfg, "nous:moonshotai/kimi-k2.6", ResolvedExecutionMode::default());
         let body = agent_cfg.extra_body.expect("extra body");
         assert_eq!(body["reasoning_effort"], "medium");
         assert_eq!(body["service_tier"], "priority");
@@ -353,7 +397,7 @@ mod tests {
             },
         );
 
-        let agent_cfg = build_agent_config(&cfg, "claude-opus-4-6");
+        let agent_cfg = build_agent_config(&cfg, "claude-opus-4-6", ResolvedExecutionMode::default());
         assert_eq!(agent_cfg.provider.as_deref(), Some("anthropic"));
     }
 
@@ -367,7 +411,7 @@ mod tests {
         );
         std::env::remove_var("HERMES_FALLBACK_MODEL");
         let cfg = GatewayConfig::default();
-        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5", ResolvedExecutionMode::default());
         assert_eq!(
             agent_cfg.retry.fallback_model.as_deref(),
             Some("nous:moonshotai/kimi-k2.6")
@@ -388,7 +432,7 @@ mod tests {
         std::env::remove_var("HERMES_FALLBACK_MODELS");
         std::env::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
         let cfg = GatewayConfig::default();
-        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5", ResolvedExecutionMode::default());
         assert_eq!(
             agent_cfg.retry.fallback_model.as_deref(),
             Some("anthropic:claude-3-5-sonnet")
@@ -413,7 +457,7 @@ mod tests {
         ];
         cfg.fallback_model = Some("OpenRouter:anthropic/claude-sonnet-4.6".to_string());
 
-        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5", ResolvedExecutionMode::default());
         assert_eq!(
             agent_cfg.retry.fallback_model.as_deref(),
             Some("openrouter:anthropic/claude-sonnet-4.6")
@@ -437,7 +481,7 @@ mod tests {
         let mut cfg = GatewayConfig::default();
         cfg.fallback_models = vec!["openrouter:backup".to_string()];
 
-        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5", ResolvedExecutionMode::default());
         assert_eq!(
             agent_cfg.retry.fallback_models,
             vec!["anthropic:claude-3-5-sonnet".to_string()]
@@ -449,7 +493,7 @@ mod tests {
         let mut cfg = GatewayConfig::default();
         cfg.agent.api_max_retries = Some(11);
 
-        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5", ResolvedExecutionMode::default());
 
         assert_eq!(agent_cfg.retry.max_retries, 11);
     }
@@ -830,10 +874,20 @@ mod tests {
             "HERMES_INFERENCE_PROVIDER",
             "HERMES_TUI_PROVIDER",
         ]);
+        let state_dir = tempfile::tempdir().expect("test run runtime directory");
+        let config = GatewayConfig {
+            home_dir: Some(state_dir.path().to_string_lossy().into_owned()),
+            ..GatewayConfig::default()
+        };
+        let run_runtime = Arc::new(
+            RunRuntime::open_for_ephemeral_testing(state_dir.path()).expect("test run runtime"),
+        );
         let calls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let calls_for_factory = Arc::clone(&calls);
         let outcome = run_noninteractive_query(
-            &GatewayConfig::default(),
+            &config,
+            run_runtime,
+            ResolvedExecutionMode::default(),
             "openai:gpt-5.5",
             "hello",
             Arc::new(AgentToolRegistry::new()),
