@@ -328,7 +328,8 @@ fn atomic_rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     let to = CString::new(to.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in destination path"))?;
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             from.as_ptr(),
             libc::AT_FDCWD,
