@@ -1,6 +1,6 @@
 {
-  "divergence_file": "/Users/sheawinkler/tmp/hermes-ultra-landing/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-07-26T11:07:16.276850+00:00",
+  "divergence_file": "docs/parity/intentional-divergence.json",
+  "generated_at_utc": "2026-07-26T11:56:17.758968+00:00",
   "items": [
     {
       "errors": [],
