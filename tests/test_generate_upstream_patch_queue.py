@@ -437,6 +437,66 @@ def test_prefix_sha_override_is_rejected_instead_of_prefix_matched(tmp_path: Pat
 
 
 
+def test_merge_commit_records_first_parent_paths(tmp_path: Path) -> None:
+    local, upstream_work, fork, upstream = _common_history(tmp_path)
+    _git(upstream_work, "switch", "-qc", "feature")
+    (upstream_work / "merge.txt").write_text("feature\n", encoding="utf-8")
+    _commit(upstream_work, "feature change")
+    _git(upstream_work, "switch", "-q", "main")
+    (upstream_work / "main.txt").write_text("main\n", encoding="utf-8")
+    _commit(upstream_work, "main change")
+    _git(upstream_work, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    merge_sha = _git(upstream_work, "rev-parse", "HEAD").stdout.strip()
+    _git(upstream_work, "push", "-q", "origin", "main")
+
+    result, queue, _ = _run_queue(local, fork, upstream)
+
+    merge_row = next(row for row in queue["commits"] if row["sha"] == merge_sha)
+    assert result.returncode == 1
+    assert merge_row["is_merge_commit"] is True
+    assert merge_row["files"] == ["merge.txt"]
+
+
+def test_intentional_divergence_rejects_empty_path_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_queue_module()
+    errors = module.ErrorCollector()
+    monkeypatch.setattr(module, "reachable_from", lambda *_args: True)
+    sha = "a" * 40
+    override = {
+        "disposition": "superseded",
+        "owner": "test",
+        "notes": "empty merge path evidence must fail",
+        "provenance": {
+            "upstream_sha": sha,
+            "fork_sha": "b" * 40,
+            "evidence": "fixture provenance",
+        },
+        "semantic_equivalence": {
+            "method": "intentional_divergence",
+            "evidence": "fixture divergence",
+        },
+    }
+
+    valid, _ = module.validate_override(
+        tmp_path,
+        override,
+        sha,
+        "c" * 40,
+        [],
+        ("apps/desktop/",),
+        "origin/main",
+        {},
+        None,
+        {},
+        errors,
+    )
+
+    assert valid is False
+    assert errors.counts() == {"override_divergence_paths_missing": 1}
+
+
 def test_intentional_divergence_rejects_unapproved_changed_path(tmp_path: Path) -> None:
     local, upstream_work, fork, upstream = _common_history(tmp_path)
     (upstream_work / "delta.txt").write_text("upstream\n", encoding="utf-8")

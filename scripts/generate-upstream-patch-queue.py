@@ -391,6 +391,7 @@ def commit_range_blocks(repo_root: Path, base_ref: str, upstream_ref: str) -> li
         [
             "log",
             "--reverse",
+            "--diff-merges=first-parent",
             "--name-only",
             "--format=__H__%H%x09%T%x09%P%x09%s",
             upstream_ref,
@@ -1652,6 +1653,13 @@ def validate_override(
             errors.add(
                 "override_semantic_method_invalid",
                 "superseded override requires intentional_divergence or behavioral_contract evidence",
+                sha=upstream_sha,
+            )
+            return False, ""
+        if method == "intentional_divergence" and not upstream_files:
+            errors.add(
+                "override_divergence_paths_missing",
+                "intentional_divergence override requires non-empty changed-path evidence",
                 sha=upstream_sha,
             )
             return False, ""
