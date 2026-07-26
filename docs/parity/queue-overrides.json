@@ -14,6 +14,20 @@
         "method": "behavioral_contract"
       }
     },
+    "022c4991fc0c5245b8cc84b9e275ae7a64b27d30": {
+      "disposition": "superseded",
+      "notes": "The upstream infographic PNG is a non-executable documentation asset; it has no Rust runtime behavior to port.",
+      "owner": "rust-runtime",
+      "provenance": {
+        "evidence": "fork c002f8c4efe475c89c9f14d3995d44e6a5df5b27; infographic/fireworks-provider/.",
+        "fork_sha": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27",
+        "upstream_sha": "022c4991fc0c5245b8cc84b9e275ae7a64b27d30"
+      },
+      "semantic_equivalence": {
+        "evidence": "The upstream infographic PNG is a non-executable documentation asset; it has no Rust runtime behavior to port.",
+        "method": "behavioral_contract"
+      }
+    },
     "02613a4d50637f23a53becd123ff67d738c620a1": {
       "disposition": "superseded",
       "notes": "The web lint/i18n/mobile-input change is covered by the approved Rust-primary UX divergence for web/.",
@@ -112,6 +126,20 @@
         "method": "behavioral_contract"
       }
     },
+    "07244c5ead7c1b4fd1b9027e2d9303ad4461a9f7": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "07244c5ead7c1b4fd1b9027e2d9303ad4461a9f7",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      }
+    },
     "0728f21613554394a7fcd70ab4168bc4151bf8a6": {
       "disposition": "superseded",
       "notes": "Nano-pdf wording changes only approved catalog/docs paths.",
@@ -166,6 +194,20 @@
       "semantic_equivalence": {
         "evidence": "Approved ledger item rust-cli-tui-primary-ux-surface intentionally keeps web/ outside the Rust CLI/TUI/gateway product surface.",
         "method": "intentional_divergence"
+      }
+    },
+    "07f39cf9a6ad5accbdd3055010ec8084c30866e3": {
+      "disposition": "superseded",
+      "notes": "Rust OpenRouter/Nous curated choices include anthropic/claude-sonnet-5; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "07f39cf9a6ad5accbdd3055010ec8084c30866e3",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust OpenRouter/Nous curated choices include anthropic/claude-sonnet-5; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust OpenRouter/Nous curated choices include anthropic/claude-sonnet-5; focused Rust regression curated_models_track_current_agentic_catalogs passed."
       }
     },
     "087732c8c60860888f6c8ac8b9e22271d5269e96": {
@@ -280,6 +322,20 @@
         "method": "behavioral_contract"
       }
     },
+    "0c4aed2499c37372cd07a127ee10bd74aec60cf4": {
+      "disposition": "superseded",
+      "notes": "Rust sessions list implements --workspace filtering and a Workspace column from persisted cwd keys; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "0c4aed2499c37372cd07a127ee10bd74aec60cf4",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust sessions list implements --workspace filtering and a Workspace column from persisted cwd keys; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust sessions list implements --workspace filtering and a Workspace column from persisted cwd keys; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed."
+      }
+    },
     "0c4c8f95e11a9f04bf27dfe19433a5f30293d2b1": {
       "disposition": "superseded",
       "notes": "Rust fails closed already",
@@ -306,6 +362,20 @@
       "semantic_equivalence": {
         "evidence": "There is exactly one active collector writer; provider streams yield chunks and have no callback reference to emit stale deltas after replacement.",
         "method": "behavioral_contract"
+      }
+    },
+    "0cf2e39c411cfe99aff477b61113992f297cd6d0": {
+      "disposition": "superseded",
+      "notes": "Webhook routes apply declarative filters before bounded, sanitized scripts and return explicit ignored reasons.",
+      "owner": "web-dashboard-website",
+      "provenance": {
+        "upstream_sha": "0cf2e39c411cfe99aff477b61113992f297cd6d0",
+        "fork_sha": "2df8183f005b5fe0192b9e75240bed9a68281c6b",
+        "evidence": "Rust WebhookRouteProcessor supports all/any/not, field operators, in_file, regex, scripts rooted below HERMES_HOME/scripts, sanitized env, and timeout. nested_any_and_in_file_filters_match_profile_relative_paths, script_transforms_payload_inside_hermes_scripts_root, route_payload_filters_duplicates_and_rate_limits, and cargo check -p hermes-cli --features gateway-webhook passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Webhook routes apply declarative filters before bounded, sanitized scripts and return explicit ignored reasons."
       }
     },
     "0ec4a873c14d7357818ce220eb18a9daa7f539af": {
@@ -459,6 +529,20 @@
       },
       "semantic_equivalence": {
         "evidence": "Rust has no Python direct_api_call shim requiring a separate predicate test.",
+        "method": "behavioral_contract"
+      }
+    },
+    "127f6e15144dda80ece620a12984f4d54989072d": {
+      "disposition": "superseded",
+      "notes": "Output-cap errors are explicitly distinguished from input/context overflow and retried with a smaller max_tokens value instead of being sent to compaction; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "127f6e15144dda80ece620a12984f4d54989072d"
+      },
+      "semantic_equivalence": {
+        "evidence": "Output-cap errors are explicitly distinguished from input/context overflow and retried with a smaller max_tokens value instead of being sent to compaction; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
         "method": "behavioral_contract"
       }
     },
@@ -784,6 +868,20 @@
         "method": "behavioral_contract"
       }
     },
+    "1aadb02eafd3420499ce30ce3154507433439c2d": {
+      "disposition": "superseded",
+      "notes": "Leaf delegated children cannot regain blocked tools through a mixed inherited bundle.",
+      "owner": "scheduler-delegation",
+      "provenance": {
+        "upstream_sha": "1aadb02eafd3420499ce30ce3154507433439c2d",
+        "fork_sha": "3df8a855c316fcdee42bfbdbcec63451129ccc72",
+        "evidence": "Rust SubAgentOrchestrator filters inherited ToolSchema names after parent selection; omitted_toolset_blocks_child_only_tools_but_keeps_execute_code passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Leaf delegated children cannot regain blocked tools through a mixed inherited bundle."
+      }
+    },
     "1ae1dd8b2c63fdd3b950553c56d9f5e56f3d23ab": {
       "disposition": "superseded",
       "notes": "Python nested interruption-tree traversal is not used by the Rust MCP error model.",
@@ -964,6 +1062,20 @@
       "semantic_equivalence": {
         "evidence": "The approved ledger explicitly tracks web/ as a non-primary UX surface.",
         "method": "intentional_divergence"
+      }
+    },
+    "1d98f8dd95ab51b667f4dd7538a3cbb9032a8bc7": {
+      "disposition": "superseded",
+      "notes": "Rust MCP rendering materializes embedded ResourceLink/EmbeddedResource/Audio content with bounded cache writes and safe names, and registers callable resources/read handlers; focused regressions mcp_resource_blocks_are_materialized_with_safe_names and manager_registers_discovered_mcp_tools_as_callable_registry_tools passed.",
+      "owner": "tools-mcp-acp",
+      "provenance": {
+        "upstream_sha": "1d98f8dd95ab51b667f4dd7538a3cbb9032a8bc7",
+        "fork_sha": "5004cd4d90be63a239a4f24d04a880eb6f836898",
+        "evidence": "Rust MCP rendering materializes embedded ResourceLink/EmbeddedResource/Audio content with bounded cache writes and safe names, and registers callable resources/read handlers; focused regressions mcp_resource_blocks_are_materialized_with_safe_names and manager_registers_discovered_mcp_tools_as_callable_registry_tools passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust MCP rendering materializes embedded ResourceLink/EmbeddedResource/Audio content with bounded cache writes and safe names, and registers callable resources/read handlers; focused regressions mcp_resource_blocks_are_materialized_with_safe_names and manager_registers_discovered_mcp_tools_as_callable_registry_tools passed."
       }
     },
     "1e2ad17afd50fd21d55e8e5980f35f376db15a14": {
@@ -1274,6 +1386,20 @@
         "method": "behavioral_contract"
       }
     },
+    "26a2fda8d709122d432ab7bc0345303ff95e6f5d": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "26a2fda8d709122d432ab7bc0345303ff95e6f5d",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "279be8211d8347cc3500b9a78c6a0f8cb4d92a6a": {
       "disposition": "superseded",
       "notes": "The revert restores behavior already present in Rust.",
@@ -1300,6 +1426,34 @@
       "semantic_equivalence": {
         "evidence": "At the exact fork, .github/workflows/release.yml and the shipped Rust crates do not read contributors/emails. This is classified as non-runtime attribution metadata, not as an unapproved intentional divergence.",
         "method": "behavioral_contract"
+      }
+    },
+    "284a3cd47e8b7645b92eedfe63e714940d52c924": {
+      "disposition": "superseded",
+      "notes": "Rust ResourceLink markers derive the registered wire-safe MCP resource reader name and resource text participates in error extraction; focused MCP resource rendering regression passed.",
+      "owner": "tools-mcp-acp",
+      "provenance": {
+        "upstream_sha": "284a3cd47e8b7645b92eedfe63e714940d52c924",
+        "fork_sha": "5004cd4d90be63a239a4f24d04a880eb6f836898",
+        "evidence": "Rust ResourceLink markers derive the registered wire-safe MCP resource reader name and resource text participates in error extraction; focused MCP resource rendering regression passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust ResourceLink markers derive the registered wire-safe MCP resource reader name and resource text participates in error extraction; focused MCP resource rendering regression passed."
+      }
+    },
+    "295e20358c8a0a32d5c4eb71107abf322998179c": {
+      "disposition": "superseded",
+      "notes": "Delegated children retain execute_code while delegate_task, clarify, memory, send_message, and cronjob remain blocked.",
+      "owner": "scheduler-delegation",
+      "provenance": {
+        "upstream_sha": "295e20358c8a0a32d5c4eb71107abf322998179c",
+        "fork_sha": "3df8a855c316fcdee42bfbdbcec63451129ccc72",
+        "evidence": "Rust CHILD_BLOCKED_TOOL_NAMES deliberately excludes execute_code; omitted_toolset_blocks_child_only_tools_but_keeps_execute_code passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Delegated children retain execute_code while delegate_task, clarify, memory, send_message, and cronjob remain blocked."
       }
     },
     "2a1ee322edba79f564ba69d109e5c7a1823258d6": {
@@ -1412,6 +1566,34 @@
       "semantic_equivalence": {
         "evidence": "The upstream AST parsing cost cannot occur because Rust tool discovery performs direct compiled registration without reading or parsing tools/*.py.",
         "method": "behavioral_contract"
+      }
+    },
+    "2d7353cd3b8ab98660f098d42144b75b6834b0ab": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "2d7353cd3b8ab98660f098d42144b75b6834b0ab",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
+    "2ea1ea0894b0561d4522af5c9a0f8e5b1e1520e8": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "2ea1ea0894b0561d4522af5c9a0f8e5b1e1520e8",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "2ebeede006e19b1ea433ba723e33dd035fc8e10e": {
@@ -1722,6 +1904,20 @@
         "method": "intentional_divergence"
       }
     },
+    "3951d769fbfffa28b0ff69dfff31b892972762d4": {
+      "disposition": "superseded",
+      "notes": "Rust Kimi curated choices include kimi-for-coding-highspeed alongside current coding choices.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "3951d769fbfffa28b0ff69dfff31b892972762d4",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust Kimi curated choices include kimi-for-coding-highspeed alongside current coding choices."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust Kimi curated choices include kimi-for-coding-highspeed alongside current coding choices."
+      }
+    },
     "3960315af7bce6194801ddc628199afa8862489f": {
       "disposition": "superseded",
       "notes": "Rust session persistence already rejects writes to closed compression parents and follows visible continuation tips.",
@@ -1748,6 +1944,20 @@
       "semantic_equivalence": {
         "evidence": "The Rust Nous profile and provider constructor use https://inference-api.nousresearch.com/v1 as the default base URL, matching the restored upstream route.",
         "method": "behavioral_contract"
+      }
+    },
+    "3a1a3c7e6727a31df89b61b27bad313430bdac45": {
+      "disposition": "superseded",
+      "notes": "Rust curated provider catalogs expose GPT-5.6 Sol/Terra/Luna model families; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "3a1a3c7e6727a31df89b61b27bad313430bdac45",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust curated provider catalogs expose GPT-5.6 Sol/Terra/Luna model families; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust curated provider catalogs expose GPT-5.6 Sol/Terra/Luna model families; focused Rust regression curated_models_track_current_agentic_catalogs passed."
       }
     },
     "3a394210ffae0358100e9d14cf1639f764d7eab7": {
@@ -2380,6 +2590,20 @@
         "method": "behavioral_contract"
       }
     },
+    "495d4acec5702c24a328381c4970e0e08d512719": {
+      "disposition": "superseded",
+      "notes": "Rust Kimi coding catalog includes kimi-k3 and kimi-k2.7-code choices for the coding-plan provider aliases.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "495d4acec5702c24a328381c4970e0e08d512719",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust Kimi coding catalog includes kimi-k3 and kimi-k2.7-code choices for the coding-plan provider aliases."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust Kimi coding catalog includes kimi-k3 and kimi-k2.7-code choices for the coding-plan provider aliases."
+      }
+    },
     "4999de8fe6287d688bf30f928553fe85edae3cc3": {
       "disposition": "superseded",
       "notes": "chore: map anoop.mehendale@gmail.com -> anoopmehendale-cue: upstream contributor-attribution metadata only; no executable source or test changes.",
@@ -2462,6 +2686,20 @@
       "semantic_equivalence": {
         "evidence": "The approved ledger keeps these ui-tui paths outside the shipped Rust CLI/TUI runtime; the changed paths require no Rust port.",
         "method": "intentional_divergence"
+      }
+    },
+    "4c03d5bff2a9a2cafce6cdc3e73ecd80262a257c": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "4c03d5bff2a9a2cafce6cdc3e73ecd80262a257c",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "4c0546c9cc240db3de30e2d5fc6ccf6e4f27f407": {
@@ -2576,6 +2814,20 @@
         "method": "behavioral_contract"
       }
     },
+    "4f4a4f0d431844c0ac9378ecdde77c84b56a3c7d": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "4f4a4f0d431844c0ac9378ecdde77c84b56a3c7d",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      }
+    },
     "4f726ed46798a01e86f0a67523d90570be31e63e": {
       "disposition": "superseded",
       "notes": "Standalone cron media traverses the live Rust gateway media-marker pipeline.",
@@ -2630,6 +2882,20 @@
       "semantic_equivalence": {
         "evidence": "handle_cli_chat sets config.approval.require_approval=false before build_execution_backend_binding and register_builtin_tools.",
         "method": "behavioral_contract"
+      }
+    },
+    "50170fdd2d4d0bec6ab2bf6efecdd1b93064a736": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "50170fdd2d4d0bec6ab2bf6efecdd1b93064a736",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "503da4e3085ebb7106652864cdd68d6eee080eaf": {
@@ -2700,6 +2966,20 @@
       "semantic_equivalence": {
         "evidence": "SkillPackageIdentityV2 carries immutable_source_revision, content_digest, manifest_digest and exact files, while remote installation validates origin, revision, and content before admission.",
         "method": "behavioral_contract"
+      }
+    },
+    "513dba42e6a066fd55edd7833bf807afee8da637": {
+      "disposition": "superseded",
+      "notes": "Rust OpenRouter/Nous curated catalogs select x-ai/grok-4.5 rather than x-ai/grok-4.3; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "513dba42e6a066fd55edd7833bf807afee8da637",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust OpenRouter/Nous curated catalogs select x-ai/grok-4.5 rather than x-ai/grok-4.3; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust OpenRouter/Nous curated catalogs select x-ai/grok-4.5 rather than x-ai/grok-4.3; focused Rust regression curated_models_track_current_agentic_catalogs passed."
       }
     },
     "51580e192b548eb4af8ede85a5233800a8a269d9": {
@@ -2786,6 +3066,20 @@
         "method": "behavioral_contract"
       }
     },
+    "543941f70974d5879decdef6aa0f29341001bcad": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "543941f70974d5879decdef6aa0f29341001bcad",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "549b87c9aa53fa091d65309b5e0861bf61bfc740": {
       "disposition": "superseded",
       "notes": "Rust persistence preserves archived rows during active transcript replacement.",
@@ -2828,6 +3122,20 @@
         "method": "intentional_divergence"
       }
     },
+    "5601f24449547d0dc5b7296f512a86f974f164fa": {
+      "disposition": "superseded",
+      "notes": "Blender skill includes bpy API, recipes, and pitfalls references.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "5601f24449547d0dc5b7296f512a86f974f164fa",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "All three upstream reference files are preserved and committed; current bpy-api.md SHA-256 exactly equals upstream 5601f244 tree content (6c62dc3572720d55d4efa2a4ccbce20c8707e6e5da4ae1cacdddec4336d7ae79), while pitfalls and recipes include the stronger b6c11a35 follow-up."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Blender skill includes bpy API, recipes, and pitfalls references."
+      }
+    },
     "569326577556d350739efedd2363a681359db5da": {
       "disposition": "superseded",
       "notes": "Rust WebConfig accepts explicit YAML null for backend selectors and normalizes it to an empty string before backend dispatch.",
@@ -2853,6 +3161,20 @@
       },
       "semantic_equivalence": {
         "evidence": "The upstream test-only relaxation concerns a watchdog absent by concrete in-process architecture, while Rust lifecycle behavior remains directly testable.",
+        "method": "behavioral_contract"
+      }
+    },
+    "57f18148322cbb4be2a0cb78f8b611446d74ef3d": {
+      "disposition": "superseded",
+      "notes": "Output-cap recovery intersects provider-reported availability with the rough current request estimate and uses a 64-token safety margin; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "57f18148322cbb4be2a0cb78f8b611446d74ef3d"
+      },
+      "semantic_equivalence": {
+        "evidence": "Output-cap recovery intersects provider-reported availability with the rough current request estimate and uses a 64-token safety margin; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
         "method": "behavioral_contract"
       }
     },
@@ -2895,6 +3217,20 @@
       },
       "semantic_equivalence": {
         "evidence": "Empty pool returns silently, preventing the log-lock storm.",
+        "method": "behavioral_contract"
+      }
+    },
+    "5a0f51325cd83e64efc015a1455e88c727ba10fe": {
+      "disposition": "superseded",
+      "notes": "Persisted and memory-synced result messages remove dropped-tool-call assistant/nudge scaffolding, preventing recovery instructions from becoming durable context; covered by dropped_tool_call.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "5a0f51325cd83e64efc015a1455e88c727ba10fe"
+      },
+      "semantic_equivalence": {
+        "evidence": "Persisted and memory-synced result messages remove dropped-tool-call assistant/nudge scaffolding, preventing recovery instructions from becoming durable context; covered by dropped_tool_call.",
         "method": "behavioral_contract"
       }
     },
@@ -2952,6 +3288,20 @@
       "semantic_equivalence": {
         "evidence": "Exact git show review: formatter changed only whitespace/wrapping/import layout; literals, operators and control flow unchanged.",
         "method": "behavioral_contract"
+      }
+    },
+    "5bb933eedf6e57386fa7c971055ba6f1d7c4b045": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "5bb933eedf6e57386fa7c971055ba6f1d7c4b045",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
       }
     },
     "5bfffcd4457bf0cfb9cca84a3fc9eae5c78089ef": {
@@ -3080,6 +3430,20 @@
         "method": "intentional_divergence"
       }
     },
+    "5e50f18b3041067b42af7b9a5a6778d55e93fdfb": {
+      "disposition": "superseded",
+      "notes": "Committed Rust parity implementation rejects malformed streamed tool-call arguments instead of repair/replay; focused Rust regression malformed_tool_call_arguments_are_rejected_without_repair passed.",
+      "owner": "tools-mcp-acp",
+      "provenance": {
+        "upstream_sha": "5e50f18b3041067b42af7b9a5a6778d55e93fdfb",
+        "fork_sha": "32862f337c439dd7b087782fa68564b0e3074ae0",
+        "evidence": "Committed Rust parity implementation rejects malformed streamed tool-call arguments instead of repair/replay; focused Rust regression malformed_tool_call_arguments_are_rejected_without_repair passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Committed Rust parity implementation rejects malformed streamed tool-call arguments instead of repair/replay; focused Rust regression malformed_tool_call_arguments_are_rejected_without_repair passed."
+      }
+    },
     "5e6a0d9eea373e8eefcc0e40540f017d82e44777": {
       "disposition": "superseded",
       "notes": "Rust already uses Converse, decodes data-image payloads to bytes, and routes bearer versus SigV4 authentication.",
@@ -3136,6 +3500,34 @@
         "method": "behavioral_contract"
       }
     },
+    "5fc2d9e64d960b666c56476e4467ea46a556ccb7": {
+      "disposition": "superseded",
+      "notes": "Diff is comment reword only; nothing executable to port.",
+      "owner": "rust-runtime",
+      "provenance": {
+        "evidence": "fork c002f8c4efe475c89c9f14d3995d44e6a5df5b27; hermes_cli/auth.py comment.",
+        "fork_sha": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27",
+        "upstream_sha": "5fc2d9e64d960b666c56476e4467ea46a556ccb7"
+      },
+      "semantic_equivalence": {
+        "evidence": "Diff is comment reword only; nothing executable to port.",
+        "method": "behavioral_contract"
+      }
+    },
+    "602fe1c15d59c763a796976d57675c98837228f8": {
+      "disposition": "superseded",
+      "notes": "Rust sessions list reads recorded cwd workspace keys from current and legacy snapshot locations, applies case-insensitive path/basename matching, and displays workspace labels; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed.",
+      "owner": "sessions-workspaces",
+      "provenance": {
+        "upstream_sha": "602fe1c15d59c763a796976d57675c98837228f8",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust sessions list reads recorded cwd workspace keys from current and legacy snapshot locations, applies case-insensitive path/basename matching, and displays workspace labels; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust sessions list reads recorded cwd workspace keys from current and legacy snapshot locations, applies case-insensitive path/basename matching, and displays workspace labels; focused Rust regression sessions_workspace_filter_matches_paths_and_windows_basenames passed."
+      }
+    },
     "60dbce7c34903bb83057baec94525efcb0a8cd87": {
       "disposition": "superseded",
       "notes": "fix(doctor): UTF-8/latin-1 fallback when scanning .env: inspected individually; Rust disposition is superseded by the cited behavioral contract.",
@@ -3178,6 +3570,20 @@
         "method": "behavioral_contract"
       }
     },
+    "62ea8005868c0b129413c0753d0dee901e704cd1": {
+      "disposition": "superseded",
+      "notes": "Output-cap recovery derives a fresh request estimate from serialized current API messages and schemas before calculating the bounded retry cap; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "62ea8005868c0b129413c0753d0dee901e704cd1"
+      },
+      "semantic_equivalence": {
+        "evidence": "Output-cap recovery derives a fresh request estimate from serialized current API messages and schemas before calculating the bounded retry cap; covered by output_cap_error_retries_with_provider_bounded_max_tokens.",
+        "method": "behavioral_contract"
+      }
+    },
     "633fc7ab88be7ca1c1c63b634fecabfd3a966605": {
       "disposition": "superseded",
       "notes": "Rust preserves xhigh when the selected OpenRouter/Copilot-compatible provider accepts it and only clamps in explicitly model-specific profiles.",
@@ -3189,6 +3595,20 @@
       },
       "semantic_equivalence": {
         "evidence": "The Rust test proves an xhigh value reaches the compatible provider payload as xhigh rather than being downgraded to high.",
+        "method": "behavioral_contract"
+      }
+    },
+    "63954d508c91e2e05f1d5b3f94dbea62c957e7c3": {
+      "disposition": "superseded",
+      "notes": "Non-streaming tool_calls-with-empty-array responses are boundedly re-prompted and the adjacent assistant/nudge recovery scaffolding is removed before the next provider request; covered by dropped_tool_call.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "63954d508c91e2e05f1d5b3f94dbea62c957e7c3"
+      },
+      "semantic_equivalence": {
+        "evidence": "Non-streaming tool_calls-with-empty-array responses are boundedly re-prompted and the adjacent assistant/nudge recovery scaffolding is removed before the next provider request; covered by dropped_tool_call.",
         "method": "behavioral_contract"
       }
     },
@@ -3360,6 +3780,20 @@
         "method": "behavioral_contract"
       }
     },
+    "6e96b745d827c8f9e22d610fbf5a2e70cdae0702": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "6e96b745d827c8f9e22d610fbf5a2e70cdae0702",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/."
+      }
+    },
     "6ece52fc733352c3ad64f1b2d874ce1e4b220707": {
       "disposition": "superseded",
       "notes": "This is follow-up Python test coverage for the compound-background rewrite already present in Rust.",
@@ -3386,6 +3820,20 @@
       "semantic_equivalence": {
         "evidence": "A monkeypatched callable with an older keyword signature cannot occur.",
         "method": "behavioral_contract"
+      }
+    },
+    "6efec39ecf8bd640173d31567884cf22aafe3424": {
+      "disposition": "superseded",
+      "notes": "Blender skill documents catalog-backed MCP usage rather than a direct socket addon workflow.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "6efec39ecf8bd640173d31567884cf22aafe3424",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "Committed skill, user-guide page, and catalog entry use the catalog MCP contract. Local SKILL and user-guide cumulative patch IDs exactly equal upstream 6efec39^..b6c11a35: c8e118251c647fd51d7c7a3adfd2ccb655a8bf40 and 1d773de4435452b4d15a057ba8e6d8b83e965ead."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Blender skill documents catalog-backed MCP usage rather than a direct socket addon workflow."
       }
     },
     "6f42bf344cf51bf99b237f7001f9e18daf5a81c6": {
@@ -3486,6 +3934,34 @@
         "method": "behavioral_contract"
       }
     },
+    "727f6704a7da7f2e7b22f463d67c7dbf52334952": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "727f6704a7da7f2e7b22f463d67c7dbf52334952",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/."
+      }
+    },
+    "72da4f8657ef26451fccb8d1210c812db3e03315": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "72da4f8657ef26451fccb8d1210c812db3e03315",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "73057ed1616c7c9973a0bc9ed4d913b93c969c4f": {
       "disposition": "superseded",
       "notes": "Rust scopes auxiliary runtime by value and client ownership rather than ContextVar/cache state, satisfying the per-turn isolation contract without a reset token.",
@@ -3556,6 +4032,20 @@
         "method": "intentional_divergence"
       }
     },
+    "75ca29fb21be23eba62f594b6504c42a6f9963e5": {
+      "disposition": "superseded",
+      "notes": "Rust Nous/OpenRouter catalogs include moonshotai/kimi-k3 and omit retired kimi-k2.6; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "75ca29fb21be23eba62f594b6504c42a6f9963e5",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust Nous/OpenRouter catalogs include moonshotai/kimi-k3 and omit retired kimi-k2.6; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust Nous/OpenRouter catalogs include moonshotai/kimi-k3 and omit retired kimi-k2.6; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      }
+    },
     "760112adb6458417da8614d2269e5325f0739ed5": {
       "disposition": "superseded",
       "notes": "fmt-only JS",
@@ -3567,6 +4057,20 @@
       },
       "semantic_equivalence": {
         "evidence": "Exact git show review: formatter changed only whitespace/wrapping/import layout; literals, operators and control flow unchanged.",
+        "method": "behavioral_contract"
+      }
+    },
+    "76381e2a8e3a21fbbd0a192b4b5f7356a7ca47b8": {
+      "disposition": "superseded",
+      "notes": "Compression raises its effective trigger to 75% for context windows below 512K while preserving higher configured thresholds, sends no summary wire max_tokens cap, and excludes assistant reasoning from serialized durable summaries; covered by focused compression tests.",
+      "owner": "config-secrets-auth",
+      "provenance": {
+        "evidence": "Local recovery commit c410ca76db7bae075a342d423774d78d024e2e0b; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "c83ee97b08c8c35c9475660a797bf72dabddb378",
+        "upstream_sha": "76381e2a8e3a21fbbd0a192b4b5f7356a7ca47b8"
+      },
+      "semantic_equivalence": {
+        "evidence": "Compression raises its effective trigger to 75% for context windows below 512K while preserving higher configured thresholds, sends no summary wire max_tokens cap, and excludes assistant reasoning from serialized durable summaries; covered by focused compression tests.",
         "method": "behavioral_contract"
       }
     },
@@ -3652,6 +4156,20 @@
       "semantic_equivalence": {
         "evidence": "The SHA introduces no command implementation or config schema value across a Rust boundary.",
         "method": "intentional_divergence"
+      }
+    },
+    "772c232631db4bd6692dcaeaad086ee3f9f7d34d": {
+      "disposition": "superseded",
+      "notes": "Rust Alibaba Coding Plan curated choices include qwen3.7-plus; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "772c232631db4bd6692dcaeaad086ee3f9f7d34d",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust Alibaba Coding Plan curated choices include qwen3.7-plus; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust Alibaba Coding Plan curated choices include qwen3.7-plus; focused Rust regression curated_models_track_current_agentic_catalogs passed."
       }
     },
     "77763f00fb9ecaf7ee7d4cca7b8c066dfc927dba": {
@@ -3878,6 +4396,20 @@
         "method": "behavioral_contract"
       }
     },
+    "7dc535ad64ae77dc197bd104e655ca5cc36a4327": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "7dc535ad64ae77dc197bd104e655ca5cc36a4327",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): skills/, ui-tui/."
+      }
+    },
     "7e3986ae686977dd4a4dc6bb3080f0ce2fadb588": {
       "disposition": "superseded",
       "notes": "Rust slash-command dispatch routes /compress directly and canonicalizes /compact to the same compression handler.",
@@ -3918,6 +4450,20 @@
       "semantic_equivalence": {
         "evidence": "No shared jobs.json flock/RLock exists in the Rust scheduler.",
         "method": "behavioral_contract"
+      }
+    },
+    "7efee32868ecd96f2bc8fb00cfea3fd77207450d": {
+      "disposition": "superseded",
+      "notes": "Rust curated catalogs include the GPT-5.6 Pro variant set used by OpenRouter/Nous/OpenAI pickers; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "7efee32868ecd96f2bc8fb00cfea3fd77207450d",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust curated catalogs include the GPT-5.6 Pro variant set used by OpenRouter/Nous/OpenAI pickers; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust curated catalogs include the GPT-5.6 Pro variant set used by OpenRouter/Nous/OpenAI pickers; focused Rust regression curated_models_track_current_agentic_catalogs passed."
       }
     },
     "7f9956a6798dd1481a7eebf0062fcce14f81e9c9": {
@@ -4186,6 +4732,20 @@
         "method": "behavioral_contract"
       }
     },
+    "899e420ab9c121254de6db3e8513d570178f9607": {
+      "disposition": "superseded",
+      "notes": "Rust uses native provider registration rather than the removed Python manual auth/models registrations; the upstream change has no remaining runtime behavior to port.",
+      "owner": "rust-runtime",
+      "provenance": {
+        "evidence": "fork c002f8c4efe475c89c9f14d3995d44e6a5df5b27; hermes_cli/auth.py+models.py.",
+        "fork_sha": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27",
+        "upstream_sha": "899e420ab9c121254de6db3e8513d570178f9607"
+      },
+      "semantic_equivalence": {
+        "evidence": "Rust uses native provider registration rather than the removed Python manual auth/models registrations; the upstream change has no remaining runtime behavior to port.",
+        "method": "behavioral_contract"
+      }
+    },
     "89e6f4c989aef5b38af8583c37324486cd674085": {
       "disposition": "superseded",
       "notes": "feat(agent): add MOA progress indicator (#59546): inspected individually; Rust disposition is superseded by the cited behavioral contract.",
@@ -4212,6 +4772,20 @@
       "semantic_equivalence": {
         "evidence": "Every changed path is covered.",
         "method": "intentional_divergence"
+      }
+    },
+    "8a2f5b7a578844087079e2498c471d42076f3089": {
+      "disposition": "superseded",
+      "notes": "The resolved cron workdir is passed as invocation context instead of mutating TERMINAL_CWD process state.",
+      "owner": "scheduler-delegation",
+      "provenance": {
+        "upstream_sha": "8a2f5b7a578844087079e2498c471d42076f3089",
+        "fork_sha": "3df8a855c316fcdee42bfbdbcec63451129ccc72",
+        "evidence": "Rust CronRunner calls with_workspace_cwd(workdir, agent_loop.run(...)); prompt/context resolution reads the task-local value with legacy fallback; focused workspace and scheduler tests passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "The resolved cron workdir is passed as invocation context instead of mutating TERMINAL_CWD process state."
       }
     },
     "8a580e8e31bedbe03c01590015f1f62f38d35647": {
@@ -4298,6 +4872,20 @@
         "method": "behavioral_contract"
       }
     },
+    "8d6e045b8f0506ffbc6ffef496eab413de263fd7": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "8d6e045b8f0506ffbc6ffef496eab413de263fd7",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      }
+    },
     "8d72845399a84f4b1660142c3d5047d49d3baec6": {
       "disposition": "superseded",
       "notes": "Rust startup recognizes moa:<preset> as a keyless virtual provider and routes it to the MoA quorum path.",
@@ -4309,6 +4897,20 @@
       },
       "semantic_equivalence": {
         "evidence": "hermes-provider-runtime allow_no_api_key explicitly accepts moa and provider_runtime_diagnostic_reports_openai_pro_and_local_no_key asserts moa:default is keyless-startable; App::moa_virtual_model_arms_quorum_without_global_policy verifies the consuming turn dispatcher.",
+        "method": "behavioral_contract"
+      }
+    },
+    "8d811f5c4513524671deccf0395989481aaa5678": {
+      "disposition": "superseded",
+      "notes": "YAML ${env:NAME} references preserve exact secret-source semantics (including trim behavior) and unresolved references remain verbatim; covered by cursor_style_env_refs_trim_names_and_preserve_other_secret_sources and load_from_yaml_keeps_unresolved_env_refs_verbatim.",
+      "owner": "config-secrets-auth",
+      "provenance": {
+        "evidence": "Local recovery commit c410ca76db7bae075a342d423774d78d024e2e0b; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "c83ee97b08c8c35c9475660a797bf72dabddb378",
+        "upstream_sha": "8d811f5c4513524671deccf0395989481aaa5678"
+      },
+      "semantic_equivalence": {
+        "evidence": "YAML ${env:NAME} references preserve exact secret-source semantics (including trim behavior) and unresolved references remain verbatim; covered by cursor_style_env_refs_trim_names_and_preserve_other_secret_sources and load_from_yaml_keeps_unresolved_env_refs_verbatim.",
         "method": "behavioral_contract"
       }
     },
@@ -4396,6 +4998,20 @@
         "method": "behavioral_contract"
       }
     },
+    "8fc0c086f5ab10407c294eeac5e47dff4afaf42f": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "8fc0c086f5ab10407c294eeac5e47dff4afaf42f",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "8fdc9c58e0e1530153f8751d835387405135ab86": {
       "disposition": "superseded",
       "notes": "The Rust OpenViking loader is read-only.",
@@ -4438,6 +5054,20 @@
         "method": "intentional_divergence"
       }
     },
+    "91cf5448d820a522aae3367d7dde39b1108532ff": {
+      "disposition": "superseded",
+      "notes": "Cron job workdirs are invocation-local rather than process-global, so jobs can run concurrently.",
+      "owner": "scheduler-delegation",
+      "provenance": {
+        "upstream_sha": "91cf5448d820a522aae3367d7dde39b1108532ff",
+        "fork_sha": "3df8a855c316fcdee42bfbdbcec63451129ccc72",
+        "evidence": "Rust task-local runtime_cwd scopes CronRunner invocation; background terminal calls receive explicit workdir; tick_due_jobs_runs_workdir_jobs_concurrently and workspace_cwd_is_isolated_between_concurrent_tasks passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Cron job workdirs are invocation-local rather than process-global, so jobs can run concurrently."
+      }
+    },
     "92057474f3d2dfe38c1be8900cabbae3e696cf41": {
       "disposition": "superseded",
       "notes": "Rust's empty-stream diagnostic explicitly reports a connection close and zero received chunks.",
@@ -4449,6 +5079,20 @@
       },
       "semantic_equivalence": {
         "evidence": "The exhausted zero-event path reports provider stream connection closed before terminal finish reason (received 0 chunks), distinct from ordinary retry exhaustion.",
+        "method": "behavioral_contract"
+      }
+    },
+    "923704c7c243d4d0ff4008279eb95e3bfa48a64c": {
+      "disposition": "superseded",
+      "notes": "Streaming tool_calls-with-empty-array responses use the same bounded recovery and remove the adjacent scaffolding before the next provider request; covered by dropped_tool_call.",
+      "owner": "core-agent-runtime",
+      "provenance": {
+        "evidence": "Local recovery commit c7c90ebcb183ff5b28e0b379cab92c6e0f6c8c7a; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "2e396e7f4e804f97f7330cff6427957694f84326",
+        "upstream_sha": "923704c7c243d4d0ff4008279eb95e3bfa48a64c"
+      },
+      "semantic_equivalence": {
+        "evidence": "Streaming tool_calls-with-empty-array responses use the same bounded recovery and remove the adjacent scaffolding before the next provider request; covered by dropped_tool_call.",
         "method": "behavioral_contract"
       }
     },
@@ -4564,6 +5208,20 @@
         "method": "intentional_divergence"
       }
     },
+    "94a0cb283e65e0de9605ca9464e46a8be1f0f098": {
+      "disposition": "superseded",
+      "notes": "Honcho is first in the default memory provider preference while explicit HERMES_MEMORY_PROVIDER_ORDER remains authoritative.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "94a0cb283e65e0de9605ca9464e46a8be1f0f098",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "Rust default_preferred_provider_order now begins with honcho and preferred_provider_order retains its environment override; default_provider_order_prioritizes_honcho passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Honcho is first in the default memory provider preference while explicit HERMES_MEMORY_PROVIDER_ORDER remains authoritative."
+      }
+    },
     "94c2a4016bed3309bb33bf60a1c20d707bbfc4a5": {
       "disposition": "superseded",
       "notes": "Both Rust compression inputs are nonblocking in-memory state.",
@@ -4620,6 +5278,20 @@
         "method": "intentional_divergence"
       }
     },
+    "96560ee60f3b2ab64a5777e40f010e4586c40710": {
+      "disposition": "superseded",
+      "notes": "SqliteSessionSearchBackend::pure_latin_fallback_terms and search_sessions_by_latin_substring recover ASCII terms embedded in CJK text after a zero-result FTS pass; focused Rust regression search_recovers_pure_latin_term_embedded_in_cjk_text passed.",
+      "owner": "sessions-workspaces",
+      "provenance": {
+        "upstream_sha": "96560ee60f3b2ab64a5777e40f010e4586c40710",
+        "fork_sha": "87de73debcd381cb69981565e2c77c22f384baef",
+        "evidence": "SqliteSessionSearchBackend::pure_latin_fallback_terms and search_sessions_by_latin_substring recover ASCII terms embedded in CJK text after a zero-result FTS pass; focused Rust regression search_recovers_pure_latin_term_embedded_in_cjk_text passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "SqliteSessionSearchBackend::pure_latin_fallback_terms and search_sessions_by_latin_substring recover ASCII terms embedded in CJK text after a zero-result FTS pass; focused Rust regression search_recovers_pure_latin_term_embedded_in_cjk_text passed."
+      }
+    },
     "96ba7ec529079b3395a7036dd84abf96e25e506b": {
       "disposition": "superseded",
       "notes": "fmt-only JS",
@@ -4631,6 +5303,20 @@
       },
       "semantic_equivalence": {
         "evidence": "Exact git show review: formatter changed only whitespace/wrapping/import layout; literals, operators and control flow unchanged.",
+        "method": "behavioral_contract"
+      }
+    },
+    "97249cfc8abb9053c518552cbec88ec45aee0d76": {
+      "disposition": "superseded",
+      "notes": "Commit 346d6685ef6692700fa54feb370d316e231d0d89 adds scripts/install.ps1 and installer_contract::windows_release_installer_is_portable_and_published; focused test passed.",
+      "owner": "release-packaging",
+      "provenance": {
+        "evidence": "Commit 346d6685ef6692700fa54feb370d316e231d0d89 adds scripts/install.ps1 and installer_contract::windows_release_installer_is_portable_and_published; focused test passed.",
+        "fork_sha": "d5828cf1b46e4efcbc0a1cb7fc0504f9f0eee121",
+        "upstream_sha": "97249cfc8abb9053c518552cbec88ec45aee0d76"
+      },
+      "semantic_equivalence": {
+        "evidence": "Commit 346d6685ef6692700fa54feb370d316e231d0d89 adds scripts/install.ps1 and installer_contract::windows_release_installer_is_portable_and_published; focused test passed.",
         "method": "behavioral_contract"
       }
     },
@@ -4660,6 +5346,20 @@
       "semantic_equivalence": {
         "evidence": "Exact git show review: formatter changed only whitespace/wrapping/import layout; literals, operators and control flow unchanged.",
         "method": "behavioral_contract"
+      }
+    },
+    "9884b4faad0fabe76ee767e85cd9c261785fb742": {
+      "disposition": "superseded",
+      "notes": "Chronos coalesces remote-JWKS fetches per URL and retries once on an unknown kid.",
+      "owner": "scheduler-delegation",
+      "provenance": {
+        "upstream_sha": "9884b4faad0fabe76ee767e85cd9c261785fb742",
+        "fork_sha": "3df8a855c316fcdee42bfbdbcec63451129ccc72",
+        "evidence": "Rust crates/hermes-cron/src/chronos.rs caches JwkSet values behind a per-URL async mutex; remote_jwks_cache_coalesces_concurrent_initial_fetches passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Chronos coalesces remote-JWKS fetches per URL and retries once on an unknown kid."
       }
     },
     "98cadadd84fb1354fa5e999ed0e2f0eb294dbeae": {
@@ -5068,6 +5768,34 @@
         "method": "behavioral_contract"
       }
     },
+    "a3828a94d071a44b0c9e97a2923890f84c8179c5": {
+      "disposition": "superseded",
+      "notes": "Rust curated catalogs include GPT-5.6 Terra Pro and related Pro variants; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "a3828a94d071a44b0c9e97a2923890f84c8179c5",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust curated catalogs include GPT-5.6 Terra Pro and related Pro variants; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust curated catalogs include GPT-5.6 Terra Pro and related Pro variants; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      }
+    },
+    "a43ac2af65036092c3a44c8e8fadf6d492d4e753": {
+      "disposition": "superseded",
+      "notes": "SlackAdapter::post_blocks now sanitizes at the outbound boundary and falls back to plain text when no valid blocks remain; sanitizer drops invalid blocks, clamps Slack character limits, and caps block count. Focused Rust regression slack_block_sanitizer_drops_invalid_blocks_and_clamps_limits passed.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "a43ac2af65036092c3a44c8e8fadf6d492d4e753",
+        "fork_sha": "6b9eef3bff6f902a368ad7d935457007491faa99",
+        "evidence": "SlackAdapter::post_blocks now sanitizes at the outbound boundary and falls back to plain text when no valid blocks remain; sanitizer drops invalid blocks, clamps Slack character limits, and caps block count. Focused Rust regression slack_block_sanitizer_drops_invalid_blocks_and_clamps_limits passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "SlackAdapter::post_blocks now sanitizes at the outbound boundary and falls back to plain text when no valid blocks remain; sanitizer drops invalid blocks, clamps Slack character limits, and caps block count. Focused Rust regression slack_block_sanitizer_drops_invalid_blocks_and_clamps_limits passed."
+      }
+    },
     "a4795da3cca70fa08b2cb52002debb119b6fe5a8": {
       "disposition": "superseded",
       "notes": "chore(contributors): map esther@feedmob.com -> Esther-Zhu023: upstream contributor-attribution metadata only; no executable source or test changes.",
@@ -5180,6 +5908,20 @@
         "method": "intentional_divergence"
       }
     },
+    "a5b9803a51d33ecaa3a0f638b302593ae0446c93": {
+      "disposition": "superseded",
+      "notes": "Commit 0d5d2447dbaf2806a5431ee28a0f0996b79cd6e4 adds Moonshot empty-required-array sanitization plus test_moonshot_tool_formatter_emits_empty_required_array; focused test passed.",
+      "owner": "test-harness",
+      "provenance": {
+        "evidence": "Commit 0d5d2447dbaf2806a5431ee28a0f0996b79cd6e4 adds Moonshot empty-required-array sanitization plus test_moonshot_tool_formatter_emits_empty_required_array; focused test passed.",
+        "fork_sha": "875bf6e54eeacd6ea935b43d013d88c1c5593358",
+        "upstream_sha": "a5b9803a51d33ecaa3a0f638b302593ae0446c93"
+      },
+      "semantic_equivalence": {
+        "evidence": "Commit 0d5d2447dbaf2806a5431ee28a0f0996b79cd6e4 adds Moonshot empty-required-array sanitization plus test_moonshot_tool_formatter_emits_empty_required_array; focused test passed.",
+        "method": "behavioral_contract"
+      }
+    },
     "a710becd6c57a21a7be547b60c910b5dbd0847a9": {
       "disposition": "superseded",
       "notes": "The 25 consistency corrections are all upstream Docusaurus website pages.",
@@ -5194,6 +5936,20 @@
         "method": "intentional_divergence"
       }
     },
+    "a7a05024c11e4aeecb680e6886b665d933ad2c80": {
+      "disposition": "superseded",
+      "notes": "Credential-store updates and refreshes are serialized by canonical store path/provider, reload inside the gate, and flush only the merged state; covered by refreshes_are_serialized_by_store_path_and_provider and refresh_reloads_a_store_opened_before_another_manager_saved_credentials.",
+      "owner": "config-secrets-auth",
+      "provenance": {
+        "evidence": "Local recovery commit c410ca76db7bae075a342d423774d78d024e2e0b; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "c83ee97b08c8c35c9475660a797bf72dabddb378",
+        "upstream_sha": "a7a05024c11e4aeecb680e6886b665d933ad2c80"
+      },
+      "semantic_equivalence": {
+        "evidence": "Credential-store updates and refreshes are serialized by canonical store path/provider, reload inside the gate, and flush only the merged state; covered by refreshes_are_serialized_by_store_path_and_provider and refresh_reloads_a_store_opened_before_another_manager_saved_credentials.",
+        "method": "behavioral_contract"
+      }
+    },
     "a7a696ba59e0838a81351859abb39fb8484d4973": {
       "disposition": "superseded",
       "notes": "fmt-only JS",
@@ -5206,6 +5962,20 @@
       "semantic_equivalence": {
         "evidence": "Exact git show review: formatter changed only whitespace/wrapping/import layout; literals, operators and control flow unchanged.",
         "method": "behavioral_contract"
+      }
+    },
+    "a801046669657f117dfb3f3ce7f12ad94dfa87b2": {
+      "disposition": "superseded",
+      "notes": "Symlink aliases resolve to the same holographic database registry entry.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "a801046669657f117dfb3f3ce7f12ad94dfa87b2",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "Rust canonical_holographic_database_path resolves the database or canonical parent before registry lookup; canonical_database_aliases_share_connection_and_survive_peer_shutdown passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Symlink aliases resolve to the same holographic database registry entry."
       }
     },
     "a8602e4afa3156e6756be7adb3f76f88a9f3ddd8": {
@@ -5276,6 +6046,20 @@
       "semantic_equivalence": {
         "evidence": "The Ink picker and its session-scope callbacks do not cross into the Rust Ratatui command dispatcher.",
         "method": "intentional_divergence"
+      }
+    },
+    "ac6dd598a4b8a76c044f5b4cde4ca354845c9f45": {
+      "disposition": "superseded",
+      "notes": "Desktop chat runs receive desktop platform framing while terminal surfaces retain CLI framing.",
+      "owner": "desktop-app",
+      "provenance": {
+        "upstream_sha": "ac6dd598a4b8a76c044f5b4cde4ca354845c9f45",
+        "fork_sha": "8602f9be6a187dc9e2b41664d853de6b6d92040c",
+        "evidence": "Rust hermes-app-runtime resolves HERMES_DESKTOP without HERMES_DESKTOP_TERMINAL to desktop; AgentLoop adds a graphical-client hint and retains the fallback match arm. test_build_agent_config_uses_desktop_surface_only_for_desktop_chat and coding_context_prompt_respects_platform_and_off_mode passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Desktop chat runs receive desktop platform framing while terminal surfaces retain CLI framing."
       }
     },
     "ac70af03952728d72424eaf9e468db97ff655f41": {
@@ -5418,6 +6202,20 @@
         "method": "behavioral_contract"
       }
     },
+    "b27d8b6ac8c8eed4c995d1b92790d476eb6e7149": {
+      "disposition": "superseded",
+      "notes": "Rust curated provider ordering promotes Fireworks to the second picker entry; focused Rust regression curated_models_track_current_agentic_catalogs passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "b27d8b6ac8c8eed4c995d1b92790d476eb6e7149",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Rust curated provider ordering promotes Fireworks to the second picker entry; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Rust curated provider ordering promotes Fireworks to the second picker entry; focused Rust regression curated_models_track_current_agentic_catalogs passed."
+      }
+    },
     "b30108143e5f6feb605e40d1f2624ea8b58bc4a0": {
       "disposition": "superseded",
       "notes": "The website-only documentation change is covered by the approved primary UX divergence ledger entry.",
@@ -5458,6 +6256,48 @@
       "semantic_equivalence": {
         "evidence": "The corresponding concurrency gaps are closed atomically.",
         "method": "behavioral_contract"
+      }
+    },
+    "b5226caff8eeca575ea64a4c68dee5dc84b1e50f": {
+      "disposition": "superseded",
+      "notes": "Holographic memory plugins sharing one database share a SQLite connection and preserve concurrent writes.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "b5226caff8eeca575ea64a4c68dee5dc84b1e50f",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "Rust weak Arc registry returns one parking_lot-protected Connection per database; concurrent_scoped_writers_preserve_every_fact and canonical_database_aliases_share_connection_and_survive_peer_shutdown passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Holographic memory plugins sharing one database share a SQLite connection and preserve concurrent writes."
+      }
+    },
+    "b5f0e451c15dd3346a593406b1551cb599ee215c": {
+      "disposition": "superseded",
+      "notes": "Resume snapshots persist cwd; interactive resume restores an existing recorded directory best-effort and supports --no-restore-cwd. Focused Rust regressions resume_workspace_restore_is_best_effort_and_opt_outable and cli_parse_resume_can_keep_current_directory passed.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "b5f0e451c15dd3346a593406b1551cb599ee215c",
+        "fork_sha": "9d14aee4fb8960bb2073df5ef515a629c6cb59a7",
+        "evidence": "Resume snapshots persist cwd; interactive resume restores an existing recorded directory best-effort and supports --no-restore-cwd. Focused Rust regressions resume_workspace_restore_is_best_effort_and_opt_outable and cli_parse_resume_can_keep_current_directory passed."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "Resume snapshots persist cwd; interactive resume restores an existing recorded directory best-effort and supports --no-restore-cwd. Focused Rust regressions resume_workspace_restore_is_best_effort_and_opt_outable and cli_parse_resume_can_keep_current_directory passed."
+      }
+    },
+    "b6c11a35ac66b38719c8f7a91fb0644b293acbdb": {
+      "disposition": "superseded",
+      "notes": "The catalog-backed Blender MCP v2.1 skill/document/reference contract is concretely present in the committed fork files; per-file SHA-256 values match the inspected upstream b6c11a35 versions.",
+      "owner": "memory-plugins-skills",
+      "provenance": {
+        "upstream_sha": "b6c11a35ac66b38719c8f7a91fb0644b293acbdb",
+        "fork_sha": "afa9098597d7c79652c9469bda530e82d1a73e28",
+        "evidence": "Concrete matching fork content: the committed SKILL.md, user-guide page, pitfalls.md, and recipes.md have the exact per-file SHA-256 values observed from upstream b6c11a35. This is behavioral/file-content evidence, not an entire Git tree-object proof."
+      },
+      "semantic_equivalence": {
+        "method": "behavioral_contract",
+        "evidence": "The catalog-backed Blender MCP v2.1 skill/document/reference contract is concretely present in the committed fork files; per-file SHA-256 values match the inspected upstream b6c11a35 versions."
       }
     },
     "b6f749af94c749f5e7cb5049c63799467cd7acde": {
@@ -5514,6 +6354,20 @@
       "semantic_equivalence": {
         "evidence": "Inspected upstream commit b8939e8316e89896d5f7081f6148ef090a20f0d8 (fix(slack): guard _resolve_thread_ts against async/cron deliveries using stale thread context); git metadata records the sole changed path as plugins/platforms/slack/adapter.py. docs/parity/intentional-divergence.json approved item rust-gateway-platform-plugin-parity includes the exact plugins/platforms/slack/ path prefix.",
         "method": "intentional_divergence"
+      }
+    },
+    "b8bf368b02c67f3b4e28299f908860dab809bfb6": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "b8bf368b02c67f3b4e28299f908860dab809bfb6",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "b9858acb0ce504dcfd0ade16792ee68033507d84": {
@@ -6174,6 +7028,20 @@
         "method": "behavioral_contract"
       }
     },
+    "ca8aee87e8162d7fe2c757c08f164d6cabe59a2b": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "ca8aee87e8162d7fe2c757c08f164d6cabe59a2b",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "ca988df8d0afb16480b13789b311aea69b2a58d9": {
       "disposition": "superseded",
       "notes": "Inspected upstream diff and the named Rust or non-runtime contract; no additive port is required for this SHA.",
@@ -6200,6 +7068,20 @@
       "semantic_equivalence": {
         "evidence": "crates/hermes-agent/src/interrupt.rs and agent_loop/methods_session.rs::drain_tool_batch_interrupt provide active-turn steer/stop state; crates/hermes-gateway/src/gateway/session_control.rs routes active versus queued input.",
         "method": "behavioral_contract"
+      }
+    },
+    "cc64f0289a7cbab5f9f158ed80da51ef168dd5ae": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "cc64f0289a7cbab5f9f158ed80da51ef168dd5ae",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
       }
     },
     "cca7b93bfee43ca579e33667adb1cb9cb2910a15": {
@@ -6508,6 +7390,20 @@
       "semantic_equivalence": {
         "evidence": "An exhausted credential pool cannot remove a curated provider from the picker because credential availability only changes the displayed auth detail, not item inclusion.",
         "method": "behavioral_contract"
+      }
+    },
+    "d6080d4cf7dd642a43a587260121770dad25786a": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "d6080d4cf7dd642a43a587260121770dad25786a",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "d661886c90a7f6dcb0e452b6535326aa8c68a918": {
@@ -6984,6 +7880,20 @@
       "semantic_equivalence": {
         "evidence": "At the exact fork, .github/workflows/release.yml and the shipped Rust crates do not read contributors/emails. This is classified as non-runtime attribution metadata, not as an unapproved intentional divergence.",
         "method": "behavioral_contract"
+      }
+    },
+    "ec6fa9bdb255ec71a2ed809f4df323bd67f3b03a": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/.",
+      "owner": "cli-tui",
+      "provenance": {
+        "upstream_sha": "ec6fa9bdb255ec71a2ed809f4df323bd67f3b03a",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): ui-tui/."
       }
     },
     "ec734b6658a0a9c0955ea8138764e6bd89aa390b": {
@@ -7504,6 +8414,20 @@
         "method": "behavioral_contract"
       }
     },
+    "fccc222bd71f257b5d43aa053d36f0e52b79aa7d": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "fccc222bd71f257b5d43aa053d36f0e52b79aa7d",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/slack/."
+      }
+    },
     "fd461b58cad4ed64d0121b60481694a597aa1e6c": {
       "disposition": "superseded",
       "notes": "Rust compression state has no fallible DB probe.",
@@ -7560,6 +8484,20 @@
         "method": "behavioral_contract"
       }
     },
+    "fe25806a6bfa8318d56a3e1a4065abf04d619fb2": {
+      "disposition": "superseded",
+      "notes": "Config loading preserves and returns the process-local last known good user config after a transient parse or validation rejection; covered by load_config_retains_only_a_previously_valid_user_config_after_transient_rejection.",
+      "owner": "config-secrets-auth",
+      "provenance": {
+        "evidence": "Local recovery commit c410ca76db7bae075a342d423774d78d024e2e0b; exact behavior is implemented in the committed Rust diff.",
+        "fork_sha": "c83ee97b08c8c35c9475660a797bf72dabddb378",
+        "upstream_sha": "fe25806a6bfa8318d56a3e1a4065abf04d619fb2"
+      },
+      "semantic_equivalence": {
+        "evidence": "Config loading preserves and returns the process-local last known good user config after a transient parse or validation rejection; covered by load_config_retains_only_a_previously_valid_user_config_after_transient_rejection.",
+        "method": "behavioral_contract"
+      }
+    },
     "fe2ae409832bba1fbab8153d6e1705ce4cd5d869": {
       "disposition": "superseded",
       "notes": "fix(agent): demote oversized tool results in protected compression tail: inspected individually; Rust disposition is superseded by the cited behavioral contract.",
@@ -7572,6 +8510,20 @@
       "semantic_equivalence": {
         "evidence": "crates/hermes-agent/src/compression.rs::find_tail_cut_by_tokens caps the protected minimum at three messages and aligns whole tool pairs, so the reviewed 3-head/8-oversized-tail shape still yields a nonempty compression window.",
         "method": "behavioral_contract"
+      }
+    },
+    "fecceec11e1a82c9314ad04dd35061f6688810a3": {
+      "disposition": "superseded",
+      "notes": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/.",
+      "owner": "gateway-platforms",
+      "provenance": {
+        "upstream_sha": "fecceec11e1a82c9314ad04dd35061f6688810a3",
+        "fork_sha": "626a955d28cbd61138be36964a3bc9d3bc761510",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/."
+      },
+      "semantic_equivalence": {
+        "method": "intentional_divergence",
+        "evidence": "Every changed upstream path is covered by approved intentional-divergence prefix(es): plugins/platforms/telegram/."
       }
     },
     "ff6d86ed0f474b51a3c5db2b5738926a8ca3d92c": {
