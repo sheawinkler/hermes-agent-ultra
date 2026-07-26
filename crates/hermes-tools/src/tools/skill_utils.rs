@@ -659,7 +659,9 @@ pub fn read_verified_skill_file(
             }
             Ok(bytes)
         }
-        SkillTrustRead::NotFound => Err("requested file is not present in the verified package".to_string()),
+        SkillTrustRead::NotFound => {
+            Err("requested file is not present in the verified package".to_string())
+        }
         SkillTrustRead::Quarantined { name, quarantine } => Err(format!(
             "package '{}' is quarantined ({:?}): {}",
             name, quarantine.reason, quarantine.detail
@@ -670,12 +672,12 @@ pub fn read_verified_skill_file(
 impl SkillTrustRuntime {
     fn store(&self, skills_root: &Path) -> Result<SkillTrustStore, String> {
         match &self.source {
-            SkillTrustRuntimeSource::Explicit(verifier) => Ok(
-                SkillTrustStore::with_shared_verifier(
+            SkillTrustRuntimeSource::Explicit(verifier) => {
+                Ok(SkillTrustStore::with_shared_verifier(
                     skills_root.to_path_buf(),
                     Arc::clone(verifier),
-                ),
-            ),
+                ))
+            }
             SkillTrustRuntimeSource::RootConfigured {
                 policy,
                 embedded_manifest_digests,

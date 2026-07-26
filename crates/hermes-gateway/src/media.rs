@@ -11,8 +11,8 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
-use hermes_core::errors::GatewayError;
 pub use hermes_config::{validate_media_delivery_path, ValidatedMediaDelivery};
+use hermes_core::errors::GatewayError;
 
 /// Stage a protected delivery snapshot without blocking a gateway async worker.
 pub(crate) async fn stage_media_delivery_path(path: &str) -> Option<ValidatedMediaDelivery> {
@@ -104,7 +104,6 @@ impl Default for MediaCacheConfig {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // MediaCache
@@ -852,5 +851,4 @@ mod tests {
         assert!(is_path_within(&ok, &root));
         assert!(!is_path_within(&bad, &root));
     }
-
 }

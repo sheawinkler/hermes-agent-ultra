@@ -13,8 +13,8 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -220,10 +220,14 @@ impl Drop for EnvGuard {
 }
 
 async fn spawn_server(app: Router) -> RunningServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind listener");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
     let address = listener.local_addr().expect("listener address");
     let task = tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve test listener");
+        axum::serve(listener, app)
+            .await
+            .expect("serve test listener");
     });
     RunningServer {
         base_url: format!("http://{address}"),
@@ -232,7 +236,9 @@ async fn spawn_server(app: Router) -> RunningServer {
 }
 
 async fn spawn_mock_idp() -> (Arc<MockIdp>, RunningServer) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock IdP");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock IdP");
     let address = listener.local_addr().expect("mock IdP address");
     let issuer = format!("http://{address}");
     let idp = Arc::new(MockIdp::new(issuer));
@@ -273,7 +279,10 @@ fn oidc_env(
         ("HERMES_DASHBOARD_AUTH_PROVIDER", Some("oidc".to_string())),
         ("HERMES_DASHBOARD_AUTH_MODE", None),
         ("HERMES_DASHBOARD_OIDC_ISSUER", Some(issuer.to_string())),
-        ("HERMES_DASHBOARD_OIDC_CLIENT_ID", Some(CLIENT_ID.to_string())),
+        (
+            "HERMES_DASHBOARD_OIDC_CLIENT_ID",
+            Some(CLIENT_ID.to_string()),
+        ),
         (
             "HERMES_DASHBOARD_OIDC_REDIRECT_URI",
             Some(redirect_uri.to_string()),
@@ -379,7 +388,11 @@ async fn mock_token(
     idp.token_requests.lock().await.push(record);
     let mode = *idp.token_mode.lock().await;
     if mode == TokenMode::ProviderError {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error":"invalid_grant"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":"invalid_grant"})),
+        )
+            .into_response();
     }
     if mode == TokenMode::Malformed {
         return (StatusCode::OK, "not-json").into_response();
@@ -413,7 +426,11 @@ async fn mock_refresh(idp: Arc<MockIdp>, form: HashMap<String, String>) -> Respo
     let mode = *idp.refresh_mode.lock().await;
     match mode {
         RefreshMode::Rejected => {
-            return (StatusCode::UNAUTHORIZED, Json(json!({"error":"invalid_grant"}))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error":"invalid_grant"})),
+            )
+                .into_response();
         }
         RefreshMode::Malformed => return (StatusCode::OK, "not-json").into_response(),
         RefreshMode::Delayed => tokio::time::sleep(Duration::from_millis(200)).await,
@@ -518,9 +535,7 @@ fn signed_id_token(mode: TokenMode, issuer: &str, nonce: &str) -> String {
         }),
     };
     if let Some(claims) = claims.as_object_mut() {
-        claims
-            .entry("email_verified")
-            .or_insert(Value::Bool(true));
+        claims.entry("email_verified").or_insert(Value::Bool(true));
     }
     match mode {
         TokenMode::RsaB => sign_rsa(&claims, RSA_B_DER_B64, "rsa-b"),
@@ -575,7 +590,10 @@ fn sign_ec(claims: &Value, kid: &str) -> String {
 fn redirect(location: &str) -> Response {
     (
         StatusCode::FOUND,
-        [(LOCATION, HeaderValue::from_str(location).expect("redirect header"))],
+        [(
+            LOCATION,
+            HeaderValue::from_str(location).expect("redirect header"),
+        )],
         "",
     )
         .into_response()
@@ -619,8 +637,7 @@ fn session_sid(cookie: &str) -> String {
         .next()
         .expect("signed session body");
     let bytes = URL_SAFE_NO_PAD.decode(value).expect("decode session body");
-    serde_json::from_slice::<Value>(&bytes)
-        .expect("session JSON")["sid"]
+    serde_json::from_slice::<Value>(&bytes).expect("session JSON")["sid"]
         .as_str()
         .expect("session identifier")
         .to_string()
@@ -646,7 +663,11 @@ async fn refresh_session(
         .expect("refresh request")
 }
 
-async fn begin_login(client: &reqwest::Client, dashboard: &str, return_to: &str) -> (String, String) {
+async fn begin_login(
+    client: &reqwest::Client,
+    dashboard: &str,
+    return_to: &str,
+) -> (String, String) {
     let response = client
         .get(format!("{dashboard}/auth/oidc/login"))
         .query(&[("return_to", return_to)])
@@ -728,7 +749,8 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
     std::env::set_var("HERMES_DASHBOARD_OIDC_REDIRECT_URI", &actual_redirect);
     let client = no_redirect_client();
 
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "https://evil.example").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "https://evil.example").await;
     let authorization = idp.authorization.lock().await;
     let first = authorization.last().expect("authorization record");
     assert_eq!(first.response_type, "code");
@@ -753,7 +775,10 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
     let response = complete_callback(&client, &login_cookie, &callback_url).await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
-        response.headers().get(LOCATION).and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok()),
         Some("/")
     );
     let session_cookie = response_cookie(response.headers(), "hermes_dashboard_session");
@@ -790,10 +815,15 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
     assert_eq!(machine.status(), StatusCode::UNAUTHORIZED);
 
     idp.set_token_mode(TokenMode::RsaB).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     let response = complete_callback(&client, &login_cookie, &callback_url).await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(idp.jwks_requests.load(Ordering::SeqCst), 2, "one kid-miss refresh after A→B rotation");
+    assert_eq!(
+        idp.jwks_requests.load(Ordering::SeqCst),
+        2,
+        "one kid-miss refresh after A→B rotation"
+    );
 
     idp.set_cache_control("no-cache").await;
     idp.set_token_mode(TokenMode::Es).await;
@@ -802,7 +832,9 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
         let (login_cookie, callback_url) =
             begin_login(&client, &dashboard.base_url, "/dashboard").await;
         assert_eq!(
-            complete_callback(&client, &login_cookie, &callback_url).await.status(),
+            complete_callback(&client, &login_cookie, &callback_url)
+                .await
+                .status(),
             StatusCode::FOUND,
             "ES256 id_token is accepted with an EC JWK"
         );
@@ -822,31 +854,41 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
         TokenMode::FutureNbf,
     ] {
         idp.set_token_mode(mode).await;
-        let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+        let (login_cookie, callback_url) =
+            begin_login(&client, &dashboard.base_url, "/dashboard").await;
         assert_eq!(
-            complete_callback(&client, &login_cookie, &callback_url).await.status(),
+            complete_callback(&client, &login_cookie, &callback_url)
+                .await
+                .status(),
             StatusCode::UNAUTHORIZED,
             "{mode:?} must fail verification"
         );
     }
 
     idp.set_token_mode(TokenMode::Denied).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::FORBIDDEN
     );
 
     idp.set_token_mode(TokenMode::UnverifiedEmail).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::FORBIDDEN,
         "an allowlisted email must still be verified"
     );
 
     idp.set_token_mode(TokenMode::ShortLived).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     let short_lived = complete_callback(&client, &login_cookie, &callback_url).await;
     assert_eq!(short_lived.status(), StatusCode::FOUND);
     let session_cookie = all_set_cookies(short_lived.headers())
@@ -861,10 +903,13 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
         .expect("integer session max age");
     assert!((1..=30).contains(&max_age));
 
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     let bad_state_url = callback_with_state(&callback_url, "wrong-state");
     assert_eq!(
-        complete_callback(&client, &login_cookie, &bad_state_url).await.status(),
+        complete_callback(&client, &login_cookie, &bad_state_url)
+            .await
+            .status(),
         StatusCode::UNAUTHORIZED
     );
 
@@ -873,35 +918,47 @@ async fn mock_oidc_protocol_exercises_login_callback_claims_rotation_and_logout(
     assert_eq!(provider_error.status(), StatusCode::UNAUTHORIZED);
     assert!(all_set_cookies(provider_error.headers())
         .iter()
-        .any(|cookie| cookie.starts_with("hermes_dashboard_oidc_login=") && cookie.contains("Max-Age=0")));
+        .any(|cookie| cookie.starts_with("hermes_dashboard_oidc_login=")
+            && cookie.contains("Max-Age=0")));
 
     idp.set_token_mode(TokenMode::ProviderError).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::BAD_GATEWAY
     );
     idp.set_token_mode(TokenMode::Malformed).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::BAD_GATEWAY
     );
 
     idp.set_token_mode(TokenMode::Delayed).await;
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::BAD_GATEWAY,
         "callback token exchange timeout must fail closed"
     );
 
-
     idp.set_token_mode(TokenMode::RsaB).await;
     idp.set_jwks_malformed();
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert_eq!(
-        complete_callback(&client, &login_cookie, &callback_url).await.status(),
+        complete_callback(&client, &login_cookie, &callback_url)
+            .await
+            .status(),
         StatusCode::BAD_GATEWAY
     );
     let logout = client
@@ -987,7 +1044,8 @@ async fn configured_callback_allowlist_provider_logout_and_machine_bearer_are_ex
     assert_ne!(machine.status(), StatusCode::UNAUTHORIZED);
     assert_ne!(machine.status(), StatusCode::SERVICE_UNAVAILABLE);
 
-    let (login_cookie, callback_url) = begin_login(&client, &dashboard.base_url, "/dashboard").await;
+    let (login_cookie, callback_url) =
+        begin_login(&client, &dashboard.base_url, "/dashboard").await;
     assert!(callback_url.starts_with(&custom_redirect));
     let callback = complete_callback(&client, &login_cookie, &callback_url).await;
     assert_eq!(callback.status(), StatusCode::FOUND);
@@ -1010,12 +1068,15 @@ async fn configured_callback_allowlist_provider_logout_and_machine_bearer_are_ex
     assert_eq!(provider_url.path(), "/end-session");
     assert!(provider_url
         .query_pairs()
-        .any(|(key, value)| key == "post_logout_redirect_uri" && value.starts_with(&dashboard.base_url)));
-    assert!(all_set_cookies(logout.headers())
-        .iter()
-        .filter(|cookie| cookie.contains("Max-Age=0"))
-        .count()
-        >= 2);
+        .any(|(key, value)| key == "post_logout_redirect_uri"
+            && value.starts_with(&dashboard.base_url)));
+    assert!(
+        all_set_cookies(logout.headers())
+            .iter()
+            .filter(|cookie| cookie.contains("Max-Age=0"))
+            .count()
+            >= 2
+    );
     let revocations = idp.revocation_requests.lock().await;
     let revocation = revocations.last().expect("refresh token revocation");
     assert_eq!(revocation.client_id, CLIENT_ID);
@@ -1087,7 +1148,8 @@ async fn mock_oidc_refresh_rotates_session_and_fails_closed() {
     assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
     assert!(all_set_cookies(rejected.headers())
         .iter()
-        .any(|cookie| cookie.starts_with("hermes_dashboard_session=") && cookie.contains("Max-Age=0")));
+        .any(|cookie| cookie.starts_with("hermes_dashboard_session=")
+            && cookie.contains("Max-Age=0")));
 
     idp.set_token_mode(TokenMode::RsaA).await;
     let malformed_source = fresh_session(&client, &dashboard.base_url).await;
@@ -1132,7 +1194,8 @@ async fn mock_oidc_refresh_rotates_session_and_fails_closed() {
     );
     assert!(all_set_cookies(cross_subject.headers())
         .iter()
-        .any(|cookie| cookie.starts_with("hermes_dashboard_session=") && cookie.contains("Max-Age=0")));
+        .any(|cookie| cookie.starts_with("hermes_dashboard_session=")
+            && cookie.contains("Max-Age=0")));
     let cross_subject_status: Value = client
         .get(format!("{}/auth/status", dashboard.base_url))
         .header(COOKIE, &cross_subject_source)
@@ -1203,15 +1266,24 @@ async fn misconfigured_oidc_is_503_and_invalid_machine_bearer_boolean_fails_clos
     let _env_lock = ENV_LOCK.lock().await;
     let _env = EnvGuard::apply(vec![
         ("HERMES_DASHBOARD_AUTH_PROVIDER", Some("oidc".to_string())),
-        ("HERMES_DASHBOARD_OIDC_ISSUER", Some("http://127.0.0.1:8787".to_string())),
-        ("HERMES_DASHBOARD_OIDC_CLIENT_ID", Some(CLIENT_ID.to_string())),
+        (
+            "HERMES_DASHBOARD_OIDC_ISSUER",
+            Some("http://127.0.0.1:8787".to_string()),
+        ),
+        (
+            "HERMES_DASHBOARD_OIDC_CLIENT_ID",
+            Some(CLIENT_ID.to_string()),
+        ),
         (
             "HERMES_DASHBOARD_OIDC_REDIRECT_URI",
             Some("http://127.0.0.1:8787/auth/oidc/callback".to_string()),
         ),
         ("HERMES_DASHBOARD_SESSION_SECRET", None),
         ("HERMES_DASHBOARD_OIDC_SESSION_SECRET", None),
-        ("HERMES_DASHBOARD_OIDC_ALLOW_MACHINE_BEARER", Some("false".to_string())),
+        (
+            "HERMES_DASHBOARD_OIDC_ALLOW_MACHINE_BEARER",
+            Some("false".to_string()),
+        ),
         ("HERMES_HTTP_API_KEY", Some(MACHINE_BEARER.to_string())),
     ]);
     let dashboard = spawn_dashboard().await;
@@ -1244,7 +1316,6 @@ async fn misconfigured_oidc_is_503_and_invalid_machine_bearer_boolean_fails_clos
             .status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
-
 
     std::env::set_var("HERMES_DASHBOARD_SESSION_SECRET", SESSION_SECRET);
     std::env::set_var("HERMES_DASHBOARD_OIDC_ALLOW_MACHINE_BEARER", "TRUE");

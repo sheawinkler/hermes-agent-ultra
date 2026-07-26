@@ -153,10 +153,7 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
-    fn classify_native_media_failure(
-        &self,
-        error: &GatewayError,
-    ) -> NativeMediaFailureClass {
+    fn classify_native_media_failure(&self, error: &GatewayError) -> NativeMediaFailureClass {
         match error {
             GatewayError::MediaPreflightFailed { .. }
             | GatewayError::MediaRemoteRejected { .. } => NativeMediaFailureClass::Rejected,
@@ -164,10 +161,7 @@ impl PlatformAdapter for DiscordAdapter {
         }
     }
 
-    async fn resume_partial_delivery(
-        &self,
-        partial: &PartialDelivery,
-    ) -> Result<(), GatewayError> {
+    async fn resume_partial_delivery(&self, partial: &PartialDelivery) -> Result<(), GatewayError> {
         self.resume_partial_text(partial).await
     }
 
@@ -257,11 +251,7 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
-    fn reaction_target_chat_id<'a>(
-        &self,
-        chat_id: &'a str,
-        thread_id: Option<&'a str>,
-    ) -> &'a str {
+    fn reaction_target_chat_id<'a>(&self, chat_id: &'a str, thread_id: Option<&'a str>) -> &'a str {
         thread_id.unwrap_or(chat_id)
     }
 

@@ -114,12 +114,7 @@ impl<'a> ExactReplayLifecycleCoordinator<'a> {
         ) {
             Ok(prepared) => (prepared, ReplayArtifactFidelity::ExactPrivate),
             Err(_) => (
-                prepare_artifact_bound(
-                    raw_artifact,
-                    private_evidence,
-                    redactor,
-                    &fingerprint_key,
-                )?,
+                prepare_artifact_bound(raw_artifact, private_evidence, redactor, &fingerprint_key)?,
                 ReplayArtifactFidelity::MetadataOnly,
             ),
         };

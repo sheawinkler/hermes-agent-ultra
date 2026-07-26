@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use hermes_agent::plugins::{PluginManager, PluginManifest, PluginQuarantineReason};
 use hermes_skills::{
     canonical_bundle_digest, full_skill_scan, load_lock, store_lock, store_revocations,
-    LocalOwnerSigningKey, PendingOwnerAttestation, SignedSkillRevocationList,
-    SkillCompatibility, SkillLockEntryV2, SkillLockV2, SkillPackageDependency,
-    SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof, SkillPackageSource,
-    SkillPermission, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
-    SkillTrustAuthorityPaths, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
-    SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+    LocalOwnerSigningKey, PendingOwnerAttestation, SignedSkillRevocationList, SkillCompatibility,
+    SkillLockEntryV2, SkillLockV2, SkillPackageDependency, SkillPackageIdentityV2,
+    SkillPackageManifestV2, SkillPackageProof, SkillPackageSource, SkillPermission,
+    SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey, SkillTrustAuthorityPaths,
+    SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier, SKILL_LOCK_SCHEMA_VERSION,
+    SKILL_REVOCATION_SCHEMA_VERSION,
 };
 use tempfile::TempDir;
 
@@ -130,10 +130,12 @@ fn write_remote_bundle(
     );
     let mut package_dependencies = dependencies
         .iter()
-        .map(|(dependency_name, dependency_version)| SkillPackageDependency {
-            name: (*dependency_name).to_string(),
-            version: (*dependency_version).to_string(),
-        })
+        .map(
+            |(dependency_name, dependency_version)| SkillPackageDependency {
+                name: (*dependency_name).to_string(),
+                version: (*dependency_version).to_string(),
+            },
+        )
         .collect::<Vec<_>>();
     package_dependencies.sort();
     let mut package_manifest = SkillPackageManifestV2::new(
@@ -301,7 +303,10 @@ fn revocation_is_consulted_on_fresh_discovery_without_effects() {
             revoked_at: "2026-07-20T00:00:00Z".to_string(),
         }],
     };
-    trust.signer.sign_revocations(&mut revocations, KEY_ID).unwrap();
+    trust
+        .signer
+        .sign_revocations(&mut revocations, KEY_ID)
+        .unwrap();
     store_revocations(&root, &revocations).unwrap();
 
     let report = PluginManager::discover_plugins(home.path(), &trust.verifier);
@@ -562,9 +567,7 @@ fn unprovisioned_external_authority_quarantines_plugin_discovery() {
     assert_eq!(report.quarantined.len(), 1);
     assert_eq!(
         report.quarantined[0].reason,
-        PluginQuarantineReason::Core(
-            hermes_skills::SkillQuarantineReason::UnprovisionedAuthority
-        )
+        PluginQuarantineReason::Core(hermes_skills::SkillQuarantineReason::UnprovisionedAuthority)
     );
 }
 
@@ -594,7 +597,9 @@ fn symlink_payload_is_quarantined_before_effect_registration() {
     assert!(report.admitted.is_empty());
     assert!(report.quarantined.iter().any(|quarantine| {
         quarantine.reason
-            == PluginQuarantineReason::Core(hermes_skills::SkillQuarantineReason::FilesystemViolation)
+            == PluginQuarantineReason::Core(
+                hermes_skills::SkillQuarantineReason::FilesystemViolation,
+            )
     }));
 }
 

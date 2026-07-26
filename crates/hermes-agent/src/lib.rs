@@ -8,9 +8,9 @@ pub mod agent_loop;
 mod alpha_runtime_v1;
 pub mod api_bridge;
 pub mod artifact_lifecycle;
-pub mod exact_replay_lifecycle;
 pub mod auxiliary_builder;
 pub mod bedrock;
+pub(crate) mod branch_replay_lifecycle;
 pub mod budget;
 pub mod code_index;
 pub mod coding_context;
@@ -18,9 +18,9 @@ pub mod compression;
 pub mod context;
 pub mod context_files;
 pub mod context_references;
-pub mod deterministic_replay;
-pub(crate) mod branch_replay_lifecycle;
 pub mod credential_pool;
+pub mod deterministic_replay;
+pub mod exact_replay_lifecycle;
 pub mod fallback;
 pub mod honcho_provider;
 pub mod interrupt;
@@ -40,9 +40,9 @@ pub mod rate_limit;
 pub mod reasoning;
 pub mod run_export;
 pub mod run_ledger;
+mod run_proof;
 pub mod run_runtime;
 mod runtime_cwd;
-mod run_proof;
 pub mod sealed_artifact;
 pub mod session_persistence;
 pub mod skill_orchestrator;
@@ -119,32 +119,32 @@ pub use plugins::PluginManager;
 pub use skill_orchestrator::SkillOrchestrator;
 
 // Re-export session persistence
-pub use session_persistence::{leading_system_prompt_for_persist, SessionPersistence};
 pub use alpha_runtime_v1::{
     AlphaRuntimeV1BackgroundJob, AlphaRuntimeV1DispatchSummary, AlphaRuntimeV1EnqueueReceipt,
     AlphaRuntimeV1Envelope, AlphaRuntimeV1Error, AlphaRuntimeV1EventType, AlphaRuntimeV1LoopId,
     AlphaRuntimeV1Request, AlphaRuntimeV1Variant, ALPHA_RUNTIME_V1_ENVELOPE_SCHEMA,
 };
 pub use run_runtime::{
-    CronScheduleSource, EphemeralRunRuntimeFactory, RunInspection, RunInvocationContext, RunRuntime,
-    SessionRunSelection,
+    CronScheduleSource, EphemeralRunRuntimeFactory, RunInspection, RunInvocationContext,
+    RunRuntime, SessionRunSelection,
 };
+pub use session_persistence::{leading_system_prompt_for_persist, SessionPersistence};
 
 // Re-export deterministic, provider/tool-free replay evidence.
 pub use deterministic_replay::{
     reconstruct_exact_verified_run, reconstruct_verified_run, BoundExactArtifactReader,
     DeterministicReplayError, DeterministicReplayReport, ExactArtifactReadError,
-    ExactArtifactReader, ReplayArtifactAvailability, ReplayArtifactReference,
-    ReplayEvidenceCount, ReplayEvidenceCounters, ReplayFidelity, VerifiedRunReplayPlan,
+    ExactArtifactReader, ReplayArtifactAvailability, ReplayArtifactReference, ReplayEvidenceCount,
+    ReplayEvidenceCounters, ReplayFidelity, VerifiedRunReplayPlan,
 };
 
 // Re-export scoped detached-signature verification for replay plans.
 pub use run_proof::{
     sign_verified_run_proof, verify_exact_run_evidence, verify_trust_policy_run_proof,
     ExactVerifiedRunEvidence, ExactVerifiedRunEvidenceError, ExactVerifiedRunEvidenceResult,
-    RunProofEnvelope, RunProofError, RunProofResult, RunProofTrustContext,
-    RunProofTrustDecision, RunProofTrustPolicy, TrustPolicyVerifiedRunProof, RUN_PROOF_SCHEMA,
-    RUN_PROOF_SCHEMA_VERSION, RUN_PROOF_SIGNATURE_ALGORITHM,
+    RunProofEnvelope, RunProofError, RunProofResult, RunProofTrustContext, RunProofTrustDecision,
+    RunProofTrustPolicy, TrustPolicyVerifiedRunProof, RUN_PROOF_SCHEMA, RUN_PROOF_SCHEMA_VERSION,
+    RUN_PROOF_SIGNATURE_ALGORITHM,
 };
 
 // Re-export invocation-local workspace scoping for scheduled runners.

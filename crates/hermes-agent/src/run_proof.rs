@@ -105,11 +105,8 @@ pub trait RunProofTrustPolicy {
     /// Canonical lowercase SHA-256 digest of the policy that made this decision.
     fn policy_digest(&self) -> &str;
 
-    fn resolve_key(
-        &self,
-        context: RunProofTrustContext<'_>,
-        key_id: &str,
-    ) -> RunProofTrustDecision;
+    fn resolve_key(&self, context: RunProofTrustContext<'_>, key_id: &str)
+        -> RunProofTrustDecision;
 }
 
 /// Fail-closed errors for detached proof serialization, trust, and verification.
@@ -586,8 +583,8 @@ fn verified_export_scope(
     export_bytes: &[u8],
     replay_plan: &VerifiedRunReplayPlan,
 ) -> RunProofResult<VerifiedExportScope> {
-    let document: serde_json::Value =
-        serde_json::from_slice(export_bytes).map_err(|_| RunProofError::InvalidVerifiedExportScope)?;
+    let document: serde_json::Value = serde_json::from_slice(export_bytes)
+        .map_err(|_| RunProofError::InvalidVerifiedExportScope)?;
     let tenant_id = document
         .pointer("/header/provenance/tenant_id")
         .and_then(serde_json::Value::as_str)
@@ -661,9 +658,7 @@ fn canonical_json(value: &impl Serialize) -> RunProofResult<Vec<u8>> {
 }
 
 fn validate_key_id(key_id: &str) -> RunProofResult<()> {
-    if key_id.is_empty()
-        || key_id.len() > MAX_KEY_ID_BYTES
-        || key_id.chars().any(char::is_control)
+    if key_id.is_empty() || key_id.len() > MAX_KEY_ID_BYTES || key_id.chars().any(char::is_control)
     {
         return Err(RunProofError::InvalidKeyId);
     }
@@ -1039,7 +1034,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn rejects_an_unknown_key_id() {
         let export = export_bytes(false);
@@ -1244,9 +1238,9 @@ mod tests {
         let signer = signing_key();
         let envelope = signed_envelope(&export, &signer, "known-key");
         let mut value = envelope_value(&envelope);
-        value["public_key"] = json!(base64::engine::general_purpose::STANDARD.encode(
-            signer.verifying_key().to_bytes()
-        ));
+        value["public_key"] = json!(
+            base64::engine::general_purpose::STANDARD.encode(signer.verifying_key().to_bytes())
+        );
         let error = verify_trust_policy_run_proof(
             &export,
             &canonical_value(&value),
@@ -1268,8 +1262,9 @@ mod tests {
         let test_policy = TestTrust::one("known-key", trusted_decision(&signer))
             .with_provenance("test-release-policy", "c".repeat(64));
 
-        let production = verify_trust_policy_run_proof(&export, &envelope_bytes, &production_policy)
-            .expect("production policy verifies signature");
+        let production =
+            verify_trust_policy_run_proof(&export, &envelope_bytes, &production_policy)
+                .expect("production policy verifies signature");
         let test = verify_trust_policy_run_proof(&export, &envelope_bytes, &test_policy)
             .expect("test policy verifies same signature");
 

@@ -202,7 +202,9 @@ mod tests {
         assert!(!rendered.contains("read_file"));
         assert!(rendered.contains("\"language\""));
         assert!(!schema.description.contains("sandboxed"));
-        assert!(schema.description.contains("does not provide OS sandbox isolation"));
+        assert!(schema
+            .description
+            .contains("does not provide OS sandbox isolation"));
     }
 
     #[tokio::test]
@@ -254,7 +256,9 @@ mod tests {
             .execute(json!({"code": "print(1)", "language": "python"}))
             .await
             .expect_err("Python requires a contained backend");
-        assert!(error.to_string().contains("unsupported until a contained backend"));
+        assert!(error
+            .to_string()
+            .contains("unsupported until a contained backend"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

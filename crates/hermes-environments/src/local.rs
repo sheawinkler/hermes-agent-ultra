@@ -57,23 +57,16 @@ impl ProcessSession {
     }
 
     fn terminate_tree_sync(&self) {
-        self.tree.lock()
-            .terminate_and_join_sync();
+        self.tree.lock().terminate_and_join_sync();
         self.mark_killed();
     }
 
     fn take_tasks(&self) -> Vec<JoinHandle<()>> {
         let mut tasks = Vec::new();
-        if let Some(task) = self
-            .wait_task.lock()
-            .take()
-        {
+        if let Some(task) = self.wait_task.lock().take() {
             tasks.push(task);
         }
-        tasks.extend(
-            self.reader_tasks.lock()
-                .drain(..),
-        );
+        tasks.extend(self.reader_tasks.lock().drain(..));
         tasks
     }
 
@@ -213,15 +206,11 @@ impl LocalBackend {
     }
 
     fn read_status_snapshot(session: &ProcessSession) -> ProcessStatus {
-        session
-            .status.lock()
-            .clone()
+        session.status.lock().clone()
     }
 
     fn read_output_snapshot(session: &ProcessSession) -> String {
-        session
-            .output.lock()
-            .clone()
+        session.output.lock().clone()
     }
 
     fn process_summary(session: &ProcessSession) -> Value {
@@ -244,9 +233,7 @@ impl LocalBackend {
     }
 
     fn get_session(&self, session_id: &str) -> Option<ProcessSession> {
-        self.background_processes.lock()
-            .get(session_id)
-            .cloned()
+        self.background_processes.lock().get(session_id).cloned()
     }
 
     async fn read_stream_to_buffer<R>(
@@ -410,10 +397,7 @@ impl LocalBackend {
     }
 
     fn background_sessions(&self) -> Vec<ProcessSession> {
-        self.background_processes.lock()
-            .values()
-            .cloned()
-            .collect()
+        self.background_processes.lock().values().cloned().collect()
     }
 
     /// Terminate and join every background process owned by this backend.
@@ -422,8 +406,7 @@ impl LocalBackend {
         for session in &sessions {
             session.terminate_and_join().await;
         }
-        self.background_processes.lock()
-            .clear();
+        self.background_processes.lock().clear();
     }
 
     fn shutdown_sync(&self) {
@@ -431,8 +414,7 @@ impl LocalBackend {
         for session in &sessions {
             session.terminate_and_join_sync();
         }
-        self.background_processes.lock()
-            .clear();
+        self.background_processes.lock().clear();
     }
 }
 
@@ -579,45 +561,33 @@ impl TerminalBackend for LocalBackend {
             reader_tasks: Arc::new(Mutex::new(Vec::new())),
         };
 
-        if let Some(stdout) = tree.lock()
-            .take_stdout()
-        {
+        if let Some(stdout) = tree.lock().take_stdout() {
             let output = output.clone();
-            session
-                .reader_tasks.lock()
-                .push(tokio::spawn(async move {
-                    Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
-                }));
+            session.reader_tasks.lock().push(tokio::spawn(async move {
+                Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
+            }));
         }
-        if let Some(stderr) = tree.lock()
-            .take_stderr()
-        {
+        if let Some(stderr) = tree.lock().take_stderr() {
             let output = output.clone();
-            session
-                .reader_tasks.lock()
-                .push(tokio::spawn(async move {
-                    Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
-                }));
+            session.reader_tasks.lock().push(tokio::spawn(async move {
+                Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
+            }));
         }
 
         let wait_session = session.clone();
         let wait_task = tokio::spawn(async move {
             loop {
-                let result = wait_session
-                    .tree.lock()
-                    .poll_exit();
+                let result = wait_session.tree.lock().poll_exit();
                 match result {
                     Ok(Some(exit)) => {
-                        let mut guard = wait_session
-                            .status.lock();
+                        let mut guard = wait_session.status.lock();
                         guard.exited = true;
                         guard.exit_code = exit.code();
                         break;
                     }
                     Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
                     Err(error) => {
-                        let mut guard = wait_session
-                            .status.lock();
+                        let mut guard = wait_session.status.lock();
                         guard.exited = true;
                         guard.exit_code = Some(-1);
                         let note = format!("\n[wait error: {error}]");
@@ -627,9 +597,9 @@ impl TerminalBackend for LocalBackend {
                 }
             }
         });
-        *session
-            .wait_task.lock() = Some(wait_task);
-        self.background_processes.lock()
+        *session.wait_task.lock() = Some(wait_task);
+        self.background_processes
+            .lock()
             .insert(session_id.clone(), session);
 
         let started = json!({
@@ -816,7 +786,8 @@ impl TerminalBackend for LocalBackend {
 
     async fn list_processes(&self) -> Result<Value, AgentError> {
         let sessions = self
-            .background_processes.lock()
+            .background_processes
+            .lock()
             .values()
             .cloned()
             .collect::<Vec<_>>();

@@ -1,6 +1,6 @@
+use std::process::Command;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Barrier};
-use std::process::Command;
 use std::time::Duration;
 
 use hermes_core::execution_mode::{ExecutionMode, ExecutionModeSource, ResolvedExecutionMode};
@@ -9,9 +9,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
+use crate::run_runtime::CertifiedEffectIntent;
 use crate::sealed_artifact;
 use crate::session_persistence::SessionPersistence;
-use crate::run_runtime::CertifiedEffectIntent;
 
 use super::ledger::{
     derive_nonresumable_claim_binding, derive_nonresumable_idempotency_key,
@@ -22,14 +22,14 @@ use super::types::LeaseToken;
 use super::{
     ActionId, AppendIdentity, AppendKey, AppendLease, AppendReceipt, AppendRequest,
     AppendReservation, ArtifactDegradationReason, BranchId, CanonicalJson,
-    CertifiedOutboxDestinationHandler, ClaimNext, CreatedRun, DeliveryCompletion,
-    DeliveryEvidence, DeliveryFailureReason, Destination, DigestAbsence, DispatchPolicyV1,
-    DurableDeliveryReceipt, EffectIntent, EventId, LedgerClock, LedgerConnectionFactory,
-    LedgerError, ModelId, NonResumableEffectAttempt, NonResumableEffectState, ObjectiveId,
-    OutboxRouteRegistry, OutboxState, PrivateFingerprint, ProvenanceDigest, ProviderId, RunExit,
-    RunId, RunLedger, RunLedgerConfig, RunOutcome, RunOwnerId, RunOwnerLease, RunProvenance,
-    RunStart, SealedArtifactRef, SessionId, SessionRunEventKind, Sha256Digest, StaleRunRecovery,
-    TaskId, TenantId, TerminalReason,
+    CertifiedOutboxDestinationHandler, ClaimNext, CreatedRun, DeliveryCompletion, DeliveryEvidence,
+    DeliveryFailureReason, Destination, DigestAbsence, DispatchPolicyV1, DurableDeliveryReceipt,
+    EffectIntent, EventId, LedgerClock, LedgerConnectionFactory, LedgerError, ModelId,
+    NonResumableEffectAttempt, NonResumableEffectState, ObjectiveId, OutboxRouteRegistry,
+    OutboxState, PrivateFingerprint, ProvenanceDigest, ProviderId, RunExit, RunId, RunLedger,
+    RunLedgerConfig, RunOutcome, RunOwnerId, RunOwnerLease, RunProvenance, RunStart,
+    SealedArtifactRef, SessionId, SessionRunEventKind, Sha256Digest, StaleRunRecovery, TaskId,
+    TenantId, TerminalReason,
 };
 
 #[derive(Debug)]
@@ -82,10 +82,11 @@ fn begin_observed_one_shot(
         .begin_nonresumable_effect(mode(), owner_lease, &certified)
         .unwrap();
     let attempt = RunLedger::observed_nonresumable_attempt(lease, "returned").unwrap();
-    ledger.persist_nonresumable_result(mode(), &attempt).unwrap();
+    ledger
+        .persist_nonresumable_result(mode(), &attempt)
+        .unwrap();
     attempt
 }
-
 
 struct NonDedupeHandler;
 
@@ -177,10 +178,8 @@ fn delivery_evidence(
 ) -> DeliveryEvidence {
     DeliveryEvidence::new(
         AppendIdentity::new(
-            CanonicalJson::from_value(&super::delivery_result_evidence_identity(
-                lease, completion,
-            ))
-            .unwrap(),
+            CanonicalJson::from_value(&super::delivery_result_evidence_identity(lease, completion))
+                .unwrap(),
             PrivateFingerprint::hmac_sha256_v1(
                 super::LedgerIdentityKeyId::new("test-ledger-key-v1").unwrap(),
                 7,
@@ -423,7 +422,9 @@ fn seed_populated_v2(factory: &LedgerConnectionFactory) {
 
 fn seed_populated_legacy_rows(factory: &LedgerConnectionFactory) {
     let connection = factory.open_configured().unwrap();
-    connection.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys=OFF;")
+        .unwrap();
 
     connection
         .execute(
@@ -671,7 +672,9 @@ fn table_counts(connection: &rusqlite::Connection) -> Vec<(String, i64)> {
         .iter()
         .map(|table| {
             let count = connection
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             ((*table).to_string(), count)
         })
@@ -816,10 +819,7 @@ fn meta_value<'a>(rows: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .map(|(_, value)| value.as_str())
 }
 
-fn assert_complete_v6_recovery(
-    factory: &LedgerConnectionFactory,
-    before: &V1MigrationSnapshot,
-) {
+fn assert_complete_v6_recovery(factory: &LedgerConnectionFactory, before: &V1MigrationSnapshot) {
     factory.validate_cutover().unwrap();
     let connection = factory.open().unwrap();
     assert_eq!(table_counts(&connection), before.counts);
@@ -831,7 +831,10 @@ fn assert_complete_v6_recovery(
         meta_value(&after_meta, "retained-v1-marker"),
         meta_value(&before.meta, "retained-v1-marker")
     );
-    assert_eq!(meta_value(&after_meta, "run_ledger_schema_version"), Some("6"));
+    assert_eq!(
+        meta_value(&after_meta, "run_ledger_schema_version"),
+        Some("6")
+    );
     assert_eq!(meta_value(&after_meta, "ledger_primary"), Some("1"));
     let expected_fingerprint = super::connection::expected_schema_fingerprint();
     assert_eq!(
@@ -868,7 +871,10 @@ fn fresh_v6_schema_validates_exactly() {
         )
         .unwrap();
     assert_eq!(version, "6");
-    assert_eq!(fingerprint, super::connection::expected_schema_fingerprint());
+    assert_eq!(
+        fingerprint,
+        super::connection::expected_schema_fingerprint()
+    );
     assert_eq!(super::LEDGER_SCHEMA_VERSION, 6);
 }
 
@@ -1025,7 +1031,14 @@ fn v1_to_v6_migration_preserves_populated_rows_hashes_and_settings() {
             .unwrap(),
         "6"
     );
-    let retained_ack: (String, i64, i64, Option<String>, Option<String>, Option<i64>) = after
+    let retained_ack: (
+        String,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    ) = after
         .query_row(
             "SELECT state, attempt_count, lease_generation, delivery_receipt, delivery_error,
                     terminal_at_ms
@@ -1552,38 +1565,34 @@ fn delivery_result_and_exact_run_start_evidence_require_complete_pairs() {
         .unwrap(),
         1
     );
-    assert!(
-        insert_schema_event(
-            &connection,
-            "delivery-evidence-missing-ref",
-            &run_id,
-            4,
-            "delivery_result",
-            None,
-            "none",
-            None,
-            true,
-            false,
-            None,
-        )
-        .is_err()
-    );
-    assert!(
-        insert_schema_event(
-            &connection,
-            "delivery-evidence-missing-identity",
-            &run_id,
-            5,
-            "delivery_result",
-            None,
-            "none",
-            None,
-            false,
-            true,
-            None,
-        )
-        .is_err()
-    );
+    assert!(insert_schema_event(
+        &connection,
+        "delivery-evidence-missing-ref",
+        &run_id,
+        4,
+        "delivery_result",
+        None,
+        "none",
+        None,
+        true,
+        false,
+        None,
+    )
+    .is_err());
+    assert!(insert_schema_event(
+        &connection,
+        "delivery-evidence-missing-identity",
+        &run_id,
+        5,
+        "delivery_result",
+        None,
+        "none",
+        None,
+        false,
+        true,
+        None,
+    )
+    .is_err());
     assert_eq!(
         insert_schema_event(
             &connection,
@@ -1601,54 +1610,48 @@ fn delivery_result_and_exact_run_start_evidence_require_complete_pairs() {
         .unwrap(),
         1
     );
-    assert!(
-        insert_schema_event(
-            &connection,
-            "run-start-evidence-missing-ref",
-            &run_id,
-            7,
-            "run_start",
-            None,
-            "none",
-            None,
-            true,
-            false,
-            Some(r#"{"schema":"hermes.session-run.start-binding/v1"}"#),
-        )
-        .is_err()
-    );
-    assert!(
-        insert_schema_event(
-            &connection,
-            "run-start-evidence-missing-identity",
-            &run_id,
-            8,
-            "run_start",
-            None,
-            "none",
-            None,
-            false,
-            true,
-            Some(r#"{"schema":"hermes.session-run.start-binding/v1"}"#),
-        )
-        .is_err()
-    );
-    assert!(
-        insert_schema_event(
-            &connection,
-            "run-exit-evidence",
-            &run_id,
-            9,
-            "run_exit",
-            None,
-            "none",
-            None,
-            true,
-            true,
-            None,
-        )
-        .is_err()
-    );
+    assert!(insert_schema_event(
+        &connection,
+        "run-start-evidence-missing-ref",
+        &run_id,
+        7,
+        "run_start",
+        None,
+        "none",
+        None,
+        true,
+        false,
+        Some(r#"{"schema":"hermes.session-run.start-binding/v1"}"#),
+    )
+    .is_err());
+    assert!(insert_schema_event(
+        &connection,
+        "run-start-evidence-missing-identity",
+        &run_id,
+        8,
+        "run_start",
+        None,
+        "none",
+        None,
+        false,
+        true,
+        Some(r#"{"schema":"hermes.session-run.start-binding/v1"}"#),
+    )
+    .is_err());
+    assert!(insert_schema_event(
+        &connection,
+        "run-exit-evidence",
+        &run_id,
+        9,
+        "run_exit",
+        None,
+        "none",
+        None,
+        true,
+        true,
+        None,
+    )
+    .is_err());
 }
 
 #[test]
@@ -2892,9 +2895,10 @@ async fn nonresumable_effect_executes_once_and_requires_claim_bound_result() {
     let effect_lease = ledger
         .begin_nonresumable_effect(mode(), &created.owner_lease, &certified)
         .unwrap();
-    let attempt =
-        RunLedger::observed_nonresumable_attempt(effect_lease, "returned").unwrap();
-    ledger.persist_nonresumable_result(mode(), &attempt).unwrap();
+    let attempt = RunLedger::observed_nonresumable_attempt(effect_lease, "returned").unwrap();
+    ledger
+        .persist_nonresumable_result(mode(), &attempt)
+        .unwrap();
 
     let retry = ledger
         .begin_nonresumable_effect(mode(), &created.owner_lease, &certified)
@@ -3127,11 +3131,18 @@ fn current_owner_heartbeat_remains_live_without_recovery_or_lease_theft() {
         StaleRunRecovery::Live
     ));
     let events = ledger.events_for_run(created.header.run_id).unwrap();
-    assert_eq!(events.len(), 1, "live recovery must append no exit or audit");
+    assert_eq!(
+        events.len(),
+        1,
+        "live recovery must append no exit or audit"
+    );
     assert!(events
         .iter()
         .all(|event| event.kind == SessionRunEventKind::RunStart));
-    assert!(ledger.outbox_for_run(created.header.run_id).unwrap().is_empty());
+    assert!(ledger
+        .outbox_for_run(created.header.run_id)
+        .unwrap()
+        .is_empty());
     let continued = ledger
         .heartbeat_run_owner(mode(), &heartbeated)
         .expect("live recovery must not steal the original owner lease");
@@ -3248,9 +3259,7 @@ fn manual_unknown_one_shot_does_not_claim_process_death() {
         TerminalReason::EffectNonResumableUnknown.as_str()
     );
     assert!(
-        binding["payload"]
-            .get("causal_terminal_reason")
-            .is_none(),
+        binding["payload"].get("causal_terminal_reason").is_none(),
         "manual unknown must not claim a stale-owner process death"
     );
     ledger.verify_run_chain(created.header.run_id).unwrap();

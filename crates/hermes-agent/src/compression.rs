@@ -483,8 +483,10 @@ Write only the summary body. Do not include any preamble or prefix."
         let mut retry_on_main_pending =
             self.config.summary_model_override.is_some() && !self.summary_model_fallen_back;
         loop {
-            let mut request =
-                AuxiliaryRequest::new(AuxiliaryTask::Compression, vec![Message::user(prompt.clone())]);
+            let mut request = AuxiliaryRequest::new(
+                AuxiliaryTask::Compression,
+                vec![Message::user(prompt.clone())],
+            );
             if let Some(model) = self.config.summary_model_override.as_ref() {
                 request = request.with_model(model.clone());
             }
@@ -493,7 +495,9 @@ Write only the summary body. Do not include any preamble or prefix."
                 Ok(resp) => {
                     let body = resp
                         .text()
-                        .map(|content| redact_sensitive_summary_text(&visible_summary_or_fallback(&content)))
+                        .map(|content| {
+                            redact_sensitive_summary_text(&visible_summary_or_fallback(&content))
+                        })
                         .map(|summary| summary.trim().to_string())
                         .unwrap_or_default();
                     if body.is_empty() {
@@ -995,7 +999,9 @@ fn summary_body_from_handoff(content: &str) -> Option<String> {
     let body = if let Some(rest) = trimmed.strip_prefix(SUMMARY_PREFIX) {
         Some(rest.trim_start())
     } else {
-        trimmed.strip_prefix(LEGACY_SUMMARY_PREFIX).map(str::trim_start)
+        trimmed
+            .strip_prefix(LEGACY_SUMMARY_PREFIX)
+            .map(str::trim_start)
     }?;
     Some(strip_inline_reasoning_blocks(body))
 }

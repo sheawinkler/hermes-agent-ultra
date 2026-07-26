@@ -46,7 +46,6 @@ impl ExecutionModeConfigValue {
     pub const fn is_explicit_null(&self) -> bool {
         matches!(self, Self::ExplicitNull)
     }
-
 }
 
 impl Default for ExecutionModeConfigValue {
@@ -137,7 +136,6 @@ impl<'de> Deserialize<'de> for ExecutionModeConfigValue {
 // GatewayConfig
 // ---------------------------------------------------------------------------
 
-
 /// Top-level configuration for the hermes gateway.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GatewayConfig {
@@ -161,10 +159,7 @@ pub struct GatewayConfig {
     ///
     /// It remains raw until the startup boundary validates every precedence
     /// layer with `hermes_core::resolve_execution_mode`.
-    #[serde(
-        default,
-        skip_serializing_if = "ExecutionModeConfigValue::is_absent"
-    )]
+    #[serde(default, skip_serializing_if = "ExecutionModeConfigValue::is_absent")]
     pub execution_mode: ExecutionModeConfigValue,
 
     /// Custom system prompt override.

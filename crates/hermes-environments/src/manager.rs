@@ -1,12 +1,12 @@
 //! Backend manager – orchestrates the active terminal backend.
 
-use std::sync::Arc;
 use hermes_config::{TerminalBackendType, TerminalConfig};
+use std::sync::Arc;
 
+use crate::containment::{ExecutionContainmentAdmissionError, ExecutionContainmentContext};
 use hermes_core::{
     AgentError, CommandOutput, ExecutionMode, ResolvedExecutionMode, TerminalBackend,
 };
-use crate::containment::{ExecutionContainmentAdmissionError, ExecutionContainmentContext};
 
 use crate::local::LocalBackend;
 
@@ -115,8 +115,7 @@ impl BackendManager {
                         config.timeout,
                         config.max_output_size,
                     ));
-                    let containment_context =
-                        Arc::new(backend.closed_execution_context(mode)?);
+                    let containment_context = Arc::new(backend.closed_execution_context(mode)?);
                     let terminal_backend: Arc<dyn TerminalBackend> = backend;
                     return Ok(ExecutionBackendBinding {
                         terminal_backend,
@@ -366,10 +365,7 @@ mod tests {
         let binding = BackendManager::execution_backend_binding(
             TerminalConfig {
                 backend: TerminalBackendType::Docker,
-                docker_image: Some(format!(
-                    "registry.example/hermes@sha256:{}",
-                    "e".repeat(64)
-                )),
+                docker_image: Some(format!("registry.example/hermes@sha256:{}", "e".repeat(64))),
                 ..TerminalConfig::default()
             },
             ResolvedExecutionMode {

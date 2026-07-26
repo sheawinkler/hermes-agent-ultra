@@ -562,7 +562,10 @@ impl SqliteSessionSearchBackend {
             .collect::<Vec<_>>();
         if terms.is_empty()
             || terms.iter().any(|term| {
-                term.len() < 3 || !term.chars().all(|character| character.is_ascii_alphabetic())
+                term.len() < 3
+                    || !term
+                        .chars()
+                        .all(|character| character.is_ascii_alphabetic())
             })
         {
             return None;

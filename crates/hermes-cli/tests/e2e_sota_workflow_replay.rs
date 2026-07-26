@@ -135,7 +135,10 @@ fn sota_workflow_replay_fixture_is_well_formed() {
         "\"production_complete\": false",
     ] {
         assert!(
-            availability.expected_stdout_contains.iter().any(|value| value == expected),
+            availability
+                .expected_stdout_contains
+                .iter()
+                .any(|value| value == expected),
             "A2A availability snapshot must require {expected:?}"
         );
     }

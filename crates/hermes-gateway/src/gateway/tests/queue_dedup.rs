@@ -47,7 +47,10 @@ async fn shutdown_after_handler_invocation_quarantines_inbound_dedup() {
     entered_rx.await.expect("first turn enters handler");
     gw.stop_all().await.expect("gateway shutdown");
     assert!(matches!(
-        first.await.expect("route task joins").expect("route outcome"),
+        first
+            .await
+            .expect("route task joins")
+            .expect("route outcome"),
         GatewayRouteOutcome::Uncertain(GatewayError::SessionExpired(_))
     ));
 

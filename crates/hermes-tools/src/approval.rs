@@ -3,15 +3,14 @@
 //! Checks whether a terminal command requires explicit user approval
 //! before execution, based on dangerous command patterns.
 
+use hermes_environments::{ExecutionContainmentContext, VerifiedIsolatedBackendCapability};
+use parking_lot::{Condvar, Mutex};
 use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
-use parking_lot::{Condvar, Mutex};
-use hermes_environments::{ExecutionContainmentContext, VerifiedIsolatedBackendCapability};
-
 
 // ---------------------------------------------------------------------------
 // ApprovalDecision
@@ -39,8 +38,6 @@ pub struct CommandExecutionEnvironment {
     backend: String,
     isolation: Option<VerifiedIsolatedBackendCapability>,
 }
-
-
 
 impl CommandExecutionEnvironment {
     pub fn host_sensitive(backend: impl Into<String>) -> Self {
@@ -559,7 +556,8 @@ pub fn approve_session(session_key: &str, pattern_key: &str) {
     if session_key.is_empty() || pattern_key.is_empty() {
         return;
     }
-    SESSION_APPROVED.lock()
+    SESSION_APPROVED
+        .lock()
         .entry(session_key.to_string())
         .or_default()
         .insert(pattern_key.to_string());
@@ -571,8 +569,7 @@ pub fn approve_permanent(pattern_key: &str) {
     if pattern_key.is_empty() {
         return;
     }
-    PERMANENT_APPROVED.lock()
-        .insert(pattern_key.to_string());
+    PERMANENT_APPROVED.lock().insert(pattern_key.to_string());
 }
 
 /// Return whether a warning pattern is approved in this session or process.
@@ -582,15 +579,14 @@ pub fn is_approved(session_key: &str, pattern_key: &str) -> bool {
     if pattern_key.is_empty() {
         return false;
     }
-    if PERMANENT_APPROVED.lock()
-        .contains(pattern_key)
-    {
+    if PERMANENT_APPROVED.lock().contains(pattern_key) {
         return true;
     }
     if session_key.is_empty() {
         return false;
     }
-    SESSION_APPROVED.lock()
+    SESSION_APPROVED
+        .lock()
         .get(session_key)
         .map(|patterns| patterns.contains(pattern_key))
         .unwrap_or(false)
@@ -605,7 +601,8 @@ where
     if session_key.is_empty() {
         return;
     }
-    GATEWAY_NOTIFY_CBS.lock()
+    GATEWAY_NOTIFY_CBS
+        .lock()
         .insert(session_key.to_string(), Arc::new(callback));
 }
 
@@ -615,8 +612,7 @@ pub fn unregister_gateway_notify(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    GATEWAY_NOTIFY_CBS.lock()
-        .remove(session_key);
+    GATEWAY_NOTIFY_CBS.lock().remove(session_key);
     cancel_gateway_approvals(session_key, ApprovalChoice::Deny);
 }
 
@@ -626,7 +622,8 @@ pub fn has_blocking_approval(session_key: &str) -> bool {
     if session_key.is_empty() {
         return false;
     }
-    GATEWAY_QUEUES.lock()
+    GATEWAY_QUEUES
+        .lock()
         .get(session_key)
         .map(|entries| !entries.is_empty())
         .unwrap_or(false)
@@ -638,7 +635,8 @@ pub fn pending_gateway_approval_count(session_key: &str) -> usize {
     if session_key.is_empty() {
         return 0;
     }
-    GATEWAY_QUEUES.lock()
+    GATEWAY_QUEUES
+        .lock()
         .get(session_key)
         .map(VecDeque::len)
         .unwrap_or(0)
@@ -687,16 +685,13 @@ where
     F: Fn(ApprovalHookEvent) + Send + Sync + 'static,
 {
     let id = NEXT_APPROVAL_OBSERVER_ID.fetch_add(1, Ordering::SeqCst);
-    APPROVAL_OBSERVERS.lock()
-        .insert(id, Arc::new(callback));
+    APPROVAL_OBSERVERS.lock().insert(id, Arc::new(callback));
     id
 }
 
 /// Remove a previously registered approval observer.
 pub fn unregister_approval_observer(id: u64) -> bool {
-    APPROVAL_OBSERVERS.lock()
-        .remove(&id)
-        .is_some()
+    APPROVAL_OBSERVERS.lock().remove(&id).is_some()
 }
 
 fn approval_surface(context: &CommandGuardContext) -> ApprovalSurface {
@@ -726,7 +721,8 @@ fn emit_approval_hook(
         allow_permanent: prompt.allow_permanent,
         choice,
     };
-    let observers = APPROVAL_OBSERVERS.lock()
+    let observers = APPROVAL_OBSERVERS
+        .lock()
         .values()
         .cloned()
         .collect::<Vec<_>>();
@@ -741,9 +737,7 @@ fn cancel_gateway_approvals(session_key: &str, choice: ApprovalChoice) -> usize 
 }
 
 fn gateway_notify_callback(session_key: &str) -> Option<GatewayNotifyCallback> {
-    GATEWAY_NOTIFY_CBS.lock()
-        .get(session_key)
-        .cloned()
+    GATEWAY_NOTIFY_CBS.lock().get(session_key).cloned()
 }
 
 enum GatewayApprovalWaitOutcome {
@@ -803,8 +797,7 @@ pub fn enable_session_yolo(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_YOLO.lock()
-        .insert(session_key.to_string());
+    SESSION_YOLO.lock().insert(session_key.to_string());
 }
 
 /// Disable yolo approval bypass for a single session key.
@@ -813,8 +806,7 @@ pub fn disable_session_yolo(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_YOLO.lock()
-        .remove(session_key);
+    SESSION_YOLO.lock().remove(session_key);
 }
 
 /// Remove approval state associated with a session boundary.
@@ -824,8 +816,7 @@ pub fn clear_session(session_key: &str) {
     if session_key.is_empty() {
         return;
     }
-    SESSION_APPROVED.lock()
-        .remove(session_key);
+    SESSION_APPROVED.lock().remove(session_key);
     cancel_gateway_approvals(session_key, ApprovalChoice::Deny);
 }
 
@@ -835,10 +826,8 @@ pub fn is_session_yolo_enabled(session_key: &str) -> bool {
     if session_key.is_empty() {
         return false;
     }
-    SESSION_YOLO.lock()
-        .contains(session_key)
+    SESSION_YOLO.lock().contains(session_key)
 }
-
 
 fn delete_without_where(command: &str) -> bool {
     DELETE_FROM.is_match(command) && !command.to_ascii_lowercase().contains(" where ")
@@ -1261,12 +1250,8 @@ impl ApprovalManager {
     where
         E: Into<CommandExecutionEnvironment>,
     {
-        let decision = self.check_approval_with_context(
-            command,
-            environment,
-            false,
-            has_sudo_password_env(),
-        );
+        let decision =
+            self.check_approval_with_context(command, environment, false, has_sudo_password_env());
         if matches!(decision, ApprovalDecision::RequiresConfirmation)
             && approval_token.is_some_and(|token| token.authorizes(command))
         {

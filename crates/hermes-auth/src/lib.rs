@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 
 use aes_gcm::aead::{Aead, KeyInit};
-use fs2::FileExt;
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
+use fs2::FileExt;
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -143,7 +143,9 @@ impl CredentialStoreError {
             Self::LegacyStoreMalformed
             | Self::InvalidCredential
             | Self::Serialization
-            | Self::Io { .. } => "repair the credential store, then run `hermes auth login <provider>`",
+            | Self::Io { .. } => {
+                "repair the credential store, then run `hermes auth login <provider>`"
+            }
         }
     }
 }
@@ -151,23 +153,32 @@ impl CredentialStoreError {
 impl fmt::Display for CredentialStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { operation } => write!(formatter, "credential store I/O failed while {operation}"),
+            Self::Io { operation } => {
+                write!(formatter, "credential store I/O failed while {operation}")
+            }
             Self::InvalidKey => formatter.write_str("credential store key is invalid"),
             Self::KeyUnavailable => formatter.write_str("credential store key is unavailable"),
             Self::EncryptedStoreMalformed => {
                 formatter.write_str("credential store encrypted envelope is malformed")
             }
             Self::UnsupportedEnvelopeVersion { version } => {
-                write!(formatter, "credential store envelope version {version} is unsupported")
+                write!(
+                    formatter,
+                    "credential store envelope version {version} is unsupported"
+                )
             }
-            Self::DecryptionFailed => formatter.write_str("credential store could not be decrypted"),
+            Self::DecryptionFailed => {
+                formatter.write_str("credential store could not be decrypted")
+            }
             Self::LegacyStoreMalformed => {
                 formatter.write_str("credential store legacy plaintext format is malformed")
             }
             Self::LegacyMigrationRequired => {
                 formatter.write_str("credential store legacy plaintext migration is required")
             }
-            Self::InvalidCredential => formatter.write_str("credential store contains an invalid credential"),
+            Self::InvalidCredential => {
+                formatter.write_str("credential store contains an invalid credential")
+            }
             Self::ReadOnly => formatter.write_str("credential store was opened read-only"),
             Self::Serialization => formatter.write_str("credential store serialization failed"),
         }
@@ -277,7 +288,11 @@ impl FileTokenStore {
         let raw = match fs::read(&path) {
             Ok(raw) => Some(raw),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return Err(CredentialStoreError::Io { operation: "reading" }),
+            Err(_) => {
+                return Err(CredentialStoreError::Io {
+                    operation: "reading",
+                })
+            }
         };
 
         let (cache, key, state, migrate_legacy) = match raw {
@@ -309,12 +324,7 @@ impl FileTokenStore {
                     let cache = decrypt_token_cache(&key, &envelope)?;
                     validate_token_cache(&cache)
                         .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
-                    (
-                        cache,
-                        Some(key),
-                        TokenStoreState::EncryptedV1,
-                        false,
-                    )
+                    (cache, Some(key), TokenStoreState::EncryptedV1, false)
                 } else {
                     let cache = serde_json::from_value::<TokenCache>(parsed)
                         .map_err(|_| CredentialStoreError::LegacyStoreMalformed)?;
@@ -366,14 +376,14 @@ impl FileTokenStore {
     pub fn credential_status(&self, provider: &str, leeway_secs: i64) -> CredentialStatus {
         match self.get_sync(provider) {
             None => CredentialStatus::Missing,
-            Some(credential) if credential.access_token.trim().is_empty() => CredentialStatus::Unusable,
-            Some(credential) if credential.is_expired(leeway_secs) => {
-                CredentialStatus::Expired {
-                    expires_at: credential
-                        .expires_at
-                        .expect("expired credential always has an expiration"),
-                }
+            Some(credential) if credential.access_token.trim().is_empty() => {
+                CredentialStatus::Unusable
             }
+            Some(credential) if credential.is_expired(leeway_secs) => CredentialStatus::Expired {
+                expires_at: credential
+                    .expires_at
+                    .expect("expired credential always has an expiration"),
+            },
             Some(credential) => CredentialStatus::Current {
                 expires_at: credential.expires_at,
             },
@@ -466,18 +476,19 @@ impl FileTokenStore {
     fn persist_cache(&self, cache: &TokenCache) -> Result<(), CredentialStoreError> {
         let key = self.writable_key()?;
         let envelope = encrypt_token_cache(key, cache)?;
-        let content =
-            serde_json::to_vec_pretty(&envelope).map_err(|_| CredentialStoreError::Serialization)?;
+        let content = serde_json::to_vec_pretty(&envelope)
+            .map_err(|_| CredentialStoreError::Serialization)?;
         write_file_private(&self.path, &content)
     }
 
     fn read_persisted_cache(&self) -> Result<TokenCache, CredentialStoreError> {
-        let key = self.key.as_deref().ok_or(CredentialStoreError::KeyUnavailable)?;
+        let key = self
+            .key
+            .as_deref()
+            .ok_or(CredentialStoreError::KeyUnavailable)?;
         let raw = match fs::read(&self.path) {
             Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(HashMap::new())
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
             Err(_) => {
                 return Err(CredentialStoreError::Io {
                     operation: "reading an encrypted credential file",
@@ -522,10 +533,8 @@ fn encrypt_token_cache(
     key: &[u8; TOKEN_STORE_KEY_BYTES],
     cache: &TokenCache,
 ) -> Result<TokenStoreEnvelope, CredentialStoreError> {
-    let plaintext =
-        serde_json::to_vec(cache).map_err(|_| CredentialStoreError::Serialization)?;
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
+    let plaintext = serde_json::to_vec(cache).map_err(|_| CredentialStoreError::Serialization)?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
     let mut nonce_bytes = [0u8; TOKEN_STORE_NONCE_BYTES];
     rand::fill(&mut nonce_bytes[..]);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -557,8 +566,7 @@ fn decrypt_token_cache(
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(envelope.ciphertext_b64.trim())
         .map_err(|_| CredentialStoreError::EncryptedStoreMalformed)?;
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CredentialStoreError::InvalidKey)?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
         .map_err(|_| CredentialStoreError::DecryptionFailed)?;
@@ -611,11 +619,12 @@ fn write_file_private(path: &Path, content: &[u8]) -> Result<(), CredentialStore
     }
     let tmp_path = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
     let result = (|| {
-        let mut file = private_create_new_options()
-            .open(&tmp_path)
-            .map_err(|_| CredentialStoreError::Io {
-                operation: "creating an encrypted credential file",
-            })?;
+        let mut file =
+            private_create_new_options()
+                .open(&tmp_path)
+                .map_err(|_| CredentialStoreError::Io {
+                    operation: "creating an encrypted credential file",
+                })?;
         file.write_all(content)
             .map_err(|_| CredentialStoreError::Io {
                 operation: "writing an encrypted credential file",
@@ -743,9 +752,9 @@ impl AuthManager {
     ) {
         let handler: RefreshHandler = Arc::new(move |provider, refresh_token| {
             let endpoints = endpoints.clone();
-            Box::pin(async move {
-                exchange_refresh_token(&provider, &endpoints, &refresh_token).await
-            })
+            Box::pin(
+                async move { exchange_refresh_token(&provider, &endpoints, &refresh_token).await },
+            )
         });
         self.register_refresh_handler(provider, handler).await;
     }
@@ -864,7 +873,10 @@ impl fmt::Debug for OAuth2Endpoints {
             .field("client_id", &self.client_id)
             .field("redirect_uri", &self.redirect_uri)
             .field("scopes", &self.scopes)
-            .field("client_secret", &self.client_secret.as_ref().map(|_| "<redacted>"))
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
             .field("client_auth_method", &self.client_auth_method)
             .finish()
     }
@@ -993,10 +1005,9 @@ async fn exchange_authorization_code_with_client(
             response.status().as_u16()
         )));
     }
-    let body = response
-        .json::<TokenEndpointJson>()
-        .await
-        .map_err(|_| AgentError::AuthFailed("OAuth token exchange response was malformed".into()))?;
+    let body = response.json::<TokenEndpointJson>().await.map_err(|_| {
+        AgentError::AuthFailed("OAuth token exchange response was malformed".into())
+    })?;
     token_endpoint_credential(provider_id, body, None, "exchange")
 }
 
@@ -1050,14 +1061,19 @@ fn token_endpoint_credential(
     operation: &str,
 ) -> Result<OAuthCredential, AgentError> {
     if body.access_token.trim().is_empty()
-        || body.token_type.as_deref().is_some_and(|token_type| token_type.trim().is_empty())
+        || body
+            .token_type
+            .as_deref()
+            .is_some_and(|token_type| token_type.trim().is_empty())
         || body.expires_in.is_some_and(|seconds| seconds <= 0)
     {
         return Err(AgentError::AuthFailed(format!(
             "OAuth token {operation} response was malformed"
         )));
     }
-    let expires_at = body.expires_in.map(|seconds| Utc::now() + Duration::seconds(seconds));
+    let expires_at = body
+        .expires_in
+        .map(|seconds| Utc::now() + Duration::seconds(seconds));
     Ok(OAuthCredential {
         provider: provider_id.to_string(),
         access_token: body.access_token,
@@ -1322,9 +1338,7 @@ mod tests {
     async fn malformed_encrypted_store_fails_closed_with_typed_error() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("tokens.json");
-        FileTokenStore::new(&path)
-            .await
-            .expect("create store key");
+        FileTokenStore::new(&path).await.expect("create store key");
         std::fs::write(
             &path,
             br#"{"version":1,"nonce_b64":"AA==","ciphertext_b64":"not-valid-base64"}"#,
@@ -1332,9 +1346,7 @@ mod tests {
         .unwrap();
 
         let result = FileTokenStore::new(&path).await;
-        let error = result
-            .err()
-            .expect("malformed encrypted store must fail");
+        let error = result.err().expect("malformed encrypted store must fail");
         assert_eq!(error, CredentialStoreError::EncryptedStoreMalformed);
     }
 
@@ -1390,7 +1402,10 @@ mod tests {
 
         let store = FileTokenStore::open_read_only(&path).expect("read-only missing store");
         assert_eq!(store.state(), TokenStoreState::Missing);
-        assert_eq!(store.credential_status("openai", 0), CredentialStatus::Missing);
+        assert_eq!(
+            store.credential_status("openai", 0),
+            CredentialStatus::Missing
+        );
         assert!(!path.exists());
         assert!(!path.with_extension("key").exists());
     }
@@ -1701,8 +1716,14 @@ mod tests {
             reopened.list_providers().await,
             vec!["nous".to_string(), "openai".to_string()]
         );
-        assert_eq!(reopened.get("openai").await.unwrap().access_token, "openai-token");
-        assert_eq!(reopened.get("nous").await.unwrap().access_token, "nous-token");
+        assert_eq!(
+            reopened.get("openai").await.unwrap().access_token,
+            "openai-token"
+        );
+        assert_eq!(
+            reopened.get("nous").await.unwrap().access_token,
+            "nous-token"
+        );
     }
 
     #[tokio::test]
@@ -1724,6 +1745,9 @@ mod tests {
 
         let reopened = FileTokenStore::new(&path).await.unwrap();
         assert!(reopened.get("openai").await.is_none());
-        assert_eq!(reopened.get("nous").await.unwrap().access_token, "nous-token");
+        assert_eq!(
+            reopened.get("nous").await.unwrap().access_token,
+            "nous-token"
+        );
     }
 }

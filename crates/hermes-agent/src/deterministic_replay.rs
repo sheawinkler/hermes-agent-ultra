@@ -11,18 +11,17 @@ use std::fmt;
 use std::sync::Arc;
 
 use serde_json::Value;
-use thiserror::Error;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::run_export::VerifiedRunExport;
 use crate::run_ledger::{
-    ArtifactPhysicalState, ArtifactReferenceState, BranchId, CanonicalJson,
-    Destination, DownstreamIdempotencyKey, EventId, ExactReplayState, OutboxRecord, OutboxRowId,
-    OutboxState, PrivateFingerprint, ReplayObligationFidelity, ReplayObligationSnapshot,
-    ReplayOperationKind, ReplayOperationOutcome, ReplayOperationPhase, RunId, RunLedger,
-    RunOutcome, RunOwnerId, SealedArtifactRef, SessionId, SessionRunEvent, SessionRunEventKind,
-    TenantId, TerminalReason,
+    ArtifactPhysicalState, ArtifactReferenceState, BranchId, CanonicalJson, Destination,
+    DownstreamIdempotencyKey, EventId, ExactReplayState, OutboxRecord, OutboxRowId, OutboxState,
+    PrivateFingerprint, ReplayObligationFidelity, ReplayObligationSnapshot, ReplayOperationKind,
+    ReplayOperationOutcome, ReplayOperationPhase, RunId, RunLedger, RunOutcome, RunOwnerId,
+    SealedArtifactRef, SessionId, SessionRunEvent, SessionRunEventKind, TenantId, TerminalReason,
 };
 use crate::sealed_artifact::{
     validate_private_jcs_commitment, validate_replay_artifact_private_jcs, ArtifactSealer,
@@ -313,7 +312,9 @@ impl VerifiedRunReplayPlan {
         let event_count = u64::try_from(events.len())
             .map_err(|_| "replay event count exceeds u64".to_string())?;
         if summary.event_count != event_count {
-            return Err("verified replay summary event count does not match parsed events".to_string());
+            return Err(
+                "verified replay summary event count does not match parsed events".to_string(),
+            );
         }
         if !summary.evidence_complete() {
             return Err("verified export relies on legacy delivery evidence".to_string());
@@ -630,11 +631,15 @@ pub fn verify_branch_replay_plan(
                 "branch source contains an unresolved replay obligation".to_string(),
             )
         })?;
-        let resolved_sequence = event_sequences.get(&resolved_event_id).copied().ok_or_else(|| {
-            DeterministicReplayError::InvalidPlan(
-                "branch source obligation resolution is absent from verified events".to_string(),
-            )
-        })?;
+        let resolved_sequence = event_sequences
+            .get(&resolved_event_id)
+            .copied()
+            .ok_or_else(|| {
+                DeterministicReplayError::InvalidPlan(
+                    "branch source obligation resolution is absent from verified events"
+                        .to_string(),
+                )
+            })?;
         let source_in_prefix = obligation.source_event_sequence <= requested_boundary.sequence;
         let resolved_in_prefix = resolved_sequence <= requested_boundary.sequence;
         if source_in_prefix != resolved_in_prefix {
@@ -656,16 +661,15 @@ pub fn verify_branch_replay_plan(
         }
     }
 
-    for outbox in source
-        .outbox
-        .iter()
-        .filter(|entry| {
-            event_sequences
-                .get(&entry.source_event_id())
-                .is_some_and(|sequence| *sequence <= requested_boundary.sequence)
-        })
-    {
-        if !matches!(outbox.state(), OutboxState::Acknowledged | OutboxState::DeadLettered) {
+    for outbox in source.outbox.iter().filter(|entry| {
+        event_sequences
+            .get(&entry.source_event_id())
+            .is_some_and(|sequence| *sequence <= requested_boundary.sequence)
+    }) {
+        if !matches!(
+            outbox.state(),
+            OutboxState::Acknowledged | OutboxState::DeadLettered
+        ) {
             return Err(DeterministicReplayError::InvalidPlan(
                 "branch boundary leaves canonical outbox work pending".to_string(),
             ));
@@ -873,13 +877,15 @@ impl fmt::Debug for ReconstructedReplayEvent {
             .field("resolved_event_id", &self.resolved_event_id)
             .field("artifact", &self.artifact)
             .field("delivery", &self.delivery)
-            .field("public_projection_len", &self.public_projection.as_str().len())
+            .field(
+                "public_projection_len",
+                &self.public_projection.as_str().len(),
+            )
             .field("has_private_fragment", &self.private_fragment.is_some())
             .field("projection_gap", &self.projection_gap)
             .finish()
     }
 }
-
 
 /// Verified artifact evidence used in a reconstruction report.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1166,7 +1172,9 @@ pub enum DeterministicReplayError {
     InvalidPlan(String),
     #[error("verified replay obligation for event {event_id} is incomplete or unavailable")]
     IncompleteReplayEvidence { event_id: EventId },
-    #[error("verified replay obligation fidelity does not match artifact evidence for event {event_id}")]
+    #[error(
+        "verified replay obligation fidelity does not match artifact evidence for event {event_id}"
+    )]
     ReplayFidelityMismatch { event_id: EventId },
     #[error("verified replay plan requires a private exact-artifact reader")]
     ArtifactReaderRequired,
@@ -1177,7 +1185,9 @@ pub enum DeterministicReplayError {
         #[source]
         source: ExactArtifactReadError,
     },
-    #[error("verified artifact for event {event_id} ({digest}) has invalid replay payload: {reason}")]
+    #[error(
+        "verified artifact for event {event_id} ({digest}) has invalid replay payload: {reason}"
+    )]
     InvalidArtifactPayload {
         event_id: EventId,
         digest: String,
@@ -1185,7 +1195,9 @@ pub enum DeterministicReplayError {
     },
     #[error("exact replay is unavailable because event {event_id} ({digest}) has metadata-only evidence")]
     ExactFidelityRequired { event_id: EventId, digest: String },
-    #[error("exact replay is unavailable because event {event_id} has unavailable structural evidence")]
+    #[error(
+        "exact replay is unavailable because event {event_id} has unavailable structural evidence"
+    )]
     ExactEvidenceRequired { event_id: EventId },
 }
 
@@ -1220,7 +1232,10 @@ pub fn reconstruct_verified_run(
         let classification = classify_artifact_private(artifact, verified.as_bytes())?;
         let artifact_fidelity = match classification {
             ReplayArtifactPrivateClassification::Exact(fragment) => {
-                if private_fragments.insert(artifact.event_id, Arc::new(fragment)).is_some() {
+                if private_fragments
+                    .insert(artifact.event_id, Arc::new(fragment))
+                    .is_some()
+                {
                     return Err(DeterministicReplayError::InvalidPlan(
                         "verified artifact identities are not unique".to_string(),
                     ));
@@ -1262,7 +1277,6 @@ pub fn reconstruct_verified_run(
         fidelity,
         obligations_complete,
     );
-
 
     Ok(DeterministicReplayReport {
         run_id: plan.summary.run_id,
@@ -1314,7 +1328,10 @@ fn reconstruction_digest(
             .to_be_bytes(),
     );
     for event in transcript {
-        update_reconstruction_digest_bytes(&mut hasher, event.source_event_id.to_string().as_bytes());
+        update_reconstruction_digest_bytes(
+            &mut hasher,
+            event.source_event_id.to_string().as_bytes(),
+        );
         hasher.update(event.source_event_sequence.to_be_bytes());
         update_reconstruction_digest_bytes(&mut hasher, event.operation.as_str().as_bytes());
         update_reconstruction_digest_bytes(&mut hasher, event.phase.as_str().as_bytes());
@@ -1331,17 +1348,29 @@ fn reconstruction_digest(
         match event.artifact.as_ref() {
             Some(artifact) => {
                 hasher.update([1]);
-                update_reconstruction_digest_bytes(&mut hasher, artifact.event_id.to_string().as_bytes());
-                update_reconstruction_digest_bytes(&mut hasher, artifact.envelope_digest.as_bytes());
+                update_reconstruction_digest_bytes(
+                    &mut hasher,
+                    artifact.event_id.to_string().as_bytes(),
+                );
+                update_reconstruction_digest_bytes(
+                    &mut hasher,
+                    artifact.envelope_digest.as_bytes(),
+                );
                 update_reconstruction_digest_bytes(
                     &mut hasher,
                     artifact.availability.as_str().as_bytes(),
                 );
-                update_reconstruction_digest_bytes(&mut hasher, artifact.fidelity.as_str().as_bytes());
+                update_reconstruction_digest_bytes(
+                    &mut hasher,
+                    artifact.fidelity.as_str().as_bytes(),
+                );
             }
             None => hasher.update([0]),
         }
-        update_reconstruction_digest_bytes(&mut hasher, event.public_projection.as_str().as_bytes());
+        update_reconstruction_digest_bytes(
+            &mut hasher,
+            event.public_projection.as_str().as_bytes(),
+        );
         match event.projection_gap {
             Some(gap) => {
                 hasher.update([1]);
@@ -1361,7 +1390,6 @@ fn update_reconstruction_digest_bytes(hasher: &mut Sha256, value: &[u8]) {
     );
     hasher.update(value);
 }
-
 
 fn reconstruct_transcript(
     plan: &VerifiedRunReplayPlan,
@@ -1408,17 +1436,16 @@ fn reconstruct_transcript(
             .unwrap_or_else(|| resolved.unwrap_or(source).public_payload.clone());
         let (artifact, private_fragment) = match obligation.fidelity {
             ReplayObligationFidelity::ExactPrivate => {
-                let resolved_id = obligation
-                    .resolved_event_id
-                    .ok_or(DeterministicReplayError::IncompleteReplayEvidence {
+                let resolved_id = obligation.resolved_event_id.ok_or(
+                    DeterministicReplayError::IncompleteReplayEvidence {
                         event_id: obligation.source_event_id,
-                    })?;
-                let required = obligation
-                    .artifact
-                    .as_ref()
-                    .ok_or(DeterministicReplayError::IncompleteReplayEvidence {
+                    },
+                )?;
+                let required = obligation.artifact.as_ref().ok_or(
+                    DeterministicReplayError::IncompleteReplayEvidence {
                         event_id: obligation.source_event_id,
-                    })?;
+                    },
+                )?;
                 if plan
                     .artifact_references
                     .iter()
@@ -1453,17 +1480,16 @@ fn reconstruct_transcript(
             }
             ReplayObligationFidelity::MetadataOnly => {
                 let artifact = if let Some(required) = obligation.artifact.as_ref() {
-                    let resolved_id = obligation
-                        .resolved_event_id
-                        .ok_or(DeterministicReplayError::IncompleteReplayEvidence {
+                    let resolved_id = obligation.resolved_event_id.ok_or(
+                        DeterministicReplayError::IncompleteReplayEvidence {
                             event_id: obligation.source_event_id,
-                        })?;
+                        },
+                    )?;
                     let artifact = artifacts
                         .iter()
                         .find(|artifact| {
                             artifact.event_id == resolved_id
-                                && artifact.envelope_digest
-                                    == required.envelope_digest().as_str()
+                                && artifact.envelope_digest == required.envelope_digest().as_str()
                         })
                         .cloned()
                         .ok_or(DeterministicReplayError::IncompleteReplayEvidence {
@@ -1796,9 +1822,10 @@ fn validate_plan(plan: &VerifiedRunReplayPlan) -> DeterministicReplayResult<()> 
         {
             saw_run_start_request = true;
         }
-        if obligation.resolved_event_id.is_some_and(|event_id| {
-            !plan.events.iter().any(|event| event.event_id == event_id)
-        }) {
+        if obligation
+            .resolved_event_id
+            .is_some_and(|event_id| !plan.events.iter().any(|event| event.event_id == event_id))
+        {
             return Err(DeterministicReplayError::InvalidPlan(
                 "replay obligation resolution event is absent from verified events".to_string(),
             ));
@@ -1842,9 +1869,10 @@ fn validate_plan(plan: &VerifiedRunReplayPlan) -> DeterministicReplayResult<()> 
                 "replay projection gap duplicates a mapped obligation".to_string(),
             ));
         }
-        if gap.resolved_event_id.is_some_and(|event_id| {
-            !plan.events.iter().any(|event| event.event_id == event_id)
-        }) {
+        if gap
+            .resolved_event_id
+            .is_some_and(|event_id| !plan.events.iter().any(|event| event.event_id == event_id))
+        {
             return Err(DeterministicReplayError::InvalidPlan(
                 "replay projection gap resolution event is absent from verified events".to_string(),
             ));

@@ -87,7 +87,9 @@ impl SkillTrustAuthorityLayout {
         ] {
             validate_existing_regular_file_or_absent(path, label)?;
             if !path.starts_with(&authority_root) {
-                return Err(layout_error("derived authority path escaped its fixed directory"));
+                return Err(layout_error(
+                    "derived authority path escaped its fixed directory",
+                ));
             }
         }
 
@@ -197,7 +199,9 @@ fn validated_absolute_path(path: &Path, label: &str) -> Result<PathBuf, ConfigEr
         .components()
         .any(|component| matches!(component, Component::ParentDir))
     {
-        return Err(layout_error(format!("{label} must not contain path traversal")));
+        return Err(layout_error(format!(
+            "{label} must not contain path traversal"
+        )));
     }
     Ok(path.to_path_buf())
 }
@@ -247,15 +251,24 @@ mod tests {
         assert_eq!(layout.state_root(), root.path());
         assert_eq!(layout.skills_root(), root.path().join("skills"));
         assert_eq!(layout.authority_root(), root.path().join("skill-trust"));
-        assert_eq!(layout.remote_root_file(), root.path().join("skill-trust/remote-root.json"));
-        assert_eq!(layout.remote_audit_file(), root.path().join("skill-trust/remote-audit.json"));
+        assert_eq!(
+            layout.remote_root_file(),
+            root.path().join("skill-trust/remote-root.json")
+        );
+        assert_eq!(
+            layout.remote_audit_file(),
+            root.path().join("skill-trust/remote-audit.json")
+        );
         assert_eq!(
             layout.local_owner_keyring_file(),
             root.path().join("skill-trust/local-owner-keyring.json")
         );
         assert!(layout.skills_root().is_absolute());
         assert!(layout.remote_root_file().is_absolute());
-        assert!(!paths_overlap(layout.skills_root(), layout.authority_root()));
+        assert!(!paths_overlap(
+            layout.skills_root(),
+            layout.authority_root()
+        ));
     }
 
     #[test]
@@ -284,7 +297,10 @@ mod tests {
         let paths = layout
             .build_skill_trust_authority_paths()
             .expect("unprovisioned leaves must still produce typed authority paths");
-        assert_eq!(paths.remote_trust_config().root_file, layout.remote_root_file());
+        assert_eq!(
+            paths.remote_trust_config().root_file,
+            layout.remote_root_file()
+        );
         assert_eq!(
             paths.local_owner_keyring_file(),
             layout.local_owner_keyring_file()
@@ -303,11 +319,9 @@ mod tests {
             .expect_err("path traversal must reject");
         assert!(traversal.to_string().contains("path traversal"));
 
-        let overlap = SkillTrustAuthorityLayout::from_resolved_roots(
-            root.path(),
-            root.path().join("skills"),
-        )
-        .expect_err("authority directory inside skills root must reject");
+        let overlap =
+            SkillTrustAuthorityLayout::from_resolved_roots(root.path(), root.path().join("skills"))
+                .expect_err("authority directory inside skills root must reject");
         assert!(overlap.to_string().contains("must not overlap"));
     }
 
@@ -315,7 +329,6 @@ mod tests {
     #[test]
     fn rejects_symlinked_home_and_authority_directory() {
         use std::os::unix::fs::symlink;
-
 
         let homes = tempfile::tempdir().expect("create home parent");
         let real_home = tempfile::tempdir().expect("create real home");

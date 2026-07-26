@@ -302,17 +302,17 @@ fn is_valid_git_sha1(value: &str) -> bool {
 fn is_valid_package_version(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'+')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'+'))
 }
 
 fn is_valid_recipe_component(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn parse_feature_names(value: &'static str) -> Result<Vec<&'static str>, BuildIdentityError> {
@@ -407,9 +407,9 @@ pub fn version_label() -> String {
         Err(BuildIdentityError::SourceDirty) => raw_embedded_git_sha1()
             .map(version_label_for_dirty_revision)
             .unwrap_or_else(unavailable_version_label),
-        Err(BuildIdentityError::SourceUnavailable | BuildIdentityError::MalformedEmbeddedIdentity) => {
-            unavailable_version_label()
-        }
+        Err(
+            BuildIdentityError::SourceUnavailable | BuildIdentityError::MalformedEmbeddedIdentity,
+        ) => unavailable_version_label(),
     }
 }
 
@@ -455,7 +455,10 @@ mod tests {
         let identity = clean_identity(SHA_A, TARGET_A).expect("valid clean identity");
         let label = version_label_for_identity(&identity);
 
-        assert_eq!(label, format!("Hermes Agent Ultra v{PACKAGE_VERSION} ({})", &SHA_A[..12]));
+        assert_eq!(
+            label,
+            format!("Hermes Agent Ultra v{PACKAGE_VERSION} ({})", &SHA_A[..12])
+        );
         assert!(!label.contains(SHA_A));
         assert_eq!(identity.full_git_sha1(), SHA_A);
     }
@@ -492,8 +495,14 @@ mod tests {
         assert_eq!(first.artifact_sha256(), repeated.artifact_sha256());
         assert_eq!(first.build_recipe_digest(), repeated.build_recipe_digest());
         assert_ne!(first.artifact_sha256(), changed_revision.artifact_sha256());
-        assert_eq!(first.build_recipe_digest(), changed_revision.build_recipe_digest());
-        assert_ne!(first.build_recipe_digest(), changed_recipe.build_recipe_digest());
+        assert_eq!(
+            first.build_recipe_digest(),
+            changed_revision.build_recipe_digest()
+        );
+        assert_ne!(
+            first.build_recipe_digest(),
+            changed_recipe.build_recipe_digest()
+        );
         assert_ne!(first.artifact_sha256(), changed_recipe.artifact_sha256());
         assert!(is_lowercase_sha256(first.artifact_sha256()));
         assert!(is_lowercase_sha256(first.build_recipe_digest()));
@@ -532,7 +541,10 @@ mod tests {
         git_sha1: Option<&'static str>,
     ) -> Result<EmbeddedBuildIdentity, BuildIdentityError> {
         match source_state {
-            SourceState::Clean => clean_identity(git_sha1.ok_or(BuildIdentityError::SourceUnavailable)?, TARGET_A),
+            SourceState::Clean => clean_identity(
+                git_sha1.ok_or(BuildIdentityError::SourceUnavailable)?,
+                TARGET_A,
+            ),
             SourceState::Dirty => {
                 if let Some(git_sha1) = git_sha1 {
                     validate_git_sha1(git_sha1)?;

@@ -2,8 +2,8 @@ use super::{
     cache_mcp_image_block, extract_mcp_error_message, is_stale_transport_error,
     mcp_call_timeout_duration, mcp_input_schema_to_json_schema, mcp_keepalive_interval_duration,
     mcp_resource_filename, render_mcp_resource_block, validate_mcp_server_config, LlmCallback,
-    McpClient, McpManager, McpServerConfig, SamplingConfig,
-    DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS, MIN_MCP_KEEPALIVE_INTERVAL_SECS,
+    McpClient, McpManager, McpServerConfig, SamplingConfig, DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS,
+    MIN_MCP_KEEPALIVE_INTERVAL_SECS,
 };
 use crate::transport::McpTransport;
 use crate::McpError;
@@ -494,7 +494,6 @@ async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
         .await;
     assert!(resource_output.contains("MCP resource contents"));
 
-
     {
         let sent = sent.lock().expect("sent lock");
         let call = sent
@@ -765,7 +764,10 @@ fn mcp_resource_blocks_are_materialized_with_safe_names() {
         .and_then(|tail| tail.split(" (").next())
         .expect("resource path");
     assert_eq!(std::fs::read(path).expect("cached resource"), b"%PDF-");
-    assert_eq!(mcp_resource_filename("mcp://files/../../report.pdf", "application/pdf"), "report.pdf");
+    assert_eq!(
+        mcp_resource_filename("mcp://files/../../report.pdf", "application/pdf"),
+        "report.pdf"
+    );
 
     let link = json!({
         "type": "resource_link",

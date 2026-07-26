@@ -191,7 +191,9 @@ pub enum GatewayRouteOutcome {
         retry_after: Option<Duration>,
     },
     /// Admission was refused before a worker or handler was created.
-    Backpressured { retry_after: Duration },
+    Backpressured {
+        retry_after: Duration,
+    },
     /// A provider accepted a prefix and supplied an exact safe continuation.
     Partial(hermes_core::errors::PartialDelivery),
     /// An external or handler side effect may have occurred and must be
@@ -204,13 +206,15 @@ impl GatewayRouteOutcome {
         match self {
             Self::Committed => Ok(()),
             Self::Retryable { error, .. } | Self::Uncertain(error) => Err(error),
-            Self::Backpressured { retry_after } => Err(
-                hermes_core::errors::GatewayError::Platform(format!(
+            Self::Backpressured { retry_after } => {
+                Err(hermes_core::errors::GatewayError::Platform(format!(
                     "gateway ingress capacity reached; retry after {} ms",
                     retry_after.as_millis()
-                )),
-            ),
-            Self::Partial(partial) => Err(hermes_core::errors::GatewayError::PartialDelivery(partial)),
+                )))
+            }
+            Self::Partial(partial) => {
+                Err(hermes_core::errors::GatewayError::PartialDelivery(partial))
+            }
         }
     }
 }
@@ -290,9 +294,7 @@ pub(crate) struct QueuedIncoming {
     dedup_key: Option<String>,
     turn_kind: QueuedTurnKind,
     completion_tx: Option<
-        tokio::sync::oneshot::Sender<
-            Result<RouteCompletion, hermes_core::errors::GatewayError>,
-        >,
+        tokio::sync::oneshot::Sender<Result<RouteCompletion, hermes_core::errors::GatewayError>>,
     >,
 }
 
@@ -344,9 +346,7 @@ impl QueuedIncoming {
     pub(crate) fn take_completion_sender(
         &mut self,
     ) -> Option<
-        tokio::sync::oneshot::Sender<
-            Result<RouteCompletion, hermes_core::errors::GatewayError>,
-        >,
+        tokio::sync::oneshot::Sender<Result<RouteCompletion, hermes_core::errors::GatewayError>>,
     > {
         self.completion_tx.take()
     }

@@ -164,7 +164,6 @@ fn slugify_skill_name(name: &str) -> String {
     deduped.trim_matches('-').to_string()
 }
 
-
 // ---------------------------------------------------------------------------
 // SkillOrchestrator
 // ---------------------------------------------------------------------------
@@ -268,7 +267,6 @@ impl SkillOrchestrator {
         }
     }
 
-
     /// Build the command mapping from fresh v2 lock admissions. Missing,
     /// legacy, tampered, revoked, incompatible, or quarantined packages never
     /// enter `commands`.
@@ -280,9 +278,9 @@ impl SkillOrchestrator {
             record_security_skip(
                 &mut security_skips,
                 "<skill-store>",
-                self.trust_runtime_error.as_deref().unwrap_or(
-                    "no core skill trust verifier is configured",
-                ),
+                self.trust_runtime_error
+                    .as_deref()
+                    .unwrap_or("no core skill trust verifier is configured"),
             );
             emit_security_skip_summary(&security_skips);
             return &self.commands;
@@ -380,7 +378,10 @@ impl SkillOrchestrator {
             return;
         }
         if !self.is_skill_allowed(&name, &cmd_name) {
-            tracing::debug!("Skipping verified skill '{}' due to enabled/disabled filters", name);
+            tracing::debug!(
+                "Skipping verified skill '{}' due to enabled/disabled filters",
+                name
+            );
             return;
         }
 
@@ -685,7 +686,9 @@ mod tests {
                 revoked_at: "2026-07-20T00:00:00Z".to_string(),
             }],
         };
-        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
         store_revocations(root, &revocations).unwrap();
     }
 
@@ -761,7 +764,10 @@ mod tests {
         let info = &orch.commands["/test-skill"];
         assert_eq!(info.name, "test-skill");
         assert_eq!(info.description, "A test");
-        assert_eq!(info.provenance.source, hermes_skills::SkillPackageSource::LocalAuthored);
+        assert_eq!(
+            info.provenance.source,
+            hermes_skills::SkillPackageSource::LocalAuthored
+        );
         assert!(!info.provenance.effects_allowed);
     }
 
@@ -815,12 +821,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(
-            orch.build_skill_invocation_message("/greet", "in French")
-                .is_none()
-        );
-        let (prompt, loaded, missing) =
-            orch.build_preloaded_skills_prompt(&["greet".to_string()]);
+        assert!(orch
+            .build_skill_invocation_message("/greet", "in French")
+            .is_none());
+        let (prompt, loaded, missing) = orch.build_preloaded_skills_prompt(&["greet".to_string()]);
         assert!(prompt.is_empty());
         assert!(loaded.is_empty());
         assert_eq!(missing, vec!["greet"]);
@@ -840,10 +844,9 @@ mod tests {
         assert!(message.contains("Follow verified instructions"));
 
         revoke_signed_remote_skill(tmp.path(), &signer);
-        assert!(
-            orch.build_skill_invocation_message("/signed-skill", "verify")
-                .is_none()
-        );
+        assert!(orch
+            .build_skill_invocation_message("/signed-skill", "verify")
+            .is_none());
         let (prompt, loaded, missing) =
             orch.build_preloaded_skills_prompt(&["signed-skill".to_string()]);
         assert!(prompt.is_empty());

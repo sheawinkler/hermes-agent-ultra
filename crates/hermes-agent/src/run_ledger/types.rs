@@ -855,7 +855,7 @@ impl ExactReplayState {
                 value: value.to_string(),
             }),
         }
-}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2065,10 +2065,7 @@ pub struct ReplayAppendContract {
 }
 
 impl ReplayAppendContract {
-    pub const fn own_event(
-        operation: ReplayOperationKind,
-        phase: ReplayOperationPhase,
-    ) -> Self {
+    pub const fn own_event(operation: ReplayOperationKind, phase: ReplayOperationPhase) -> Self {
         Self {
             operation,
             phase,
@@ -2088,7 +2085,6 @@ impl ReplayAppendContract {
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppendRequest {
@@ -2216,7 +2212,6 @@ pub(crate) struct NonResumableEffectLease {
     pub claimed_at_ms: i64,
     pub token: LeaseToken,
 }
-
 
 #[derive(Debug)]
 pub struct NonResumableEffectAttempt {
@@ -2347,7 +2342,6 @@ impl DeliveryEvidence {
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryCompletionReceipt {

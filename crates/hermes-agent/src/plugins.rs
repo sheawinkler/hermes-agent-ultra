@@ -87,7 +87,6 @@ pub enum HookResult {
     Error(String),
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ToolRequestMiddlewareResult {
     pub args: Value,
@@ -104,7 +103,6 @@ pub struct ToolExecutionMiddlewareContext {
     pub original_args: Value,
     pub turn: u32,
 }
-
 
 // ---------------------------------------------------------------------------
 // PluginManifest
@@ -234,8 +232,6 @@ impl DiscoveredPlugin {
     }
 }
 
-
-
 /// Plugin manager — a diagnostic bundle-discovery surface.
 ///
 /// Third-party effect execution is unavailable until an implementation loader
@@ -287,7 +283,6 @@ impl PluginManager {
         terminal_call(context.args)
     }
 
-
     /// Verify bundle metadata under the supplied core verifier. Verification
     /// does not load or execute a plugin implementation.
     pub fn discover_plugins(
@@ -321,12 +316,7 @@ impl PluginManager {
                 };
             }
         };
-        Self::discover_plugins_with_options(
-            hermes_dir,
-            cwd,
-            enable_project_plugins,
-            &verifier,
-        )
+        Self::discover_plugins_with_options(hermes_dir, cwd, enable_project_plugins, &verifier)
     }
 
     /// Discover user and (when explicitly selected) project bundle metadata
@@ -389,9 +379,7 @@ impl PluginManager {
             embedded_manifest_digests,
         )
     }
-
 }
-
 
 fn scan_plugin_root(
     plugins_dir: &Path,
@@ -815,9 +803,13 @@ fn enforce_plugin_dependency_graph(
     for left in 0..bundles.len() {
         for right in 0..left {
             if bundles[left].admission.identity == bundles[right].admission.identity {
-                let detail = "discovery contains the same immutable package identity more than once"
-                    .to_string();
-                reasons[left] = Some((PluginQuarantineReason::DuplicatePackageIdentity, detail.clone()));
+                let detail =
+                    "discovery contains the same immutable package identity more than once"
+                        .to_string();
+                reasons[left] = Some((
+                    PluginQuarantineReason::DuplicatePackageIdentity,
+                    detail.clone(),
+                ));
                 reasons[right] = Some((PluginQuarantineReason::DuplicatePackageIdentity, detail));
             }
         }
@@ -977,9 +969,7 @@ fn quarantine_from_trust_error(
         | SkillTrustError::MalformedKeyring(_) => SkillQuarantineReason::MalformedLock,
         SkillTrustError::InvalidTrustRoot(_) => SkillQuarantineReason::InvalidTrustRoot,
         SkillTrustError::KeyringRollback(_) => SkillQuarantineReason::KeyringRollback,
-        SkillTrustError::UnprovisionedAuthority(_) => {
-            SkillQuarantineReason::UnprovisionedAuthority
-        }
+        SkillTrustError::UnprovisionedAuthority(_) => SkillQuarantineReason::UnprovisionedAuthority,
     };
     plugin_quarantine(
         root,
@@ -990,10 +980,8 @@ fn quarantine_from_trust_error(
     )
 }
 
-
 impl Default for PluginManager {
     fn default() -> Self {
         Self::new()
     }
 }
-

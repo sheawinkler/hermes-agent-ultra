@@ -68,15 +68,13 @@ impl AuxiliaryError {
             || matches!(
                 self,
                 AuxiliaryError::Llm {
-                    source:
-                        AgentError::Io(_)
+                    source: AgentError::Io(_)
                         | AgentError::Timeout(_)
                         | AgentError::Interrupted { .. },
                     ..
                 }
             )
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +157,7 @@ pub fn is_unsupported_temperature_error(err: &AgentError) -> bool {
 pub fn should_fallback(err: &AgentError) -> bool {
     if matches!(
         err,
-        AgentError::Io(_)
-            | AgentError::Timeout(_)
-            | AgentError::Interrupted { .. }
+        AgentError::Io(_) | AgentError::Timeout(_) | AgentError::Interrupted { .. }
     ) {
         return false;
     }

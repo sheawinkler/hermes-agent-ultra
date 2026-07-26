@@ -345,11 +345,10 @@ struct CaptureMemoryBackend {
 }
 
 fn memory_filter() -> MemorySubjectStorageKey {
-    let subject = MemorySubject::local_owner(MemorySurface::Local, "upstream-contract")
-        .expect("subject");
+    let subject =
+        MemorySubject::local_owner(MemorySurface::Local, "upstream-contract").expect("subject");
     subject.storage_key(&MemorySubjectDerivationKey::from_bytes([47_u8; 32]))
 }
-
 
 #[async_trait]
 impl MemoryBackend for CaptureMemoryBackend {

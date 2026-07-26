@@ -42,7 +42,10 @@ mod tests {
             },
         ));
 
-        assert_eq!(first.await.expect("first task"), Some(PathBuf::from("/workspace/first")));
+        assert_eq!(
+            first.await.expect("first task"),
+            Some(PathBuf::from("/workspace/first"))
+        );
         assert_eq!(
             second.await.expect("second task"),
             Some(PathBuf::from("/workspace/second"))

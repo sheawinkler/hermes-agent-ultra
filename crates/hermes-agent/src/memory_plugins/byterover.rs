@@ -144,7 +144,6 @@ fn run_brv(args: &[&str], _timeout_secs: u64, cwd: &str) -> (bool, String) {
         }
     };
 
-
     let result = Command::new(&brv_path)
         .args(args)
         .current_dir(cwd)
@@ -321,7 +320,10 @@ fn regular_files(root: &Path) -> Result<Vec<(PathBuf, SystemTime)>, String> {
         for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
-            if path.file_name().is_some_and(|name| name == ".byterover.lock") {
+            if path
+                .file_name()
+                .is_some_and(|name| name == ".byterover.lock")
+            {
                 continue;
             }
             let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
@@ -465,8 +467,11 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
             user_content.chars().take(2000).collect::<String>(),
             assistant_content.chars().take(2000).collect::<String>()
         );
-        let (ok, error) =
-            run_brv_locked(&["curate", "--", &combined], CURATE_TIMEOUT_SECS, &workspace);
+        let (ok, error) = run_brv_locked(
+            &["curate", "--", &combined],
+            CURATE_TIMEOUT_SECS,
+            &workspace,
+        );
         if !ok {
             tracing::warn!("ByteRover sync_turn curate failed: {error}");
         }
@@ -529,8 +534,11 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
             return String::new();
         }
         let combined = format!("[Pre-compression context]\n{}", parts.join("\n"));
-        let (ok, error) =
-            run_brv_locked(&["curate", "--", &combined], CURATE_TIMEOUT_SECS, &workspace);
+        let (ok, error) = run_brv_locked(
+            &["curate", "--", &combined],
+            CURATE_TIMEOUT_SECS,
+            &workspace,
+        );
         if !ok {
             tracing::warn!("ByteRover pre-compression curate failed: {error}");
         }
@@ -623,9 +631,12 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
                 .map_err(|_| governance_error(MemoryGovernanceOperation::Export))?
                 .to_string_lossy()
                 .to_string();
-            let bytes = fs::read(&path).map_err(|_| governance_error(MemoryGovernanceOperation::Export))?;
+            let bytes =
+                fs::read(&path).map_err(|_| governance_error(MemoryGovernanceOperation::Export))?;
             let record_id = MemoryExportEvidenceDigest::sha256_bytes(
-                [relative_path.as_bytes(), bytes.as_slice()].concat().as_slice(),
+                [relative_path.as_bytes(), bytes.as_slice()]
+                    .concat()
+                    .as_slice(),
             );
             rows.push((
                 record_id,
@@ -644,9 +655,12 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         let snapshot = MemoryExportSnapshot::new(
             MemoryExportEvidenceDigest::sha256_bytes(&snapshot_bytes),
             MemoryExportEvidenceDigest::sha256_bytes(
-                [b"byterover-revision-v1".as_slice(), snapshot_bytes.as_slice()]
-                    .concat()
-                    .as_slice(),
+                [
+                    b"byterover-revision-v1".as_slice(),
+                    snapshot_bytes.as_slice(),
+                ]
+                .concat()
+                .as_slice(),
             ),
             None,
         );
@@ -666,14 +680,20 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
             let end = (start + 100).min(rows.len());
             let cursor = (start != 0).then(|| {
                 MemoryExportEvidenceDigest::sha256_bytes(
-                    format!("byterover-export:{}:{start}", snapshot.snapshot_digest.as_str())
-                        .as_bytes(),
+                    format!(
+                        "byterover-export:{}:{start}",
+                        snapshot.snapshot_digest.as_str()
+                    )
+                    .as_bytes(),
                 )
             });
             let next_cursor = (end < rows.len()).then(|| {
                 MemoryExportEvidenceDigest::sha256_bytes(
-                    format!("byterover-export:{}:{end}", snapshot.snapshot_digest.as_str())
-                        .as_bytes(),
+                    format!(
+                        "byterover-export:{}:{end}",
+                        snapshot.snapshot_digest.as_str()
+                    )
+                    .as_bytes(),
                 )
             });
             let page = MemoryExportPage::new(
@@ -697,7 +717,10 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
             page_count = page_count.saturating_add(1);
         }
         if sink
-            .finish_provider(MemoryExportCompletion::exhausted(exported_records, page_count))
+            .finish_provider(MemoryExportCompletion::exhausted(
+                exported_records,
+                page_count,
+            ))
             .is_err()
         {
             sink.abort();
@@ -741,7 +764,11 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         if workspace.exists() {
             return Err(governance_error(MemoryGovernanceOperation::Forget));
         }
-        Ok(MemoryForgetReceipt::new("byterover", filter.clone(), deleted))
+        Ok(MemoryForgetReceipt::new(
+            "byterover",
+            filter.clone(),
+            deleted,
+        ))
     }
 
     fn retention_sweep(
@@ -752,10 +779,8 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         _actor: &MemoryAuditActor,
     ) -> Result<MemoryRetentionReceipt, MemoryProviderGovernanceError> {
         check_governance_capability(MemoryGovernanceOperation::RetentionSweep)?;
-        let workspace = self.subject_workspace_for_governance(
-            filter,
-            MemoryGovernanceOperation::RetentionSweep,
-        )?;
+        let workspace = self
+            .subject_workspace_for_governance(filter, MemoryGovernanceOperation::RetentionSweep)?;
         if !workspace.exists() {
             return Ok(MemoryRetentionReceipt::new("byterover", filter.clone(), 0));
         }
@@ -935,11 +960,7 @@ mod tests {
             Err(hermes_core::MemoryExportSinkError::Incomplete)
         }
     }
-    fn subject(label: &str) -> (
-        MemorySubject,
-        MemorySubjectStorageKey,
-        MemoryAuditActor,
-    ) {
+    fn subject(label: &str) -> (MemorySubject, MemorySubjectStorageKey, MemoryAuditActor) {
         let derivation = hermes_core::MemorySubjectDerivationKey::from_bytes([9; 32]);
         let subject = MemorySubject::local_owner(
             hermes_core::MemorySurface::Local,
@@ -950,7 +971,6 @@ mod tests {
         let actor = derivation.actor_for_subject(&subject);
         (subject, key, actor)
     }
-
 
     struct EnvGuard {
         key: &'static str,
@@ -1019,7 +1039,8 @@ mod tests {
     fn test_byterover_handle_tool_missing_args() {
         let plugin = ByteRoverPlugin::new();
         let (subject, key, _) = subject("tool");
-        let result = plugin.handle_tool_call(&subject, &key, "brv_query", &json!({"query": "test"}));
+        let result =
+            plugin.handle_tool_call(&subject, &key, "brv_query", &json!({"query": "test"}));
         assert!(result.contains("error"));
     }
 
@@ -1141,7 +1162,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn export_exhausts_full_workspace_with_nonlooping_pages_and_stable_snapshot() {
         let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
@@ -1154,8 +1174,11 @@ mod tests {
             .expect("initialize");
         let workspace = plugin.working_dir(&key).expect("workspace");
         for index in 0..101 {
-            fs::write(workspace.join(format!("record-{index:03}.txt")), format!("value-{index}"))
-                .expect("record");
+            fs::write(
+                workspace.join(format!("record-{index:03}.txt")),
+                format!("value-{index}"),
+            )
+            .expect("record");
         }
 
         let mut sink = TestExportSink::default();
@@ -1191,10 +1214,15 @@ mod tests {
         assert_eq!(snapshot_export.exported_records, 101);
         assert!(mutating_sink.mutated);
         assert!(mutating_sink.lock_was_released);
-        assert!(mutating_sink.pages.iter().flat_map(|page| page.records.iter()).all(
-            |record| record["path"] != "written-after-snapshot.record"
-        ));
-        assert_eq!(regular_files(&workspace).expect("full inventory").len(), 102);
+        assert!(mutating_sink
+            .pages
+            .iter()
+            .flat_map(|page| page.records.iter())
+            .all(|record| record["path"] != "written-after-snapshot.record"));
+        assert_eq!(
+            regular_files(&workspace).expect("full inventory").len(),
+            102
+        );
     }
     #[test]
     fn subject_workspace_lock_serializes_concurrent_writers() {
@@ -1203,8 +1231,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let (_, key, _) = subject("concurrent");
-        let workspace = subject_workspace(tmp.path().to_str().expect("tmp"), &key)
-            .expect("workspace");
+        let workspace =
+            subject_workspace(tmp.path().to_str().expect("tmp"), &key).expect("workspace");
         let barrier = Arc::new(Barrier::new(2));
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
@@ -1240,8 +1268,7 @@ mod tests {
         let (_, key, _) = subject("symlink");
         let subjects = tmp.path().join("byterover").join("subjects");
         fs::create_dir_all(&subjects).expect("subjects");
-        std::os::unix::fs::symlink(outside.path(), subjects.join(key.as_str()))
-            .expect("symlink");
+        std::os::unix::fs::symlink(outside.path(), subjects.join(key.as_str())).expect("symlink");
         assert!(subject_workspace(tmp.path().to_str().expect("tmp"), &key).is_err());
     }
 }

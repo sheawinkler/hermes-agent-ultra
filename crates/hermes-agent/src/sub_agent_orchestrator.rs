@@ -69,7 +69,6 @@ fn filter_child_tool_schemas(tool_schemas: Vec<ToolSchema>) -> Vec<ToolSchema> {
         .collect()
 }
 
-
 #[derive(Debug)]
 enum CancelAndJoinError {
     Join(tokio::task::JoinError),
@@ -94,10 +93,7 @@ struct AbortOnDropTask<T: Send + 'static> {
 }
 
 impl<T: Send + 'static> AbortOnDropTask<T> {
-    fn new(
-        handle: tokio::task::JoinHandle<T>,
-        interrupt: Option<InterruptController>,
-    ) -> Self {
+    fn new(handle: tokio::task::JoinHandle<T>, interrupt: Option<InterruptController>) -> Self {
         Self {
             handle: Some(handle),
             interrupt,
@@ -319,7 +315,6 @@ impl SubAgentOrchestrator {
         })
     }
 
-
     async fn execute_inner(self: Arc<Self>, req: SubAgentRequest, sub_agent_id: String) -> String {
         let started_at = Utc::now();
 
@@ -442,8 +437,6 @@ impl SubAgentOrchestrator {
 
         let child_interrupt = InterruptController::new();
         let child_interrupt_for_spawn = child_interrupt.clone();
-
-
 
         // Run the child on its own tokio task so that its `impl Future` type is
         // fully erased behind a `JoinHandle`, breaking async recursion with the
@@ -690,7 +683,6 @@ fn extract_final_assistant_text(messages: &[Message]) -> String {
         .unwrap_or_default()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,7 +764,6 @@ mod tests {
         }
     }
 
-
     struct TestOrchestrator {
         inner: Arc<SubAgentOrchestrator>,
         parent_run_id: RunId,
@@ -815,20 +806,18 @@ mod tests {
                 .expect("ephemeral run runtime"),
         );
         let parent_messages = vec![Message::user("parent")];
-        let parent_start_evidence =
-            crate::run_runtime::PreparedRunStartEvidence::new(
-                &parent_messages,
-                &parent_tools,
-                crate::run_runtime::PreparedSystemPromptEvidence::Fresh {
-                    content: "sub-agent orchestrator parent test system prompt",
-                    injected_skills_block: None,
-                },
-            );
-        let containment =
-            hermes_environments::ExecutionContainmentContext::manual(
-                cfg.parent_config.execution_mode,
-            )
-            .expect("manual parent run test context");
+        let parent_start_evidence = crate::run_runtime::PreparedRunStartEvidence::new(
+            &parent_messages,
+            &parent_tools,
+            crate::run_runtime::PreparedSystemPromptEvidence::Fresh {
+                content: "sub-agent orchestrator parent test system prompt",
+                injected_skills_block: None,
+            },
+        );
+        let containment = hermes_environments::ExecutionContainmentContext::manual(
+            cfg.parent_config.execution_mode,
+        )
+        .expect("manual parent run test context");
         let parent_run = runtime
             .start_run(
                 &cfg.parent_config,
@@ -849,11 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn omitted_toolset_inherits_parent_advertised_tools() {
-        let terminal = ToolSchema::new(
-            "terminal",
-            "Terminal tool",
-            JsonSchema::new("object"),
-        );
+        let terminal = ToolSchema::new("terminal", "Terminal tool", JsonSchema::new("object"));
         let mut registry = ToolRegistry::new();
         registry.register_test_observation(
             "terminal",
@@ -1113,10 +1098,7 @@ mod tests {
         let child_runs = orch
             .inner
             .run_runtime
-            .session_runs(
-                &child_session,
-                crate::run_runtime::SessionRunSelection::All,
-            )
+            .session_runs(&child_session, crate::run_runtime::SessionRunSelection::All)
             .expect("child run inspection");
         assert_eq!(child_runs.len(), 1);
         // The deadline cancelled an already-dispatched provider request, so the
@@ -1136,7 +1118,6 @@ mod tests {
             .map(|s| s == "json")
             .unwrap_or(false));
     }
-
 
     #[tokio::test]
     async fn provider_panic_is_terminalized_without_leaving_a_running_child() {
@@ -1207,10 +1188,7 @@ mod tests {
         let child_runs = orch
             .inner
             .run_runtime
-            .session_runs(
-                &child_session,
-                crate::run_runtime::SessionRunSelection::All,
-            )
+            .session_runs(&child_session, crate::run_runtime::SessionRunSelection::All)
             .expect("panic run inspection");
         assert_eq!(child_runs.len(), 1);
         assert_eq!(
@@ -1508,9 +1486,7 @@ mod tests {
         let child_interrupt = interrupt.clone();
         let task = tokio::spawn(async move {
             child_interrupt.fatal_cancelled().await;
-            Err::<hermes_core::AgentResult, _>(AgentError::Io(
-                "child finalizer failed".to_string(),
-            ))
+            Err::<hermes_core::AgentResult, _>(AgentError::Io("child finalizer failed".to_string()))
         });
         let mut supervised = AbortOnDropTask::new(task, Some(interrupt));
 

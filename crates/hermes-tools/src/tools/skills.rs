@@ -55,7 +55,11 @@ impl ToolHandler for SkillsListHandler {
             ToolError::ExecutionFailed("no core skill trust verifier is configured".into())
         })?;
         let catalog = discover_verified_skills(&self.skill_roots, trust);
-        let names: Vec<String> = catalog.available.iter().map(|skill| skill.name.clone()).collect();
+        let names: Vec<String> = catalog
+            .available
+            .iter()
+            .map(|skill| skill.name.clone())
+            .collect();
         let skills: Vec<Value> = catalog
             .available
             .iter()
@@ -240,7 +244,6 @@ fn has_traversal_component(path: &str) -> bool {
         )
     })
 }
-
 
 // ---------------------------------------------------------------------------
 // SkillManageHandler
@@ -451,9 +454,9 @@ mod tests {
     use hermes_skills::{
         canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
         LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
-        SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
-        SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
-        SkillManager, SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
+        SkillLockV2, SkillManager, SkillPackageIdentityV2, SkillPackageManifestV2,
+        SkillPackageProof, SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature,
+        SkillSigningKey, SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
         SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
     };
     use std::collections::BTreeMap;
@@ -606,7 +609,9 @@ mod tests {
                 revoked_at: "2026-07-20T00:00:00Z".to_string(),
             }],
         };
-        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
         store_revocations(skills_root, &revocations).unwrap();
     }
 
@@ -666,19 +671,12 @@ mod tests {
         let initial_list: Value =
             serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
         assert_eq!(initial_list["count"], Value::from(1));
-        let initial_view = view
-            .execute(json!({"name": "signed-skill"}))
-            .await
-            .unwrap();
+        let initial_view = view.execute(json!({"name": "signed-skill"})).await.unwrap();
         assert!(initial_view.contains("Follow verified instructions"));
         assert!(initial_view.contains("key_id=\"test-key\""));
 
         revoke_signed_remote_skill(&skills_root, &signer);
-        assert!(
-            view.execute(json!({"name": "signed-skill"}))
-                .await
-                .is_err()
-        );
+        assert!(view.execute(json!({"name": "signed-skill"})).await.is_err());
         let revoked_list: Value =
             serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
         assert_eq!(revoked_list["count"], Value::from(0));
@@ -799,12 +797,10 @@ mod tests {
         let payload: Value = serde_json::from_str(&list.execute(json!({})).await.unwrap()).unwrap();
         assert_eq!(payload["count"], Value::from(0));
         assert_eq!(payload["blocked_count"], Value::from(1));
-        assert!(
-            payload["blocked"][0]["reason"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("PendingOwnerAttestation")
-        );
+        assert!(payload["blocked"][0]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("PendingOwnerAttestation"));
         assert!(store.load("new-skill").await.is_err());
     }
 

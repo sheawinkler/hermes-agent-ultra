@@ -1,24 +1,21 @@
 //! Docker terminal backend – executes commands inside least-privilege containers.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
-
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::process::Command as TokioCommand;
 
+use crate::containment::{
+    ContainmentCommandRequest, ExecutionContainmentAdmissionError, ExecutionContainmentContext,
+    HardenedCommandPlan, HardenedCommandPlanFailure, VerifiedIsolatedBackendCapability,
+};
 use hermes_core::{
     subprocess::CommandNoWindowExt, subprocess_env::should_strip_subprocess_env_key, AgentError,
     CommandOutput, ResolvedExecutionMode, TerminalBackend,
 };
-use crate::containment::{
-    ContainmentCommandRequest, ExecutionContainmentAdmissionError,
-    ExecutionContainmentContext, HardenedCommandPlan, HardenedCommandPlanFailure,
-    VerifiedIsolatedBackendCapability,
-};
-
 
 const DEFAULT_CONTAINER_CPUS: u32 = 1;
 const DEFAULT_CONTAINER_MEMORY_MIB: u64 = 512;
@@ -118,7 +115,6 @@ trait DockerTestCommandRunner: Send + Sync {
     async fn execute_command(&self, args: &[String]) -> Result<CommandOutput, AgentError>;
 }
 
-
 impl DockerBackend {
     /// Create a new Docker backend.
     ///
@@ -167,7 +163,6 @@ impl DockerBackend {
         self
     }
 
-
     /// Produce the typed capability needed for an intentional manual workspace
     /// mount. Callers must still pass canonical-path validation.
     pub fn manual_workspace_mount_capability() -> DockerManualWorkspaceMountCapability {
@@ -188,10 +183,7 @@ impl DockerBackend {
     /// Return a typed statement of what this backend can prove. Existing
     /// containers are never represented as least-privilege containers.
     pub fn containment_proof(&self) -> DockerContainmentProof {
-        if self
-            .container_id.lock()
-            .is_some()
-        {
+        if self.container_id.lock().is_some() {
             DockerContainmentProof::ExistingContainerUnverified
         } else {
             DockerContainmentProof::LeastPrivilegeContainer
@@ -247,7 +239,9 @@ impl DockerBackend {
         let plan: Arc<dyn HardenedCommandPlan> = Arc::new(DockerHardenedExecutionPlan {
             backend: Arc::clone(self),
         });
-        Ok(ExecutionContainmentContext::certified(mode, capability, plan)?)
+        Ok(ExecutionContainmentContext::certified(
+            mode, capability, plan,
+        )?)
     }
 
     fn canonical_hardened_certification_config(
@@ -478,7 +472,9 @@ impl DockerBackend {
                 )
             })?;
             let cwd = std::env::current_dir().map_err(|error| {
-                AgentError::Io(format!("Failed to resolve current directory for Docker: {error}"))
+                AgentError::Io(format!(
+                    "Failed to resolve current directory for Docker: {error}"
+                ))
             })?;
             let cwd = Self::canonical_workspace_mount(&cwd)?;
             args.push("-v".to_string());
@@ -496,10 +492,7 @@ impl DockerBackend {
     /// Ensure we have a running container. If `container_id` is None,
     /// create one from the configured image.
     async fn ensure_container(&self) -> Result<String, AgentError> {
-        if let Some(id) = self
-            .container_id.lock()
-            .clone()
-        {
+        if let Some(id) = self.container_id.lock().clone() {
             return Ok(id);
         }
 
@@ -595,7 +588,9 @@ impl DockerBackend {
             )
             .await
             .map_err(|_| {
-                AgentError::Timeout(format!("Docker command timed out after {timeout_secs} seconds"))
+                AgentError::Timeout(format!(
+                    "Docker command timed out after {timeout_secs} seconds"
+                ))
             })?;
         }
 
@@ -949,8 +944,14 @@ mod containment_tests {
             .closed_execution_context(reviewed_mode())
             .expect("pinned fresh hardened Docker backend is certifiable");
         let certificate = context.certificate().expect("closed certificate");
-        assert_eq!(certificate.backend_kind(), VerifiedIsolatedBackendKind::Docker);
-        assert_eq!(context.sandbox_digest(), Some(certificate.configuration_digest()));
+        assert_eq!(
+            certificate.backend_kind(),
+            VerifiedIsolatedBackendKind::Docker
+        );
+        assert_eq!(
+            context.sandbox_digest(),
+            Some(certificate.configuration_digest())
+        );
 
         let result = context
             .execute_host_sensitive(
@@ -966,8 +967,12 @@ mod containment_tests {
         assert_eq!(runner.launch_calls.load(Ordering::Relaxed), 1);
         assert_eq!(runner.execute_calls.load(Ordering::Relaxed), 1);
         let run_args = runner.run_args.lock();
-        assert!(run_args[0].windows(2).any(|pair| pair == ["--network", "none"]));
-        assert!(run_args[0].windows(2).any(|pair| pair == ["--cap-drop", "ALL"]));
+        assert!(run_args[0]
+            .windows(2)
+            .any(|pair| pair == ["--network", "none"]));
+        assert!(run_args[0]
+            .windows(2)
+            .any(|pair| pair == ["--cap-drop", "ALL"]));
         assert!(run_args[0].iter().any(|argument| argument == "--read-only"));
         assert!(!run_args[0].iter().any(|argument| argument == "-v"));
         drop(run_args);
@@ -995,7 +1000,10 @@ mod containment_tests {
             .await
             .expect_err("launch failure must not execute elsewhere");
 
-        assert!(matches!(error, ContainmentExecutionError::LaunchFailed { .. }));
+        assert!(matches!(
+            error,
+            ContainmentExecutionError::LaunchFailed { .. }
+        ));
         assert_eq!(runner.launch_calls.load(Ordering::Relaxed), 1);
         assert_eq!(runner.execute_calls.load(Ordering::Relaxed), 0);
         assert!(context.completed_execution_receipts().is_empty());
@@ -1068,7 +1076,9 @@ mod containment_tests {
             1024,
         );
         assert_eq!(
-            host_mount.verified_isolated_backend_capability().unwrap_err(),
+            host_mount
+                .verified_isolated_backend_capability()
+                .unwrap_err(),
             DockerContainmentCertificationError::HostWorkspaceMount
         );
     }
@@ -1099,8 +1109,12 @@ mod quote_tests {
         let args = backend
             .build_run_args("rust:1.90")
             .expect("least-privilege args");
-        assert!(args.windows(2).any(|window| window == ["--network", "none"]));
-        assert!(args.windows(2).any(|window| window == ["--cap-drop", "ALL"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--network", "none"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--cap-drop", "ALL"]));
         assert!(args
             .windows(2)
             .any(|window| window == ["--security-opt", "no-new-privileges"]));
@@ -1114,7 +1128,9 @@ mod quote_tests {
             .windows(2)
             .any(|window| window == ["--tmpfs", CONTAINER_TMPFS]));
         assert!(args.windows(2).any(|window| window == ["-e", "FOO=bar"]));
-        assert!(args.windows(2).any(|window| window == ["--user", "65534:65534"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--user", "65534:65534"]));
         assert!(args.iter().any(|arg| arg == "--rm"));
         assert!(!args.iter().any(|arg| arg == "-v"));
         assert_eq!(

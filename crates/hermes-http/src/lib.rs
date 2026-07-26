@@ -1270,7 +1270,8 @@ mod tests {
             },
         );
 
-        let agent_config = build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert_eq!(
             agent_config
@@ -1295,7 +1296,8 @@ mod tests {
         let mut config = GatewayConfig::default();
         config.agent.preflight_context_compress = false;
 
-        let agent_config = build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert!(!agent_config.preflight_context_compress);
     }
@@ -1314,7 +1316,8 @@ mod tests {
             ..GatewayConfig::default()
         };
 
-        let agent_config = build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
+        let agent_config =
+            build_agent_config(&config, "openai:dynamic", ResolvedExecutionMode::default());
 
         assert_eq!(agent_config.prefill_messages.len(), 2);
         assert_eq!(
@@ -1335,7 +1338,8 @@ mod tests {
         config.delegation.base_url = Some(" https://openrouter.ai/api/v1 ".to_string());
         config.delegation.api_key = Some(" sk-or-test ".to_string());
 
-        let agent_config = build_agent_config(&config, "nous:hermes-3", ResolvedExecutionMode::default());
+        let agent_config =
+            build_agent_config(&config, "nous:hermes-3", ResolvedExecutionMode::default());
 
         assert_eq!(
             agent_config.delegation_model.as_deref(),
@@ -1374,7 +1378,9 @@ mod tests {
                 .expect("invalid config execution mode must fail startup");
 
             assert!(
-                error.to_string().contains(ExecutionModeSource::ConfigFile.as_str()),
+                error
+                    .to_string()
+                    .contains(ExecutionModeSource::ConfigFile.as_str()),
                 "expected config-file validation for {raw:?}, got {error}"
             );
             assert_runtime_was_not_opened(&state_root);
@@ -1399,7 +1405,9 @@ mod tests {
                 .expect("invalid environment execution mode must fail startup");
 
             assert!(
-                error.to_string().contains(ExecutionModeSource::Environment.as_str()),
+                error
+                    .to_string()
+                    .contains(ExecutionModeSource::Environment.as_str()),
                 "expected environment validation for {raw:?}, got {error}"
             );
             assert_runtime_was_not_opened(&state_root);
@@ -1436,8 +1444,12 @@ mod tests {
         assert!(state_root.join("sessions.db").is_file());
         assert_eq!(state.execution_mode, resolved);
         assert_eq!(
-            build_agent_config(state.config.as_ref(), "openai:dynamic", state.execution_mode)
-                .execution_mode,
+            build_agent_config(
+                state.config.as_ref(),
+                "openai:dynamic",
+                state.execution_mode
+            )
+            .execution_mode,
             resolved
         );
     }

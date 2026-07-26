@@ -1,8 +1,8 @@
 use super::*;
-use hermes_core::{ExecutionMode, ExecutionModeSource};
 use crate::config::ExecutionModeConfigValue;
-use std::collections::HashMap;
+use hermes_core::{ExecutionMode, ExecutionModeSource};
 use parking_lot::Mutex;
+use std::collections::HashMap;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -628,8 +628,8 @@ fn execution_mode_precedence_is_profile_config_environment_then_cli() {
     let config = execution_mode_config(directory.path(), "reviewed".into());
     set_test_env(EXECUTION_MODE_ENV_KEY, "autonomous_local");
 
-    let resolved = resolve_runtime_execution_mode(&config, Some("ci"))
-        .expect("resolve all precedence layers");
+    let resolved =
+        resolve_runtime_execution_mode(&config, Some("ci")).expect("resolve all precedence layers");
 
     assert_eq!(resolved.mode, ExecutionMode::Ci);
     assert_eq!(resolved.source, ExecutionModeSource::Cli);
@@ -758,11 +758,9 @@ fn managed_overlay_rejects_explicit_null_execution_mode_without_mutating_base() 
         ..GatewayConfig::default()
     };
 
-    let error = apply_managed_config_overlay(
-        &mut config,
-        &serde_json::json!({ "execution_mode": null }),
-    )
-    .expect_err("managed explicit-null execution mode must fail closed");
+    let error =
+        apply_managed_config_overlay(&mut config, &serde_json::json!({ "execution_mode": null }))
+            .expect_err("managed explicit-null execution mode must fail closed");
     assert!(
         error
             .to_string()
@@ -781,11 +779,7 @@ fn execution_mode_file_load_matrix_handles_missing_and_all_invalid_forms() {
     let path = directory.path().join("config.yaml");
 
     for (description, contents, expected) in [
-        (
-            "missing",
-            "{}\n",
-            Some(ExecutionModeConfigValue::Absent),
-        ),
+        ("missing", "{}\n", Some(ExecutionModeConfigValue::Absent)),
         (
             "closed value",
             "execution_mode: manual\n",
@@ -798,8 +792,8 @@ fn execution_mode_file_load_matrix_handles_missing_and_all_invalid_forms() {
         std::fs::write(&path, contents).expect("write config file");
         match expected {
             Some(expected) => {
-                let loaded = load_from_yaml(&path)
-                    .expect("missing or closed execution mode should load");
+                let loaded =
+                    load_from_yaml(&path).expect("missing or closed execution mode should load");
                 assert_eq!(loaded.execution_mode, expected, "{description}");
             }
             None => {
@@ -845,15 +839,11 @@ fn execution_mode_source_winner_matrix_covers_every_precedence_layer() {
 
     remove_test_env(EXECUTION_MODE_ENV_KEY);
     let built_in_directory = tempfile::tempdir().expect("create built-in directory");
-    let built_in =
-        resolve_runtime_execution_mode(
-            &execution_mode_config(
-                built_in_directory.path(),
-                ExecutionModeConfigValue::Absent,
-            ),
-            None,
-        )
-        .expect("built-in default should resolve");
+    let built_in = resolve_runtime_execution_mode(
+        &execution_mode_config(built_in_directory.path(), ExecutionModeConfigValue::Absent),
+        None,
+    )
+    .expect("built-in default should resolve");
     assert_eq!(
         built_in,
         hermes_core::ResolvedExecutionMode {
@@ -864,12 +854,11 @@ fn execution_mode_source_winner_matrix_covers_every_precedence_layer() {
 
     let profile_directory = tempfile::tempdir().expect("create profile directory");
     write_active_execution_mode_profile(profile_directory.path(), "execution_mode: reviewed\n");
-    let profile =
-        resolve_runtime_execution_mode(
-            &execution_mode_config(profile_directory.path(), ExecutionModeConfigValue::Absent),
-            None,
-        )
-        .expect("profile mode should resolve");
+    let profile = resolve_runtime_execution_mode(
+        &execution_mode_config(profile_directory.path(), ExecutionModeConfigValue::Absent),
+        None,
+    )
+    .expect("profile mode should resolve");
     assert_eq!(
         profile,
         hermes_core::ResolvedExecutionMode {
@@ -897,15 +886,14 @@ fn execution_mode_source_winner_matrix_covers_every_precedence_layer() {
 
     let environment_directory = tempfile::tempdir().expect("create environment directory");
     set_test_env(EXECUTION_MODE_ENV_KEY, "ci");
-    let environment =
-        resolve_runtime_execution_mode(
-            &execution_mode_config(
-                environment_directory.path(),
-                ExecutionModeConfigValue::value("reviewed"),
-            ),
-            None,
-        )
-        .expect("environment mode should resolve");
+    let environment = resolve_runtime_execution_mode(
+        &execution_mode_config(
+            environment_directory.path(),
+            ExecutionModeConfigValue::value("reviewed"),
+        ),
+        None,
+    )
+    .expect("environment mode should resolve");
     assert_eq!(
         environment,
         hermes_core::ResolvedExecutionMode {
@@ -915,15 +903,14 @@ fn execution_mode_source_winner_matrix_covers_every_precedence_layer() {
     );
 
     let cli_directory = tempfile::tempdir().expect("create cli directory");
-    let cli =
-        resolve_runtime_execution_mode(
-            &execution_mode_config(
-                cli_directory.path(),
-                ExecutionModeConfigValue::value("reviewed"),
-            ),
-            Some("remote_worker"),
-        )
-        .expect("CLI mode should resolve");
+    let cli = resolve_runtime_execution_mode(
+        &execution_mode_config(
+            cli_directory.path(),
+            ExecutionModeConfigValue::value("reviewed"),
+        ),
+        Some("remote_worker"),
+    )
+    .expect("CLI mode should resolve");
     assert_eq!(
         cli,
         hermes_core::ResolvedExecutionMode {
@@ -940,7 +927,10 @@ fn execution_mode_diagnostic_reports_all_layers_and_lower_error_provenance() {
     let directory = tempfile::tempdir().expect("create config directory");
     write_active_execution_mode_profile(directory.path(), "execution_mode: manual\n");
     set_test_env(EXECUTION_MODE_ENV_KEY, "autonomous_local");
-    let config = execution_mode_config(directory.path(), ExecutionModeConfigValue::value("reviewed"));
+    let config = execution_mode_config(
+        directory.path(),
+        ExecutionModeConfigValue::value("reviewed"),
+    );
 
     let diagnostic = diagnose_runtime_execution_mode(&config, Some("ci"));
     assert_eq!(diagnostic.mode, Some(ExecutionMode::Ci));
@@ -1006,12 +996,13 @@ fn user_config_unknown_keys_are_strict_by_default_with_explicit_compatibility_es
         "expected source path, got {error}"
     );
 
-    let compatibility = load_user_config_file_with_options(
-        &path,
-        UserConfigLoadOptions::compatibility(),
-    )
-    .expect("compatibility option must be an explicit user-only escape hatch");
-    assert_eq!(compatibility.execution_mode, ExecutionModeConfigValue::Absent);
+    let compatibility =
+        load_user_config_file_with_options(&path, UserConfigLoadOptions::compatibility())
+            .expect("compatibility option must be an explicit user-only escape hatch");
+    assert_eq!(
+        compatibility.execution_mode,
+        ExecutionModeConfigValue::Absent
+    );
 
     std::fs::write(&path, "unknown_null_key: null\n").expect("write null unknown key");
     let error = load_from_yaml(&path)
@@ -1142,7 +1133,9 @@ fn raw_effective_config_retains_only_a_previously_valid_mapping_after_transient_
 
     let initial = load_effective_config_yaml_value(&path).expect("read valid raw config");
     assert_eq!(
-        initial.pointer("/upstream_opaque/nested").and_then(serde_json::Value::as_str),
+        initial
+            .pointer("/upstream_opaque/nested")
+            .and_then(serde_json::Value::as_str),
         Some("retained")
     );
 

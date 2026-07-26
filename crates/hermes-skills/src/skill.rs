@@ -329,7 +329,7 @@ mod tests {
         let signer = crate::LocalOwnerSigningKey::from_seed(TEST_LOCAL_OWNER_SEED);
         let store = Arc::new(
             FileSkillStore::new(dir.clone()).with_trusted_local_owner_keys(vec![
-                signer.trusted_key("test-owner", "test-local-key", true),
+                signer.trusted_key("test-owner", "test-local-key", true)
             ]),
         );
         (SkillManager::new(store.clone()), store)

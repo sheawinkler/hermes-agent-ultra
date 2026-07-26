@@ -133,7 +133,6 @@ static COMPILED_BLOCKED_URLS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 pub const MAX_SKILL_FILE_COUNT: usize = 200;
 pub const MAX_SINGLE_SKILL_FILE_BYTES: usize = 1024 * 1024;
 
-
 /// Trust tier used by install-policy decisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillTrustLevel {
@@ -342,10 +341,8 @@ fn is_detached_trust_metadata(path: &Path, root: &Path) -> bool {
     relative == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_LOCK_FILE)
         || relative
             == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_REVOCATIONS_FILE)
-        || relative
-            == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_KEYRING_FILE)
+        || relative == Path::new(crate::trust::SKILL_HUB_DIR).join(crate::trust::SKILL_KEYRING_FILE)
 }
-
 
 pub fn scan_skill_file(path: &Path, root: &Path) -> Vec<SkillScanFinding> {
     let rel = display_rel(path, root);
@@ -603,11 +600,9 @@ pub fn should_allow_install(
 ) -> (bool, String) {
     (
         false,
-        "Legacy source/verdict admission is disabled; use the v2 SkillTrustVerifier"
-            .to_string(),
+        "Legacy source/verdict admission is disabled; use the v2 SkillTrustVerifier".to_string(),
     )
 }
-
 
 // ---------------------------------------------------------------------------
 // SkillGuard
@@ -642,7 +637,6 @@ impl SkillGuard {
             blocked_urls,
         }
     }
-
 
     /// Validate a skill's content and structure.
     ///
@@ -715,7 +709,6 @@ impl SkillGuard {
         self.validate_urls_in_content(&skill.content)?;
 
         Ok(())
-
     }
 
     /// Run the complete directory scanner used by package trust verification.
@@ -986,7 +979,6 @@ mod tests {
         assert!(validate_skill(&skill).is_err());
     }
 
-
     #[test]
     fn guard_mode_environment_cannot_disable_production_scanning() {
         let previous = std::env::var_os("HERMES_SKILL_GUARD_MODE");
@@ -1038,12 +1030,8 @@ mod tests {
 
     #[test]
     fn legacy_source_verdict_gate_never_admits_or_honors_force() {
-        let (allowed, reason) = should_allow_install(
-            SkillTrustLevel::Builtin,
-            SkillScanVerdict::Safe,
-            0,
-            true,
-        );
+        let (allowed, reason) =
+            should_allow_install(SkillTrustLevel::Builtin, SkillScanVerdict::Safe, 0, true);
         assert!(!allowed);
         assert!(reason.contains("v2 SkillTrustVerifier"));
     }

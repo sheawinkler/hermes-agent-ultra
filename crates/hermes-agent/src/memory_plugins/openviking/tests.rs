@@ -37,7 +37,6 @@ impl hermes_core::MemoryExportSink for TestExportSink {
     }
 }
 
-
 fn subject(label: &str) -> (MemorySubject, MemorySubjectStorageKey) {
     let subject = MemorySubject::local_owner(hermes_core::MemorySurface::Local, label)
         .expect("explicit local subject");
@@ -69,13 +68,19 @@ fn mock_server(responses: Vec<(u16, String)>) -> (String, mpsc::Receiver<String>
             sender
                 .send(String::from_utf8_lossy(&bytes[..read]).to_string())
                 .expect("record request");
-            let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+            let reason = if (200..300).contains(&status) {
+                "OK"
+            } else {
+                "Error"
+            };
             let response = format!(
                 "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body,
             );
-            stream.write_all(response.as_bytes()).expect("write response");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
         }
     });
     (format!("http://{address}"), receiver)
@@ -131,7 +136,9 @@ fn search_forces_authenticated_subject_root() {
         &json!({"query":"status", "scope": root(&key)}),
     );
     assert!(!result.contains("error"));
-    let request = requests.recv_timeout(StdDuration::from_secs(2)).expect("request");
+    let request = requests
+        .recv_timeout(StdDuration::from_secs(2))
+        .expect("request");
     assert!(request.starts_with("POST /api/v1/search/find "));
     assert!(request.contains(&root(&key)));
     assert!(!request.contains("search-session"));
@@ -174,11 +181,25 @@ fn forget_enumerates_subject_files_and_proves_tree_and_search_miss() {
         .expect("subject forget");
     assert_eq!(receipt.deleted_records, 2);
     let captured = (0..6)
-        .map(|_| requests.recv_timeout(StdDuration::from_secs(2)).expect("request"))
+        .map(|_| {
+            requests
+                .recv_timeout(StdDuration::from_secs(2))
+                .expect("request")
+        })
         .collect::<Vec<_>>();
-    assert_eq!(captured.iter().filter(|request| request.starts_with("DELETE /api/v1/fs?")).count(), 3);
-    assert!(captured.iter().any(|request| request.starts_with("POST /api/v1/search/find ")));
-    assert!(captured.iter().all(|request| request.contains(&key.as_str())));
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|request| request.starts_with("DELETE /api/v1/fs?"))
+            .count(),
+        3
+    );
+    assert!(captured
+        .iter()
+        .any(|request| request.starts_with("POST /api/v1/search/find ")));
+    assert!(captured
+        .iter()
+        .all(|request| request.contains(&key.as_str())));
 }
 
 #[test]
@@ -187,7 +208,8 @@ fn retention_keeps_newest_subject_record() {
     let subject_root = root(&key);
     let newest = format!("{subject_root}/preferences/new.md");
     let oldest = format!("{subject_root}/preferences/old.md");
-    let tree = format!(r#"{{"result":{{"children":[{{"uri":"{newest}"}},{{"uri":"{oldest}"}}]}}}}"#);
+    let tree =
+        format!(r#"{{"result":{{"children":[{{"uri":"{newest}"}},{{"uri":"{oldest}"}}]}}}}"#);
     let (endpoint, requests) = mock_server(vec![
         (200, tree),
         (200, "{\"created_at\":200}".to_string()),
@@ -202,7 +224,11 @@ fn retention_keeps_newest_subject_record() {
         .expect("retention sweep");
     assert_eq!(receipt.deleted_records, 1);
     let captured = (0..4)
-        .map(|_| requests.recv_timeout(StdDuration::from_secs(2)).expect("request"))
+        .map(|_| {
+            requests
+                .recv_timeout(StdDuration::from_secs(2))
+                .expect("request")
+        })
         .collect::<Vec<_>>();
     let delete = captured
         .iter()

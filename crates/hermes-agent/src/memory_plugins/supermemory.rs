@@ -85,7 +85,8 @@ impl SupermemoryConfig {
     fn load(hermes_home: &str) -> Self {
         let mut config = Self {
             api_key: std::env::var("SUPERMEMORY_API_KEY").unwrap_or_default(),
-            base_url: std::env::var("SUPERMEMORY_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string()),
+            base_url: std::env::var("SUPERMEMORY_BASE_URL")
+                .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string()),
             auto_recall: true,
             auto_capture: true,
             max_recall_results: DEFAULT_MAX_RECALL,
@@ -95,10 +96,18 @@ impl SupermemoryConfig {
         let path = std::path::Path::new(hermes_home).join("supermemory.json");
         if let Ok(content) = std::fs::read_to_string(path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
-                if let Some(value) = raw.get("api_key").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+                if let Some(value) = raw
+                    .get("api_key")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                {
                     config.api_key = value.trim().to_string();
                 }
-                if let Some(value) = raw.get("base_url").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+                if let Some(value) = raw
+                    .get("base_url")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                {
                     config.base_url = value.trim().to_string();
                 }
                 if let Some(value) = raw.get("auto_recall").and_then(Value::as_bool) {
@@ -115,7 +124,11 @@ impl SupermemoryConfig {
                         config.search_mode = value.to_string();
                     }
                 }
-                if let Some(value) = raw.get("api_timeout").or_else(|| raw.get("timeout")).and_then(Value::as_f64) {
+                if let Some(value) = raw
+                    .get("api_timeout")
+                    .or_else(|| raw.get("timeout"))
+                    .and_then(Value::as_f64)
+                {
                     config.api_timeout = value.clamp(1.0, 60.0);
                 }
             }
@@ -146,17 +159,26 @@ fn subject_metadata(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -
     })
 }
 
-fn scope_query(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Vec<(&'static str, String)> {
+fn scope_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
     let key = filter.as_str().to_string();
     vec![
         ("subject_key", key.clone()),
         ("container_tag", key.clone()),
         ("tenant_id", key.clone()),
         ("principal_id", key.clone()),
-        ("team_id", subject.team_id().map(|_| key.clone()).unwrap_or_default()),
+        (
+            "team_id",
+            subject.team_id().map(|_| key.clone()).unwrap_or_default(),
+        ),
         ("session_id", key.clone()),
         ("surface", subject.surface().as_str().to_string()),
-        ("visibility", visibility_label(subject.visibility()).to_string()),
+        (
+            "visibility",
+            visibility_label(subject.visibility()).to_string(),
+        ),
     ]
 }
 
@@ -165,7 +187,9 @@ fn scoped_payload(
     filter: &MemorySubjectStorageKey,
     mut payload: Value,
 ) -> Result<Value, String> {
-    let map = payload.as_object_mut().ok_or_else(|| "Supermemory request body must be an object".to_string())?;
+    let map = payload
+        .as_object_mut()
+        .ok_or_else(|| "Supermemory request body must be an object".to_string())?;
     let key = filter.as_str();
     let metadata = subject_metadata(subject, filter);
     map.insert("container_tag".to_string(), json!(key));
@@ -173,7 +197,10 @@ fn scoped_payload(
     map.insert("subject_key".to_string(), json!(key));
     map.insert("tenant_id".to_string(), json!(key));
     map.insert("principal_id".to_string(), json!(key));
-    map.insert("team_id".to_string(), subject.team_id().map(|_| json!(key)).unwrap_or(Value::Null));
+    map.insert(
+        "team_id".to_string(),
+        subject.team_id().map(|_| json!(key)).unwrap_or(Value::Null),
+    );
     map.insert("session_id".to_string(), json!(key));
     match map.remove("metadata") {
         Some(Value::Object(mut existing)) => {
@@ -193,9 +220,24 @@ fn scoped_payload(
 
 fn reject_subject_override(args: &Value) -> Result<(), String> {
     const FORBIDDEN: &[&str] = &[
-        "container_tag", "containerTag", "container_tags", "containerTags", "user_id", "userId",
-        "tenant_id", "tenantId", "principal_id", "principalId", "team_id", "teamId",
-        "session_id", "sessionId", "subject_key", "subjectKey", "runtime_user_id", "runtimeUserId",
+        "container_tag",
+        "containerTag",
+        "container_tags",
+        "containerTags",
+        "user_id",
+        "userId",
+        "tenant_id",
+        "tenantId",
+        "principal_id",
+        "principalId",
+        "team_id",
+        "teamId",
+        "session_id",
+        "sessionId",
+        "subject_key",
+        "subjectKey",
+        "runtime_user_id",
+        "runtimeUserId",
     ];
     if FORBIDDEN.iter().any(|key| args.get(*key).is_some()) {
         return Err("authenticated memory subject cannot be overridden by tool arguments".into());
@@ -228,13 +270,25 @@ fn extract_profile_lists(profile: &Value) -> (Vec<String>, Vec<String>, Vec<Valu
         .pointer("/profile/static")
         .or_else(|| profile.get("static"))
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(ToString::to_string).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     let dynamic_facts = profile
         .pointer("/profile/dynamic")
         .or_else(|| profile.get("dynamic"))
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(ToString::to_string).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     let results = profile
         .get("search_results")
@@ -244,25 +298,63 @@ fn extract_profile_lists(profile: &Value) -> (Vec<String>, Vec<String>, Vec<Valu
     (static_facts, dynamic_facts, results)
 }
 
-fn format_prefetch_context(static_facts: &[String], dynamic_facts: &[String], results: &[Value]) -> String {
+fn format_prefetch_context(
+    static_facts: &[String],
+    dynamic_facts: &[String],
+    results: &[Value],
+) -> String {
     let mut parts = Vec::new();
     if !static_facts.is_empty() {
-        parts.push(format!("## User Profile (Persistent)\n{}", static_facts.iter().map(|fact| format!("- {fact}")).collect::<Vec<_>>().join("\n")));
+        parts.push(format!(
+            "## User Profile (Persistent)\n{}",
+            static_facts
+                .iter()
+                .map(|fact| format!("- {fact}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
     }
     if !dynamic_facts.is_empty() {
-        parts.push(format!("## Recent Context\n{}", dynamic_facts.iter().map(|fact| format!("- {fact}")).collect::<Vec<_>>().join("\n")));
+        parts.push(format!(
+            "## Recent Context\n{}",
+            dynamic_facts
+                .iter()
+                .map(|fact| format!("- {fact}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
     }
     let memories = results
         .iter()
-        .filter_map(|record| record.get("memory").or_else(|| record.get("content")).or_else(|| record.get("text")).and_then(Value::as_str))
+        .filter_map(|record| {
+            record
+                .get("memory")
+                .or_else(|| record.get("content"))
+                .or_else(|| record.get("text"))
+                .and_then(Value::as_str)
+        })
         .map(str::trim)
         .filter(|memory| !memory.is_empty())
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     if !memories.is_empty() {
-        parts.push(format!("## Relevant Memories\n{}", memories.iter().map(|memory| format!("- {memory}")).collect::<Vec<_>>().join("\n")));
+        parts.push(format!(
+            "## Relevant Memories\n{}",
+            memories
+                .iter()
+                .map(|memory| format!("- {memory}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
     }
-    if parts.is_empty() { String::new() } else { format!("<supermemory-context>\n{}\n</supermemory-context>", parts.join("\n\n")) }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<supermemory-context>\n{}\n</supermemory-context>",
+            parts.join("\n\n")
+        )
+    }
 }
 
 fn retention_candidates(records: &[Value], policy: &MemoryRetentionPolicy) -> Vec<String> {
@@ -322,7 +414,10 @@ impl SupermemoryMemoryPlugin {
         {
             return Err("Supermemory request subject does not match initialized subject".into());
         }
-        self.config.lock().clone().ok_or_else(|| "Supermemory is not configured".to_string())
+        self.config
+            .lock()
+            .clone()
+            .ok_or_else(|| "Supermemory is not configured".to_string())
     }
 
     fn client(config: &SupermemoryConfig) -> Result<reqwest::blocking::Client, String> {
@@ -339,7 +434,11 @@ impl SupermemoryMemoryPlugin {
         payload: Option<&Value>,
         query: Option<&[(&str, String)]>,
     ) -> Result<Value, String> {
-        let url = format!("{}/{}", config.base_url.trim_end_matches('/'), path.trim_start_matches('/'));
+        let url = format!(
+            "{}/{}",
+            config.base_url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        );
         let mut request = Self::client(config)?
             .request(method.clone(), &url)
             .header("Authorization", format!("Bearer {}", config.api_key))
@@ -352,13 +451,22 @@ impl SupermemoryMemoryPlugin {
         if let Some(query) = query {
             request = request.query(query);
         }
-        let response = request.send().map_err(|error| format!("Supermemory request {method} {url} failed: {error}"))?;
+        let response = request
+            .send()
+            .map_err(|error| format!("Supermemory request {method} {url} failed: {error}"))?;
         let status = response.status();
         let body = response.text().unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("Supermemory request {method} {url} returned {status}: {body}"));
+            return Err(format!(
+                "Supermemory request {method} {url} returned {status}: {body}"
+            ));
         }
-        if body.trim().is_empty() { Ok(json!({})) } else { serde_json::from_str(&body).map_err(|error| format!("Supermemory response parse error: {error}")) }
+        if body.trim().is_empty() {
+            Ok(json!({}))
+        } else {
+            serde_json::from_str(&body)
+                .map_err(|error| format!("Supermemory response parse error: {error}"))
+        }
     }
 
     fn add_memory(
@@ -368,7 +476,11 @@ impl SupermemoryMemoryPlugin {
         content: &str,
         metadata: Option<Value>,
     ) -> Result<Value, String> {
-        let payload = scoped_payload(subject, filter, json!({"content": redact_sensitive_text(content), "metadata": metadata.unwrap_or_else(|| json!({}))}))?;
+        let payload = scoped_payload(
+            subject,
+            filter,
+            json!({"content": redact_sensitive_text(content), "metadata": metadata.unwrap_or_else(|| json!({}))}),
+        )?;
         let mut last_error = String::new();
         for path in ["/v3/memories", "/v3/documents", "/v1/memories"] {
             match Self::send_json(config, Method::POST, path, Some(&payload), None) {
@@ -392,7 +504,11 @@ impl SupermemoryMemoryPlugin {
             json!({"q": query, "query": query, "limit": limit.clamp(1, MAX_REMOTE_RECORDS), "search_mode": config.search_mode}),
         )?;
         let mut last_error = String::new();
-        for path in ["/v3/search/memories", "/v3/memories/search", "/v1/memory/search"] {
+        for path in [
+            "/v3/search/memories",
+            "/v3/memories/search",
+            "/v1/memory/search",
+        ] {
             match Self::send_json(config, Method::POST, path, Some(&payload), None) {
                 Ok(value) => return Ok(unwrap_results(value)),
                 Err(error) => last_error = error,
@@ -426,15 +542,19 @@ impl SupermemoryMemoryPlugin {
     }
 
     fn export_has_more(response: &Value) -> Option<bool> {
-        [Some(response), response.get("meta"), response.get("pagination")]
-            .into_iter()
-            .flatten()
-            .find_map(|scope| {
-                scope
-                    .get("has_more")
-                    .or_else(|| scope.get("hasMore"))
-                    .and_then(Value::as_bool)
-            })
+        [
+            Some(response),
+            response.get("meta"),
+            response.get("pagination"),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|scope| {
+            scope
+                .get("has_more")
+                .or_else(|| scope.get("hasMore"))
+                .and_then(Value::as_bool)
+        })
     }
 
     fn stable_export_page(
@@ -468,14 +588,16 @@ impl SupermemoryMemoryPlugin {
         if let Some(cursor) = cursor {
             payload["cursor"] = json!(cursor);
         }
-        for path in ["/v3/search/memories", "/v3/memories/search", "/v1/memory/search"] {
+        for path in [
+            "/v3/search/memories",
+            "/v3/memories/search",
+            "/v1/memory/search",
+        ] {
             match Self::send_json(config, Method::POST, path, Some(&payload), None) {
                 Ok(response) => {
-                    let snapshot = Self::export_marker(
-                        &response,
-                        &["snapshot_id", "snapshotId", "snapshot"],
-                    )
-                    .ok_or(SupermemoryExportError::Unsupported)?;
+                    let snapshot =
+                        Self::export_marker(&response, &["snapshot_id", "snapshotId", "snapshot"])
+                            .ok_or(SupermemoryExportError::Unsupported)?;
                     let revision = Self::export_marker(
                         &response,
                         &["revision_id", "revisionId", "revision", "version"],
@@ -566,24 +688,30 @@ impl SupermemoryMemoryPlugin {
                 let record_count = records.len() as u64;
                 sink.append_page(
                     MemoryExportPage::new(
-                        current_cursor
-                            .as_deref()
-                            .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
-                        next_cursor
-                            .as_deref()
-                            .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
+                        current_cursor.as_deref().map(|cursor| {
+                            MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())
+                        }),
+                        next_cursor.as_deref().map(|cursor| {
+                            MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())
+                        }),
                         record_ids,
                         records,
                     )
-                    .map_err(|_| SupermemoryExportError::Failed("export page evidence is invalid"))?,
+                    .map_err(|_| {
+                        SupermemoryExportError::Failed("export page evidence is invalid")
+                    })?,
                 )
-                .map_err(|_| SupermemoryExportError::Failed("export sink rejected provider page"))?;
+                .map_err(|_| {
+                    SupermemoryExportError::Failed("export sink rejected provider page")
+                })?;
                 exported_records = exported_records.checked_add(record_count).ok_or(
                     SupermemoryExportError::Failed("stable export record count overflow"),
                 )?;
-                page_count = page_count.checked_add(1).ok_or(
-                    SupermemoryExportError::Failed("stable export page count overflow"),
-                )?;
+                page_count = page_count
+                    .checked_add(1)
+                    .ok_or(SupermemoryExportError::Failed(
+                        "stable export page count overflow",
+                    ))?;
 
                 let Some(next_cursor) = next_cursor else {
                     break;
@@ -602,7 +730,9 @@ impl SupermemoryMemoryPlugin {
                 exported_records,
                 page_count,
             ))
-            .map_err(|_| SupermemoryExportError::Failed("export sink rejected provider completion"))?;
+            .map_err(|_| {
+                SupermemoryExportError::Failed("export sink rejected provider completion")
+            })?;
             Ok((snapshot, exported_records, page_count))
         })();
         if result.is_err() {
@@ -665,13 +795,32 @@ impl SupermemoryMemoryPlugin {
                 })
             })
             .collect::<Vec<_>>();
-        if messages.is_empty() { return Ok(()); }
-        let payload = scoped_payload(subject, filter, json!({"conversationId": filter.as_str(), "messages":messages}))?;
-        Self::send_json(config, Method::POST, "/v4/conversations", Some(&payload), None).map(|_| ())
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let payload = scoped_payload(
+            subject,
+            filter,
+            json!({"conversationId": filter.as_str(), "messages":messages}),
+        )?;
+        Self::send_json(
+            config,
+            Method::POST,
+            "/v4/conversations",
+            Some(&payload),
+            None,
+        )
+        .map(|_| ())
     }
 }
 
-fn governance_failure(provider: &str, operation: MemoryGovernanceOperation, filter: &MemorySubjectStorageKey, actor: Option<&MemoryAuditActor>, error: &str) -> MemoryProviderGovernanceError {
+fn governance_failure(
+    provider: &str,
+    operation: MemoryGovernanceOperation,
+    filter: &MemorySubjectStorageKey,
+    actor: Option<&MemoryAuditActor>,
+    error: &str,
+) -> MemoryProviderGovernanceError {
     if let Some(actor) = actor {
         tracing::warn!(provider, operation=operation.as_str(), subject_key=filter.as_str(), actor=actor.opaque_id().as_str(), error=%redact_sensitive_text(error), "subject-scoped memory governance failed");
     } else {
@@ -681,14 +830,27 @@ fn governance_failure(provider: &str, operation: MemoryGovernanceOperation, filt
 }
 
 impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
-    fn name(&self) -> &str { "supermemory" }
-
-    fn is_available(&self) -> bool {
-        !std::env::var("SUPERMEMORY_API_KEY").unwrap_or_default().trim().is_empty()
-            || config_io::json_file_has_nonempty_string(&config_io::default_hermes_home().join("supermemory.json"), &["api_key"])
+    fn name(&self) -> &str {
+        "supermemory"
     }
 
-    fn initialize(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, hermes_home: &str) -> Result<(), String> {
+    fn is_available(&self) -> bool {
+        !std::env::var("SUPERMEMORY_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+            || config_io::json_file_has_nonempty_string(
+                &config_io::default_hermes_home().join("supermemory.json"),
+                &["api_key"],
+            )
+    }
+
+    fn initialize(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        hermes_home: &str,
+    ) -> Result<(), String> {
         let config = SupermemoryConfig::load(hermes_home);
         *self.active.lock() = !config.api_key.trim().is_empty();
         *self.config.lock() = Some(config);
@@ -699,16 +861,32 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
     }
 
     fn system_prompt_block(&self) -> String {
-        if !*self.active.lock() { return String::new(); }
+        if !*self.active.lock() {
+            return String::new();
+        }
         "# Supermemory\nActive only in the authenticated memory subject container. Use supermemory-search, supermemory-save, supermemory-forget, and supermemory-profile.".to_string()
     }
 
-    fn prefetch(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, query: &str) -> String {
-        if !*self.active.lock() { return String::new(); }
+    fn prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        query: &str,
+    ) -> String {
+        if !*self.active.lock() {
+            return String::new();
+        }
         let queued = std::mem::take(&mut *self.prefetch_result.lock());
-        if !queued.is_empty() { return queued; }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(_) => return String::new() };
-        if !config.auto_recall || query.trim().is_empty() { return String::new(); }
+        if !queued.is_empty() {
+            return queued;
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return String::new(),
+        };
+        if !config.auto_recall || query.trim().is_empty() {
+            return String::new();
+        }
         match Self::get_profile(&config, subject, filter, Some(query.trim())) {
             Ok(profile) => {
                 let (static_facts, dynamic_facts, results) = extract_profile_lists(&profile);
@@ -718,10 +896,22 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
         }
     }
 
-    fn queue_prefetch(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, query: &str) {
-        if !*self.active.lock() || query.trim().is_empty() { return; }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(_) => return };
-        if !config.auto_recall { return; }
+    fn queue_prefetch(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        query: &str,
+    ) {
+        if !*self.active.lock() || query.trim().is_empty() {
+            return;
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
+        };
+        if !config.auto_recall {
+            return;
+        }
         let subject = subject.clone();
         let filter = filter.clone();
         let query = query.trim().to_string();
@@ -730,50 +920,141 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
             if let Ok(profile) = Self::get_profile(&config, &subject, &filter, Some(&query)) {
                 let (static_facts, dynamic_facts, results) = extract_profile_lists(&profile);
                 let context = format_prefetch_context(&static_facts, &dynamic_facts, &results);
-                if !context.is_empty() { *out.lock() = context; }
+                if !context.is_empty() {
+                    *out.lock() = context;
+                }
             }
         });
     }
 
-    fn sync_turn(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, user_content: &str, assistant_content: &str) {
-        if !*self.active.lock() { return; }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(_) => return };
-        if !config.auto_capture || user_content.trim().is_empty() || assistant_content.trim().is_empty() { return; }
+    fn sync_turn(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        user_content: &str,
+        assistant_content: &str,
+    ) {
+        if !*self.active.lock() {
+            return;
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
+        };
+        if !config.auto_capture
+            || user_content.trim().is_empty()
+            || assistant_content.trim().is_empty()
+        {
+            return;
+        }
         let subject = subject.clone();
         let filter = filter.clone();
-        let content = format!("[role: user]\n{}\n[user:end]\n\n[role: assistant]\n{}\n[assistant:end]", redact_sensitive_text(&user_content.chars().take(2500).collect::<String>()), redact_sensitive_text(&assistant_content.chars().take(2500).collect::<String>()));
+        let content = format!(
+            "[role: user]\n{}\n[user:end]\n\n[role: assistant]\n{}\n[assistant:end]",
+            redact_sensitive_text(&user_content.chars().take(2500).collect::<String>()),
+            redact_sensitive_text(&assistant_content.chars().take(2500).collect::<String>())
+        );
         std::thread::spawn(move || {
-            let _ = Self::add_memory(&config, &subject, &filter, &content, Some(json!({"type":"conversation_turn"})));
+            let _ = Self::add_memory(
+                &config,
+                &subject,
+                &filter,
+                &content,
+                Some(json!({"type":"conversation_turn"})),
+            );
         });
     }
 
-    fn get_tool_schemas(&self) -> Vec<Value> { vec![store_schema(), search_schema(), forget_schema(), profile_schema()] }
+    fn get_tool_schemas(&self) -> Vec<Value> {
+        vec![
+            store_schema(),
+            search_schema(),
+            forget_schema(),
+            profile_schema(),
+        ]
+    }
 
-    fn handle_tool_call(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, tool_name: &str, args: &Value) -> String {
-        if let Err(error) = reject_subject_override(args) { return json!({"error":error}).to_string(); }
-        if !*self.active.lock() { return json!({"error":"Supermemory is not configured"}).to_string(); }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(error) => return json!({"error":error}).to_string() };
+    fn handle_tool_call(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        tool_name: &str,
+        args: &Value,
+    ) -> String {
+        if let Err(error) = reject_subject_override(args) {
+            return json!({"error":error}).to_string();
+        }
+        if !*self.active.lock() {
+            return json!({"error":"Supermemory is not configured"}).to_string();
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(error) => return json!({"error":error}).to_string(),
+        };
         let result = match tool_name {
             "supermemory-save" | "supermemory_store" => {
-                let content = args.get("content").and_then(Value::as_str).unwrap_or("").trim();
-                if content.is_empty() { Err("content is required".to_string()) }
-                else { Self::add_memory(&config, subject, filter, content, args.get("metadata").cloned().filter(Value::is_object)).map(|value| json!({"saved":true,"raw":value})) }
+                let content = args
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if content.is_empty() {
+                    Err("content is required".to_string())
+                } else {
+                    Self::add_memory(
+                        &config,
+                        subject,
+                        filter,
+                        content,
+                        args.get("metadata").cloned().filter(Value::is_object),
+                    )
+                    .map(|value| json!({"saved":true,"raw":value}))
+                }
             }
             "supermemory-search" | "supermemory_search" => {
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
-                if query.is_empty() { Err("query is required".to_string()) }
-                else { Self::search_memories(&config, subject, filter, query, args.get("limit").and_then(Value::as_u64).unwrap_or(config.max_recall_results as u64) as usize).map(|records| json!({"results":records,"count":records.len()})) }
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if query.is_empty() {
+                    Err("query is required".to_string())
+                } else {
+                    Self::search_memories(
+                        &config,
+                        subject,
+                        filter,
+                        query,
+                        args.get("limit")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(config.max_recall_results as u64)
+                            as usize,
+                    )
+                    .map(|records| json!({"results":records,"count":records.len()}))
+                }
             }
             "supermemory-forget" | "supermemory_forget" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or("").trim();
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
-                if id.is_empty() && query.is_empty() { Err("provide id or query".to_string()) }
-                else if !id.is_empty() { Self::forget_memory(&config, subject, filter, id).map(|_| json!({"forgotten":true,"id":id})) }
-                else {
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if id.is_empty() && query.is_empty() {
+                    Err("provide id or query".to_string())
+                } else if !id.is_empty() {
+                    Self::forget_memory(&config, subject, filter, id)
+                        .map(|_| json!({"forgotten":true,"id":id}))
+                } else {
                     // Query-forget deliberately deletes every scoped match; a best match is never an erasure claim.
                     (|| -> Result<Value, String> {
-                        let records =
-                            Self::search_memories(&config, subject, filter, query, MAX_REMOTE_RECORDS)?;
+                        let records = Self::search_memories(
+                            &config,
+                            subject,
+                            filter,
+                            query,
+                            MAX_REMOTE_RECORDS,
+                        )?;
                         let mut deleted = 0_u64;
                         for record in records {
                             let id = record_id(&record)
@@ -781,8 +1062,13 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                             Self::forget_memory(&config, subject, filter, id)?;
                             deleted += 1;
                         }
-                        let residual =
-                            Self::search_memories(&config, subject, filter, query, MAX_REMOTE_RECORDS)?;
+                        let residual = Self::search_memories(
+                            &config,
+                            subject,
+                            filter,
+                            query,
+                            MAX_REMOTE_RECORDS,
+                        )?;
                         if !residual.is_empty() {
                             Err("subject-scoped query forget left residue".to_string())
                         } else {
@@ -791,28 +1077,70 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                     })()
                 }
             }
-            "supermemory-profile" | "supermemory_profile" => Self::get_profile(&config, subject, filter, args.get("query").and_then(Value::as_str)).map(|profile| json!({"profile":profile})),
+            "supermemory-profile" | "supermemory_profile" => Self::get_profile(
+                &config,
+                subject,
+                filter,
+                args.get("query").and_then(Value::as_str),
+            )
+            .map(|profile| json!({"profile":profile})),
             _ => Err(format!("Unknown tool: {tool_name}")),
         };
-        match result { Ok(value) => value.to_string(), Err(error) => json!({"error":error}).to_string() }
+        match result {
+            Ok(value) => value.to_string(),
+            Err(error) => json!({"error":error}).to_string(),
+        }
     }
 
-    fn on_session_end(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, messages: &[Value]) {
-        if !*self.active.lock() { return; }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(_) => return };
+    fn on_session_end(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        messages: &[Value],
+    ) {
+        if !*self.active.lock() {
+            return;
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
+        };
         let subject = subject.clone();
         let filter = filter.clone();
         let messages = messages.to_vec();
-        std::thread::spawn(move || { let _ = Self::ingest_conversation(&config, &subject, &filter, &messages); });
+        std::thread::spawn(move || {
+            let _ = Self::ingest_conversation(&config, &subject, &filter, &messages);
+        });
     }
 
-    fn on_memory_write(&self, subject: &MemorySubject, filter: &MemorySubjectStorageKey, action: &str, target: &str, content: &str) {
-        if action != "add" || target != "user" || content.trim().is_empty() || !*self.active.lock() { return; }
-        let config = match self.config_snapshot(subject, filter) { Ok(config) => config, Err(_) => return };
+    fn on_memory_write(
+        &self,
+        subject: &MemorySubject,
+        filter: &MemorySubjectStorageKey,
+        action: &str,
+        target: &str,
+        content: &str,
+    ) {
+        if action != "add" || target != "user" || content.trim().is_empty() || !*self.active.lock()
+        {
+            return;
+        }
+        let config = match self.config_snapshot(subject, filter) {
+            Ok(config) => config,
+            Err(_) => return,
+        };
         let subject = subject.clone();
         let filter = filter.clone();
         let content = content.trim().to_string();
-        std::thread::spawn(move || { let _ = Self::add_memory(&config, &subject, &filter, &content, Some(json!({"type":"explicit_memory"}))); });
+        std::thread::spawn(move || {
+            let _ = Self::add_memory(
+                &config,
+                &subject,
+                &filter,
+                &content,
+                Some(json!({"type":"explicit_memory"})),
+            );
+        });
     }
 
     fn shutdown(&self) {
@@ -835,7 +1163,10 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
 
     fn save_config(&self, config: &Value) -> Result<(), String> {
         reject_subject_override(config)?;
-        config_io::merge_and_write_owner_only(&config_io::default_hermes_home().join("supermemory.json"), config)
+        config_io::merge_and_write_owner_only(
+            &config_io::default_hermes_home().join("supermemory.json"),
+            config,
+        )
     }
 
     fn export_subject(
@@ -990,27 +1321,50 @@ mod tests {
             MemorySessionId::new("session-a").unwrap(),
             MemorySurface::Gateway,
             MemoryVisibility::Private,
-        ).unwrap();
+        )
+        .unwrap();
         let filter = subject.storage_key(&MemorySubjectDerivationKey::from_bytes([6; 32]));
         (subject, filter)
     }
 
     fn config(base_url: String) -> SupermemoryConfig {
-        SupermemoryConfig { api_key: "test-key".into(), base_url, auto_recall: true, auto_capture: true, max_recall_results: 10, search_mode: "hybrid".into(), api_timeout: 2.0 }
+        SupermemoryConfig {
+            api_key: "test-key".into(),
+            base_url,
+            auto_recall: true,
+            auto_capture: true,
+            max_recall_results: 10,
+            search_mode: "hybrid".into(),
+            api_timeout: 2.0,
+        }
     }
 
     fn read_request(stream: &mut std::net::TcpStream) -> String {
-        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let mut bytes = Vec::new();
         let mut chunk = [0_u8; 4096];
         loop {
             let read = stream.read(&mut chunk).unwrap();
-            if read == 0 { break; }
+            if read == 0 {
+                break;
+            }
             bytes.extend_from_slice(&chunk[..read]);
             if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
                 let headers = String::from_utf8_lossy(&bytes[..end]);
-                let content_length = headers.lines().find_map(|line| { let (name, value) = line.split_once(':')?; name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().ok()).flatten() }).unwrap_or(0);
-                if bytes.len() >= end + 4 + content_length { break; }
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                if bytes.len() >= end + 4 + content_length {
+                    break;
+                }
             }
         }
         String::from_utf8_lossy(&bytes).to_string()
@@ -1024,7 +1378,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 sender.send(read_request(&mut stream)).unwrap();
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 stream.write_all(format!("HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
             }
         });
@@ -1039,7 +1397,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 sender.send(read_request(&mut stream)).unwrap();
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 stream
                     .write_all(
                         format!(
@@ -1074,8 +1436,17 @@ mod tests {
         assert_ne!(filter, bob_filter);
         let (base, requests) = server(vec![(200, r#"{"results":[]}"#)]);
         let plugin = plugin(config(base), &alice, &filter);
-        assert!(plugin.handle_tool_call(&alice, &filter, "supermemory-search", &json!({"query":"x","container_tag":"victim"})).contains("cannot be overridden"));
-        assert!(plugin.handle_tool_call(&alice, &filter, "supermemory-search", &json!({"query":"x"})).contains("results"));
+        assert!(plugin
+            .handle_tool_call(
+                &alice,
+                &filter,
+                "supermemory-search",
+                &json!({"query":"x","container_tag":"victim"})
+            )
+            .contains("cannot be overridden"));
+        assert!(plugin
+            .handle_tool_call(&alice, &filter, "supermemory-search", &json!({"query":"x"}))
+            .contains("results"));
         let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(request.contains(filter.as_str()));
         assert!(!request.contains("alice"));
@@ -1101,9 +1472,19 @@ mod tests {
             (200, r#"{"results":[]}"#),
         ]);
         let plugin = plugin(config(base), &subject, &filter);
-        let value = plugin.handle_tool_call(&subject, &filter, "supermemory-forget", &json!({"query":"remove"}));
+        let value = plugin.handle_tool_call(
+            &subject,
+            &filter,
+            "supermemory-forget",
+            &json!({"query":"remove"}),
+        );
         assert!(value.contains("\"deleted\":2"));
-        for _ in 0..4 { assert!(requests.recv_timeout(Duration::from_secs(2)).unwrap().contains(filter.as_str())); }
+        for _ in 0..4 {
+            assert!(requests
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .contains(filter.as_str()));
+        }
     }
 
     #[test]

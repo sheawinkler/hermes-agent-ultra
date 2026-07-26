@@ -526,8 +526,7 @@ fn cli_parse_resume_specific_session() {
 
 #[test]
 fn cli_parse_resume_can_keep_current_directory() {
-    let cli =
-        Cli::try_parse_from(vec!["hermes", "--no-restore-cwd", "resume", "abc123"]).unwrap();
+    let cli = Cli::try_parse_from(vec!["hermes", "--no-restore-cwd", "resume", "abc123"]).unwrap();
     assert!(cli.no_restore_cwd);
     match cli.command {
         Some(CliCommand::Resume { session_id }) => {
@@ -817,8 +816,14 @@ fn cli_parse_skills_trust_provision_flags() {
         }) => {
             assert_eq!(action.as_deref(), Some("trust"));
             assert_eq!(name.as_deref(), Some("provision-remote-root"));
-            assert_eq!(authority_dir.as_deref(), Some(std::path::Path::new("/private/authority")));
-            assert_eq!(file.as_deref(), Some(std::path::Path::new("/private/admin/root.json")));
+            assert_eq!(
+                authority_dir.as_deref(),
+                Some(std::path::Path::new("/private/authority"))
+            );
+            assert_eq!(
+                file.as_deref(),
+                Some(std::path::Path::new("/private/admin/root.json"))
+            );
             assert_eq!(
                 expected_sha256.as_deref(),
                 Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -853,9 +858,14 @@ fn cli_parse_sessions_limit_default_is_twenty() {
 
 #[test]
 fn cli_parse_sessions_workspace_flag() {
-    let cli =
-        Cli::try_parse_from(vec!["hermes", "sessions", "list", "--workspace", "hermes-agent"])
-            .unwrap();
+    let cli = Cli::try_parse_from(vec![
+        "hermes",
+        "sessions",
+        "list",
+        "--workspace",
+        "hermes-agent",
+    ])
+    .unwrap();
     match cli.command {
         Some(CliCommand::Sessions { workspace, .. }) => {
             assert_eq!(workspace.as_deref(), Some("hermes-agent"));

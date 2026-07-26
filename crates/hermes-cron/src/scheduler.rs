@@ -313,7 +313,6 @@ impl CronScheduler {
         }
     }
 
-
     async fn mark_running_if_idle(
         running_job_ids: &Arc<Mutex<HashSet<String>>>,
         job_id: &str,
@@ -798,11 +797,8 @@ impl CronScheduler {
             (job, runnable_job)
         };
 
-        let run_context = RunInvocationContext::cron_manual(
-            &job.id,
-            Utc::now().timestamp_millis(),
-        )
-        .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+        let run_context = RunInvocationContext::cron_manual(&job.id, Utc::now().timestamp_millis())
+            .map_err(|error| CronError::InvalidJob(error.to_string()))?;
 
         if job.status == JobStatus::Completed {
             return Err(CronError::JobCompleted(id.to_string()));
@@ -965,8 +961,7 @@ mod tests {
     fn make_test_scheduler() -> CronScheduler {
         let root = tempdir().expect("tempdir").keep();
         let run_runtime = Arc::new(
-            crate::RunRuntime::open_for_ephemeral_testing(&root)
-                .expect("ephemeral run runtime"),
+            crate::RunRuntime::open_for_ephemeral_testing(&root).expect("ephemeral run runtime"),
         );
         let execution_mode = hermes_core::ResolvedExecutionMode::default();
         let execution_containment = Arc::new(

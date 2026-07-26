@@ -365,7 +365,9 @@ fn exact_llm_and_tool_transcripts_are_byte_identical_and_fail_closed() {
         .unwrap();
         assert_eq!(
             prepared.private_jcs.as_slice(),
-            serde_json_canonicalizer::to_vec(&private).unwrap().as_slice()
+            serde_json_canonicalizer::to_vec(&private)
+                .unwrap()
+                .as_slice()
         );
         let public_identity: Value =
             serde_json::from_slice(&prepared.identity().public_identity_jcs).unwrap();
@@ -402,8 +404,7 @@ fn exact_llm_and_tool_transcripts_are_byte_identical_and_fail_closed() {
         tool_private.clone(),
     );
     let mut mismatched_private = tool_private.clone();
-    mismatched_private["payload"]["arguments"]["query"] =
-        Value::String("different".to_string());
+    mismatched_private["payload"]["arguments"]["query"] = Value::String("different".to_string());
     assert!(prepare_exact_runtime_artifact_bound(
         ExactRuntimeEvidenceSchema::ToolIntentV1,
         &raw,

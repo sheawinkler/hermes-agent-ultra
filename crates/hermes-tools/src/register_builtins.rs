@@ -10,7 +10,6 @@ use std::sync::Arc;
 use hermes_core::{SkillProvider, TerminalBackend, ToolHandler};
 use hermes_environments::ExecutionContainmentContext;
 
-
 use crate::{ToolRegistry, VettedToolEffect};
 
 /// Register all built-in tool handlers into the given registry.
@@ -178,10 +177,12 @@ fn register_builtin_tools_with_data_dir_and_memory_home(
     );
 
     // -- Terminal ------------------------------------------------------------
-    let terminal_handler = Arc::new(crate::tools::terminal::TerminalHandler::with_execution_context(
-        terminal_backend.clone(),
-        registry.execution_containment_context(),
-    ));
+    let terminal_handler = Arc::new(
+        crate::tools::terminal::TerminalHandler::with_execution_context(
+            terminal_backend.clone(),
+            registry.execution_containment_context(),
+        ),
+    );
     let terminal_schema = terminal_handler.schema();
     let terminal_name = terminal_schema.name.clone();
     let terminal_description = terminal_schema.description.clone();

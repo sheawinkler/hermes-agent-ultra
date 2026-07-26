@@ -42,9 +42,9 @@ pub mod configured;
 pub mod error;
 pub mod eval_ledger;
 pub mod promotion_gate;
-pub mod reporter;
 pub mod release_candidate;
 pub mod release_operations;
+pub mod reporter;
 pub mod result;
 pub mod runner;
 pub mod tblite;
@@ -55,6 +55,8 @@ pub use adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
 pub use agent_rollout::AgentLoopRollout;
 pub use configured::{ConfiguredBenchmarkAdapter, ConfiguredTask, ConfiguredVerifier};
 pub use error::{EvalError, EvalResult};
+#[cfg(feature = "agent-loop")]
+pub use eval_ledger::ExactEvaluationReceiptEvidence;
 pub use eval_ledger::{
     BaselineEvidence, EvaluationEvidence, EvaluationLedger, EvaluationReceipt,
     EvaluationReceiptError, EvaluationReceiptInputs, EvaluationReceiptResult, EvaluatorVersion,
@@ -64,13 +66,15 @@ pub use eval_ledger::{
     SignatureVerificationEvidence, TerminalValidity, EVALUATION_RECEIPT_DIGEST_ALGORITHM,
     EVALUATION_RECEIPT_SCHEMA, EVALUATION_RECEIPT_SCHEMA_VERSION,
 };
-#[cfg(feature = "agent-loop")]
-pub use eval_ledger::ExactEvaluationReceiptEvidence;
 pub use promotion_gate::{
     evaluate_promotion, ExactReplayEvidenceItem, PromotionDecision, PromotionGate,
     PromotionGateFailure, PromotionGateOutcome, PromotionGateResult, PromotionMetric,
     PromotionPolicyRequirement, PromotionSupplementaryEvidence, PromotionVerdict, ReleaseBinding,
     MAXIMUM_ROLLBACK_DRILL_MILLIS_EXCLUSIVE, MINIMUM_SOAK_MILLIS,
+};
+#[cfg(feature = "agent-loop")]
+pub use release_candidate::{
+    exact_replay_evidence_from_verified_p3, verify_release_candidate_receipt,
 };
 pub use release_candidate::{
     release_candidate_ledger_schema_fingerprint, sign_release_candidate_receipt,
@@ -88,10 +92,6 @@ pub use release_candidate::{
     RELEASE_CANDIDATE_SIGNATURE_DOMAIN,
 };
 pub use release_operations::{VerifiedRollbackDrillReceipt, VerifiedSoakReceipt};
-#[cfg(feature = "agent-loop")]
-pub use release_candidate::{
-    exact_replay_evidence_from_verified_p3, verify_release_candidate_receipt,
-};
 pub use reporter::{JsonReporter, Reporter};
 pub use result::{AggregateMetrics, RunRecord, TaskResult, TaskStatus};
 pub use runner::{Runner, RunnerConfig, TaskRollout};

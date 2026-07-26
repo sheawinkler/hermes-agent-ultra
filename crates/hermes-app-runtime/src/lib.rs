@@ -130,7 +130,12 @@ fn runtime_surface_platform() -> &'static str {
     let enabled = |key: &str| {
         std::env::var(key)
             .ok()
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes"
+                )
+            })
             .unwrap_or(false)
     };
 
@@ -140,7 +145,6 @@ fn runtime_surface_platform() -> &'static str {
         "cli"
     }
 }
-
 
 pub fn build_agent_config(
     config: &GatewayConfig,

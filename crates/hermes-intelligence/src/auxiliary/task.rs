@@ -160,7 +160,10 @@ mod tests {
     #[test]
     fn compression_leaves_output_limit_to_the_provider() {
         assert_eq!(AuxiliaryTask::Compression.default_max_tokens(), None);
-        assert_eq!(AuxiliaryTask::FlushMemories.default_max_tokens(), Some(4096));
+        assert_eq!(
+            AuxiliaryTask::FlushMemories.default_max_tokens(),
+            Some(4096)
+        );
     }
 
     #[test]

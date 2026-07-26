@@ -59,7 +59,6 @@ pub enum ToolError {
     #[error("Tool execution outcome unknown: {0}")]
     OutcomeUnknown(String),
 
-
     #[error("Schema violation: {0}")]
     SchemaViolation(String),
 }

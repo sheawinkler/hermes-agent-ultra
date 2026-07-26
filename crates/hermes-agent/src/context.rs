@@ -8,13 +8,11 @@
 //! `_build_system_prompt`).
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
-use hermes_core::{
-    BudgetConfig, MemorySubject, MemorySubjectStorageKey, Message, MessageRole,
-};
+use hermes_core::{BudgetConfig, MemorySubject, MemorySubjectStorageKey, Message, MessageRole};
 
 /// Number of recent messages to preserve during compression.
 const DEFAULT_RECENT_MESSAGES: usize = 4;
@@ -834,7 +832,12 @@ fn subject_memory_directory(
     let subjects = memories.join("subjects");
     let subject_dir = subjects.join(filter.as_str());
 
-    for directory in [base, memories.as_path(), subjects.as_path(), subject_dir.as_path()] {
+    for directory in [
+        base,
+        memories.as_path(),
+        subjects.as_path(),
+        subject_dir.as_path(),
+    ] {
         match std::fs::symlink_metadata(directory) {
             Ok(metadata)
                 if metadata.file_type().is_symlink()

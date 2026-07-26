@@ -2901,5 +2901,4 @@ mod tests {
             "# Active signed skill\n\nverified instructions"
         );
     }
-
 }

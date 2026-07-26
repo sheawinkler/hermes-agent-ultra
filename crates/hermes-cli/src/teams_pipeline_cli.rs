@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
-use uuid::Uuid;
 use hermes_config::{load_config, GatewayConfig};
 use hermes_core::AgentError;
 use hermes_tools::{
@@ -15,6 +14,7 @@ use hermes_tools::{
     TeamsPipelineStore,
 };
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Default)]
 pub struct TeamsPipelineCliOptions {
@@ -414,8 +414,7 @@ fn validate_configuration_snapshot(
     {
         issues.push("Microsoft Graph app-only credentials are incomplete.".to_owned());
     }
-    if let Err(error) =
-        TeamsPipelineConfig::from_value(Some(build_pipeline_runtime_config(config)))
+    if let Err(error) = TeamsPipelineConfig::from_value(Some(build_pipeline_runtime_config(config)))
     {
         issues.push(error.to_string());
     }
@@ -429,7 +428,6 @@ fn validate_configuration_snapshot(
         "store_stats": store.stats().map_err(agent_error)?,
     }))
 }
-
 
 fn build_pipeline(options: &TeamsPipelineCliOptions) -> Result<TeamsMeetingPipeline, AgentError> {
     let store = Arc::new(open_store(options)?);
@@ -477,11 +475,13 @@ fn required_organizer_user_id(
                 "{action}: --organizer-user-id (Microsoft Entra object ID) is required"
             ))
         })?;
-    Uuid::parse_str(raw).map(|identifier| identifier.to_string()).map_err(|_| {
-        AgentError::Config(format!(
-            "{action}: --organizer-user-id must be a Microsoft Entra object ID UUID"
-        ))
-    })
+    Uuid::parse_str(raw)
+        .map(|identifier| identifier.to_string())
+        .map_err(|_| {
+            AgentError::Config(format!(
+                "{action}: --organizer-user-id must be a Microsoft Entra object ID UUID"
+            ))
+        })
 }
 
 fn compact_job(mut value: Value) -> Value {
@@ -521,9 +521,7 @@ fn agent_error(error: TeamsPipelineError) -> AgentError {
         }
         TeamsPipelineError::Graph {
             status, message, ..
-        } => {
-            AgentError::ToolExecution(format!("Microsoft Graph HTTP {status}: {message}"))
-        }
+        } => AgentError::ToolExecution(format!("Microsoft Graph HTTP {status}: {message}")),
     }
 }
 
@@ -537,9 +535,10 @@ mod tests {
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock_environment() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-
 
     struct EnvVarGuard {
         key: &'static str,

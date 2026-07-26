@@ -1,8 +1,8 @@
 //! Mem0 memory provider plugin with authenticated subject partitioning.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hermes_core::{
@@ -105,7 +105,11 @@ impl Mem0Config {
         let env_base_url = std::env::var("MEM0_BASE_URL").unwrap_or_default();
         let mut config = Self {
             mode: std::env::var("MEM0_MODE").unwrap_or_else(|_| {
-                if env_host.trim().is_empty() { "platform".into() } else { "oss".into() }
+                if env_host.trim().is_empty() {
+                    "platform".into()
+                } else {
+                    "oss".into()
+                }
             }),
             api_key: std::env::var("MEM0_API_KEY").unwrap_or_default(),
             base_url: if !env_base_url.trim().is_empty() {
@@ -120,10 +124,18 @@ impl Mem0Config {
         };
         if let Ok(content) = std::fs::read_to_string(Self::config_path(hermes_home)) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
-                if let Some(api_key) = raw.get("api_key").and_then(Value::as_str).filter(|key| !key.trim().is_empty()) {
+                if let Some(api_key) = raw
+                    .get("api_key")
+                    .and_then(Value::as_str)
+                    .filter(|key| !key.trim().is_empty())
+                {
                     config.api_key = api_key.to_string();
                 }
-                if let Some(mode) = raw.get("mode").and_then(Value::as_str).filter(|mode| !mode.trim().is_empty()) {
+                if let Some(mode) = raw
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .filter(|mode| !mode.trim().is_empty())
+                {
                     config.mode = mode.to_string();
                 }
                 if let Some(base_url) = raw
@@ -206,30 +218,55 @@ fn scoped_body(
     map.insert("user_id".to_string(), json!(key));
     map.insert("tenant_id".to_string(), json!(key));
     map.insert("principal_id".to_string(), json!(key));
-    map.insert("team_id".to_string(), subject.team_id().map(|_| json!(key)).unwrap_or(Value::Null));
+    map.insert(
+        "team_id".to_string(),
+        subject.team_id().map(|_| json!(key)).unwrap_or(Value::Null),
+    );
     map.insert("session_id".to_string(), json!(key));
     Ok(body)
 }
 
-fn scope_query(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Vec<(&'static str, String)> {
+fn scope_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
     let key = filter.as_str().to_string();
     vec![
         ("subject_key", key.clone()),
         ("user_id", key.clone()),
         ("tenant_id", key.clone()),
         ("principal_id", key.clone()),
-        ("team_id", subject.team_id().map(|_| key.clone()).unwrap_or_default()),
+        (
+            "team_id",
+            subject.team_id().map(|_| key.clone()).unwrap_or_default(),
+        ),
         ("session_id", key.clone()),
         ("surface", subject.surface().as_str().to_string()),
-        ("visibility", visibility_label(subject.visibility()).to_string()),
+        (
+            "visibility",
+            visibility_label(subject.visibility()).to_string(),
+        ),
     ]
 }
 
 fn reject_subject_override(args: &Value) -> Result<(), String> {
     const FORBIDDEN: &[&str] = &[
-        "user_id", "userId", "agent_id", "agentId", "tenant_id", "tenantId",
-        "principal_id", "principalId", "team_id", "teamId", "session_id", "sessionId",
-        "subject_key", "subjectKey", "runtime_user_id", "runtimeUserId",
+        "user_id",
+        "userId",
+        "agent_id",
+        "agentId",
+        "tenant_id",
+        "tenantId",
+        "principal_id",
+        "principalId",
+        "team_id",
+        "teamId",
+        "session_id",
+        "sessionId",
+        "subject_key",
+        "subjectKey",
+        "runtime_user_id",
+        "runtimeUserId",
     ];
     if FORBIDDEN.iter().any(|key| args.get(*key).is_some()) {
         return Err("authenticated memory subject cannot be overridden by tool arguments".into());
@@ -358,7 +395,11 @@ impl Mem0MemoryPlugin {
         body: Option<&Value>,
         query: Option<&[(&str, String)]>,
     ) -> Result<Value, String> {
-        let url = format!("{}/{}", config.base_url.trim_end_matches('/'), path.trim_start_matches('/'));
+        let url = format!(
+            "{}/{}",
+            config.base_url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        );
         let mut request = Self::client(config)?
             .request(method.clone(), &url)
             .header("Content-Type", "application/json");
@@ -379,7 +420,9 @@ impl Mem0MemoryPlugin {
         let status = response.status();
         let text = response.text().unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("Mem0 request {method} {url} returned {status}: {text}"));
+            return Err(format!(
+                "Mem0 request {method} {url} returned {status}: {text}"
+            ));
         }
         if text.trim().is_empty() {
             return Ok(json!({}));
@@ -419,7 +462,10 @@ impl Mem0MemoryPlugin {
     ) -> Result<Vec<Value>, String> {
         let mut query = scope_query(subject, filter);
         query.push(("page", page.max(1).to_string()));
-        query.push(("page_size", page_size.clamp(1, MAX_REMOTE_RECORDS as u64).to_string()));
+        query.push((
+            "page_size",
+            page_size.clamp(1, MAX_REMOTE_RECORDS as u64).to_string(),
+        ));
         let mut last_error = String::new();
         for path in ["memories", "memory"] {
             match Self::send_json(config, Method::GET, path, None, Some(&query)) {
@@ -427,8 +473,15 @@ impl Mem0MemoryPlugin {
                 Err(error) => last_error = error,
             }
         }
-        Self::search_memories(config, subject, filter, "*", config.rerank, MAX_REMOTE_RECORDS as u64)
-            .map_err(|fallback| format!("{last_error}; fallback search failed: {fallback}"))
+        Self::search_memories(
+            config,
+            subject,
+            filter,
+            "*",
+            config.rerank,
+            MAX_REMOTE_RECORDS as u64,
+        )
+        .map_err(|fallback| format!("{last_error}; fallback search failed: {fallback}"))
     }
 
     fn export_marker(response: &Value, keys: &[&str]) -> Option<String> {
@@ -456,15 +509,19 @@ impl Mem0MemoryPlugin {
     }
 
     fn export_has_more(response: &Value) -> Option<bool> {
-        [Some(response), response.get("meta"), response.get("pagination")]
-            .into_iter()
-            .flatten()
-            .find_map(|scope| {
-                scope
-                    .get("has_more")
-                    .or_else(|| scope.get("hasMore"))
-                    .and_then(Value::as_bool)
-            })
+        [
+            Some(response),
+            response.get("meta"),
+            response.get("pagination"),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|scope| {
+            scope
+                .get("has_more")
+                .or_else(|| scope.get("hasMore"))
+                .and_then(Value::as_bool)
+        })
     }
 
     fn stable_export_page(
@@ -494,11 +551,9 @@ impl Mem0MemoryPlugin {
         for path in ["memories", "memory"] {
             match Self::send_json(config, Method::GET, path, None, Some(&query)) {
                 Ok(response) => {
-                    let snapshot = Self::export_marker(
-                        &response,
-                        &["snapshot_id", "snapshotId", "snapshot"],
-                    )
-                    .ok_or(Mem0ExportError::Unsupported)?;
+                    let snapshot =
+                        Self::export_marker(&response, &["snapshot_id", "snapshotId", "snapshot"])
+                            .ok_or(Mem0ExportError::Unsupported)?;
                     let revision = Self::export_marker(
                         &response,
                         &["revision_id", "revisionId", "revision", "version"],
@@ -540,96 +595,98 @@ impl Mem0MemoryPlugin {
         filter: &MemorySubjectStorageKey,
         sink: &mut dyn MemoryExportSink,
     ) -> Result<(MemoryExportSnapshot, u64, u64), Mem0ExportError> {
-        let result = (|| {
-            let first = Self::stable_export_page(config, subject, filter, None, None, None)?;
-            let snapshot_raw = first.snapshot.clone();
-            let revision_raw = first.revision.clone();
-            let snapshot = MemoryExportSnapshot::new(
-                MemoryExportEvidenceDigest::sha256_bytes(snapshot_raw.as_bytes()),
-                MemoryExportEvidenceDigest::sha256_bytes(revision_raw.as_bytes()),
-                None,
-            );
-            sink.begin_provider(snapshot.clone())
-                .map_err(|_| Mem0ExportError::Failed("export sink rejected provider snapshot"))?;
+        let result =
+            (|| {
+                let first = Self::stable_export_page(config, subject, filter, None, None, None)?;
+                let snapshot_raw = first.snapshot.clone();
+                let revision_raw = first.revision.clone();
+                let snapshot = MemoryExportSnapshot::new(
+                    MemoryExportEvidenceDigest::sha256_bytes(snapshot_raw.as_bytes()),
+                    MemoryExportEvidenceDigest::sha256_bytes(revision_raw.as_bytes()),
+                    None,
+                );
+                sink.begin_provider(snapshot.clone()).map_err(|_| {
+                    Mem0ExportError::Failed("export sink rejected provider snapshot")
+                })?;
 
-            let mut current_cursor: Option<String> = None;
-            let mut page = first;
-            let mut seen_next_cursors = HashSet::new();
-            let mut exported_records = 0_u64;
-            let mut page_count = 0_u64;
-            loop {
-                let Mem0StablePage {
-                    snapshot: received_snapshot,
-                    revision: received_revision,
-                    next_cursor,
-                    records,
-                } = page;
-                if received_snapshot != snapshot_raw || received_revision != revision_raw {
-                    return Err(Mem0ExportError::Failed(
-                        "stable export snapshot changed while paging",
-                    ));
-                }
-                if let Some(next_cursor) = next_cursor.as_ref() {
-                    if !seen_next_cursors.insert(next_cursor.clone()) {
+                let mut current_cursor: Option<String> = None;
+                let mut page = first;
+                let mut seen_next_cursors = HashSet::new();
+                let mut exported_records = 0_u64;
+                let mut page_count = 0_u64;
+                loop {
+                    let Mem0StablePage {
+                        snapshot: received_snapshot,
+                        revision: received_revision,
+                        next_cursor,
+                        records,
+                    } = page;
+                    if received_snapshot != snapshot_raw || received_revision != revision_raw {
                         return Err(Mem0ExportError::Failed(
-                            "stable export cursor repeated while paging",
+                            "stable export snapshot changed while paging",
                         ));
                     }
+                    if let Some(next_cursor) = next_cursor.as_ref() {
+                        if !seen_next_cursors.insert(next_cursor.clone()) {
+                            return Err(Mem0ExportError::Failed(
+                                "stable export cursor repeated while paging",
+                            ));
+                        }
+                    }
+
+                    let record_ids = records
+                        .iter()
+                        .map(|record| {
+                            record_id(record)
+                                .map(|id| MemoryExportEvidenceDigest::sha256_bytes(id.as_bytes()))
+                                .ok_or(Mem0ExportError::Failed(
+                                    "stable export record has no stable identifier",
+                                ))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let record_count = records.len() as u64;
+                    sink.append_page(
+                        MemoryExportPage::new(
+                            current_cursor.as_deref().map(|cursor| {
+                                MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())
+                            }),
+                            next_cursor.as_deref().map(|cursor| {
+                                MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())
+                            }),
+                            record_ids,
+                            records,
+                        )
+                        .map_err(|_| Mem0ExportError::Failed("export page evidence is invalid"))?,
+                    )
+                    .map_err(|_| Mem0ExportError::Failed("export sink rejected provider page"))?;
+                    exported_records = exported_records.checked_add(record_count).ok_or(
+                        Mem0ExportError::Failed("stable export record count overflow"),
+                    )?;
+                    page_count = page_count
+                        .checked_add(1)
+                        .ok_or(Mem0ExportError::Failed("stable export page count overflow"))?;
+
+                    let Some(next_cursor) = next_cursor else {
+                        break;
+                    };
+                    current_cursor = Some(next_cursor);
+                    page = Self::stable_export_page(
+                        config,
+                        subject,
+                        filter,
+                        Some(&snapshot_raw),
+                        Some(&revision_raw),
+                        current_cursor.as_deref(),
+                    )?;
                 }
 
-                let record_ids = records
-                    .iter()
-                    .map(|record| {
-                        record_id(record)
-                            .map(|id| MemoryExportEvidenceDigest::sha256_bytes(id.as_bytes()))
-                            .ok_or(Mem0ExportError::Failed(
-                                "stable export record has no stable identifier",
-                            ))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let record_count = records.len() as u64;
-                sink.append_page(
-                    MemoryExportPage::new(
-                        current_cursor
-                            .as_deref()
-                            .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
-                        next_cursor
-                            .as_deref()
-                            .map(|cursor| MemoryExportEvidenceDigest::sha256_bytes(cursor.as_bytes())),
-                        record_ids,
-                        records,
-                    )
-                    .map_err(|_| Mem0ExportError::Failed("export page evidence is invalid"))?,
-                )
-                .map_err(|_| Mem0ExportError::Failed("export sink rejected provider page"))?;
-                exported_records = exported_records
-                    .checked_add(record_count)
-                    .ok_or(Mem0ExportError::Failed("stable export record count overflow"))?;
-                page_count = page_count
-                    .checked_add(1)
-                    .ok_or(Mem0ExportError::Failed("stable export page count overflow"))?;
-
-                let Some(next_cursor) = next_cursor else {
-                    break;
-                };
-                current_cursor = Some(next_cursor);
-                page = Self::stable_export_page(
-                    config,
-                    subject,
-                    filter,
-                    Some(&snapshot_raw),
-                    Some(&revision_raw),
-                    current_cursor.as_deref(),
-                )?;
-            }
-
-            sink.finish_provider(MemoryExportCompletion::exhausted(
-                exported_records,
-                page_count,
-            ))
-            .map_err(|_| Mem0ExportError::Failed("export sink rejected provider completion"))?;
-            Ok((snapshot, exported_records, page_count))
-        })();
+                sink.finish_provider(MemoryExportCompletion::exhausted(
+                    exported_records,
+                    page_count,
+                ))
+                .map_err(|_| Mem0ExportError::Failed("export sink rejected provider completion"))?;
+                Ok((snapshot, exported_records, page_count))
+            })();
         if result.is_err() {
             sink.abort();
         }
@@ -680,7 +737,13 @@ impl Mem0MemoryPlugin {
             (Method::PUT, format!("memories/{memory_id}")),
             (Method::POST, "memories/update".to_string()),
         ] {
-            match Self::send_json(config, method, &path, Some(&payload), Some(&scope_query(subject, filter))) {
+            match Self::send_json(
+                config,
+                method,
+                &path,
+                Some(&payload),
+                Some(&scope_query(subject, filter)),
+            ) {
                 Ok(value) => return Ok(value),
                 Err(error) => last_error = error,
             }
@@ -698,11 +761,25 @@ impl Mem0MemoryPlugin {
         let payload = scoped_body(subject, filter, json!({"memory_id": memory_id}))?;
         let mut last_error = String::new();
         for (method, path, body) in [
-            (Method::DELETE, format!("memories/{memory_id}"), Some(&payload)),
-            (Method::DELETE, format!("memory/{memory_id}"), Some(&payload)),
+            (
+                Method::DELETE,
+                format!("memories/{memory_id}"),
+                Some(&payload),
+            ),
+            (
+                Method::DELETE,
+                format!("memory/{memory_id}"),
+                Some(&payload),
+            ),
             (Method::POST, "memories/delete".to_string(), Some(&payload)),
         ] {
-            match Self::send_json(config, method, &path, body, Some(&scope_query(subject, filter))) {
+            match Self::send_json(
+                config,
+                method,
+                &path,
+                body,
+                Some(&scope_query(subject, filter)),
+            ) {
                 Ok(_) => return Ok(()),
                 Err(error) => last_error = error,
             }
@@ -734,7 +811,8 @@ impl Mem0MemoryPlugin {
     fn record_failure(&self) {
         let previous = self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
         if previous + 1 >= BREAKER_THRESHOLD {
-            *self.breaker_open_until.lock() = Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
+            *self.breaker_open_until.lock() =
+                Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
         }
     }
 }
@@ -760,8 +838,14 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
     }
 
     fn is_available(&self) -> bool {
-        !std::env::var("MEM0_API_KEY").unwrap_or_default().trim().is_empty()
-            || !std::env::var("MEM0_HOST").unwrap_or_default().trim().is_empty()
+        !std::env::var("MEM0_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+            || !std::env::var("MEM0_HOST")
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
             || Mem0Config::configured_at(&Mem0Config::default_config_path())
     }
 
@@ -806,22 +890,25 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
         let out = Arc::clone(&self.prefetch_result);
         let failures = Arc::clone(&self.consecutive_failures);
         let breaker = Arc::clone(&self.breaker_open_until);
-        std::thread::spawn(move || match Self::search_memories(&config, &subject, &filter, &query, config.rerank, 5) {
-            Ok(records) => {
-                let lines = records
-                    .iter()
-                    .filter_map(extract_memory_text)
-                    .map(|memory| format!("- {memory}"))
-                    .collect::<Vec<_>>();
-                if !lines.is_empty() {
-                    *out.lock() = lines.join("\n");
+        std::thread::spawn(move || {
+            match Self::search_memories(&config, &subject, &filter, &query, config.rerank, 5) {
+                Ok(records) => {
+                    let lines = records
+                        .iter()
+                        .filter_map(extract_memory_text)
+                        .map(|memory| format!("- {memory}"))
+                        .collect::<Vec<_>>();
+                    if !lines.is_empty() {
+                        *out.lock() = lines.join("\n");
+                    }
+                    failures.store(0, Ordering::Relaxed);
                 }
-                failures.store(0, Ordering::Relaxed);
-            }
-            Err(_) => {
-                let previous = failures.fetch_add(1, Ordering::Relaxed);
-                if previous + 1 >= BREAKER_THRESHOLD {
-                    *breaker.lock() = Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
+                Err(_) => {
+                    let previous = failures.fetch_add(1, Ordering::Relaxed);
+                    if previous + 1 >= BREAKER_THRESHOLD {
+                        *breaker.lock() =
+                            Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
+                    }
                 }
             }
         });
@@ -838,7 +925,11 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
         }
         let mut result = self.prefetch_result.lock();
         let result = std::mem::take(&mut *result);
-        if result.is_empty() { String::new() } else { format!("## Mem0 Memory\n{result}") }
+        if result.is_empty() {
+            String::new()
+        } else {
+            format!("## Mem0 Memory\n{result}")
+        }
     }
 
     fn sync_turn(
@@ -867,20 +958,30 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
         let failures = Arc::clone(&self.consecutive_failures);
         let breaker = Arc::clone(&self.breaker_open_until);
         std::thread::spawn(move || {
-            let messages = vec![json!({"role":"user","content":user}), json!({"role":"assistant","content":assistant})];
+            let messages = vec![
+                json!({"role":"user","content":user}),
+                json!({"role":"assistant","content":assistant}),
+            ];
             if Self::add_messages(&config, &subject, &filter, messages, None).is_ok() {
                 failures.store(0, Ordering::Relaxed);
             } else {
                 let previous = failures.fetch_add(1, Ordering::Relaxed);
                 if previous + 1 >= BREAKER_THRESHOLD {
-                    *breaker.lock() = Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
+                    *breaker.lock() =
+                        Some(Instant::now() + Duration::from_secs(BREAKER_COOLDOWN_SECS));
                 }
             }
         });
     }
 
     fn get_tool_schemas(&self) -> Vec<Value> {
-        vec![list_schema(), search_schema(), add_schema(), update_schema(), delete_schema()]
+        vec![
+            list_schema(),
+            search_schema(),
+            add_schema(),
+            update_schema(),
+            delete_schema(),
+        ]
     }
 
     fn handle_tool_call(
@@ -904,24 +1005,45 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
             "mem0_list" | "mem0_profile" => {
                 let page = args.get("page").and_then(Value::as_u64).unwrap_or(1);
                 let size = args.get("page_size").and_then(Value::as_u64).unwrap_or(100);
-                Self::list_memories(&config, subject, filter, page, size).map(|records| json!({"results":records,"count":records.len()}))
+                Self::list_memories(&config, subject, filter, page, size)
+                    .map(|records| json!({"results":records,"count":records.len()}))
             }
             "mem0_search" => {
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if query.is_empty() {
                     Err("query is required".to_string())
                 } else {
-                    let rerank = args.get("rerank").and_then(Value::as_bool).unwrap_or(config.rerank);
+                    let rerank = args
+                        .get("rerank")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(config.rerank);
                     let top_k = args.get("top_k").and_then(Value::as_u64).unwrap_or(10);
-                    Self::search_memories(&config, subject, filter, query, rerank, top_k).map(|records| json!({"results":records,"count":records.len()}))
+                    Self::search_memories(&config, subject, filter, query, rerank, top_k)
+                        .map(|records| json!({"results":records,"count":records.len()}))
                 }
             }
             "mem0_add" | "mem0_conclude" => {
-                let content = args.get("content").or_else(|| args.get("conclusion")).and_then(Value::as_str).unwrap_or("").trim();
+                let content = args
+                    .get("content")
+                    .or_else(|| args.get("conclusion"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if content.is_empty() {
                     Err("content is required".to_string())
                 } else {
-                    Self::add_messages(&config, subject, filter, vec![json!({"role":"user","content":redact_sensitive_text(content)})], Some(false)).map(|_| json!({"result":"Fact stored."}))
+                    Self::add_messages(
+                        &config,
+                        subject,
+                        filter,
+                        vec![json!({"role":"user","content":redact_sensitive_text(content)})],
+                        Some(false),
+                    )
+                    .map(|_| json!({"result":"Fact stored."}))
                 }
             }
             "mem0_update" => Self::update_memory(
@@ -1144,24 +1266,41 @@ mod tests {
     }
 
     fn config(base_url: String) -> Mem0Config {
-        Mem0Config { mode: "oss".into(), api_key: String::new(), base_url, api_timeout_secs: 2.0, rerank: false }
+        Mem0Config {
+            mode: "oss".into(),
+            api_key: String::new(),
+            base_url,
+            api_timeout_secs: 2.0,
+            rerank: false,
+        }
     }
 
     fn read_request(stream: &mut std::net::TcpStream) -> String {
-        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let mut bytes = Vec::new();
         let mut chunk = [0_u8; 4096];
         loop {
             let read = stream.read(&mut chunk).unwrap();
-            if read == 0 { break; }
+            if read == 0 {
+                break;
+            }
             bytes.extend_from_slice(&chunk[..read]);
             if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
                 let headers = String::from_utf8_lossy(&bytes[..end]);
-                let length = headers.lines().find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().ok()).flatten()
-                }).unwrap_or(0);
-                if bytes.len() >= end + 4 + length { break; }
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                if bytes.len() >= end + 4 + length {
+                    break;
+                }
             }
         }
         String::from_utf8_lossy(&bytes).to_string()
@@ -1175,7 +1314,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 sender.send(read_request(&mut stream)).unwrap();
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 stream.write_all(format!("HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
             }
         });
@@ -1190,7 +1333,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 sender.send(read_request(&mut stream)).unwrap();
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 stream
                     .write_all(
                         format!(
@@ -1224,9 +1371,15 @@ mod tests {
         assert_ne!(alice_filter, bob_filter);
         let (base, requests) = server(vec![(200, r#"{"results":[]}"#)]);
         let plugin = plugin(config(base), &alice, &alice_filter);
-        let rejected = plugin.handle_tool_call(&alice, &alice_filter, "mem0_search", &json!({"query":"x","user_id":"victim"}));
+        let rejected = plugin.handle_tool_call(
+            &alice,
+            &alice_filter,
+            "mem0_search",
+            &json!({"query":"x","user_id":"victim"}),
+        );
         assert!(rejected.contains("cannot be overridden"));
-        let result = plugin.handle_tool_call(&alice, &alice_filter, "mem0_search", &json!({"query":"x"}));
+        let result =
+            plugin.handle_tool_call(&alice, &alice_filter, "mem0_search", &json!({"query":"x"}));
         assert!(result.contains("results"));
         let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(request.contains(alice_filter.as_str()));

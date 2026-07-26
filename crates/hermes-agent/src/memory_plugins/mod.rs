@@ -213,7 +213,12 @@ mod provider_order_tests {
 
     #[test]
     fn default_provider_order_prioritizes_honcho() {
-        assert_eq!(default_preferred_provider_order().first().map(String::as_str), Some("honcho"));
+        assert_eq!(
+            default_preferred_provider_order()
+                .first()
+                .map(String::as_str),
+            Some("honcho")
+        );
     }
 }
 

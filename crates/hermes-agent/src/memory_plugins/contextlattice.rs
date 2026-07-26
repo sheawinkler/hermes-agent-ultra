@@ -97,7 +97,9 @@ impl ContextLatticeScope {
                 digest.len() == 64 && digest.as_bytes().iter().all(u8::is_ascii_hexdigit)
             });
         if !valid_key {
-            return Err("ContextLattice requires a canonical authenticated subject key".to_string());
+            return Err(
+                "ContextLattice requires a canonical authenticated subject key".to_string(),
+            );
         }
         Ok(Self {
             opaque_subject_key: opaque_subject_key.to_string(),
@@ -145,9 +147,15 @@ impl ContextLatticeScope {
 }
 
 fn relative_scope_suffix(raw: &str, fallback: &str) -> Result<String, String> {
-    let value = if raw.trim().is_empty() { fallback } else { raw.trim() };
+    let value = if raw.trim().is_empty() {
+        fallback
+    } else {
+        raw.trim()
+    };
     if value.starts_with('/') || value.starts_with('\\') || value.contains('\\') {
-        return Err("ContextLattice scope suffix must be a relative slash-delimited path".to_string());
+        return Err(
+            "ContextLattice scope suffix must be a relative slash-delimited path".to_string(),
+        );
     }
     let mut normalized = Vec::new();
     for segment in value.split('/') {
@@ -283,7 +291,8 @@ impl ContextLatticeConfig {
                 config.default_topic_suffix = relative_scope_suffix(topic, "memory")?;
             }
             if let Some(file_name) = object.get("file_name").and_then(Value::as_str) {
-                config.default_file_name = relative_scope_suffix(file_name, "checkpoints/current.md")?;
+                config.default_file_name =
+                    relative_scope_suffix(file_name, "checkpoints/current.md")?;
             }
             if let Some(enabled) = object.get("pressure_aware").and_then(Value::as_bool) {
                 config.pressure_aware = enabled;
@@ -306,7 +315,10 @@ impl ContextLatticeConfig {
             {
                 config.pressure_status_ttl_secs = value.clamp(0.2, 30.0);
             }
-            if let Some(values) = object.get("pressure_fast_sources").and_then(Value::as_array) {
+            if let Some(values) = object
+                .get("pressure_fast_sources")
+                .and_then(Value::as_array)
+            {
                 let parsed = values
                     .iter()
                     .filter_map(Value::as_str)
@@ -399,9 +411,7 @@ impl ContextLatticeRequestFailure {
             Self::Decode => "contextlattice_response_invalid",
         }
     }
-
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DurableContextLatticeWrite {
@@ -465,7 +475,11 @@ fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), String>
     ensure_private_directory(parent)?;
     let bytes = serde_json::to_vec(value)
         .map_err(|_| "ContextLattice durable outbox serialization failed".to_string())?;
-    let temporary = parent.join(format!(".{}.{}.tmp", uuid::Uuid::new_v4(), std::process::id()));
+    let temporary = parent.join(format!(
+        ".{}.{}.tmp",
+        uuid::Uuid::new_v4(),
+        std::process::id()
+    ));
     let result = (|| -> Result<(), String> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -543,10 +557,7 @@ fn pending_outbox_paths(home: &Path, scope: &ContextLatticeScope) -> Result<Vec<
     Ok(paths)
 }
 
-fn subject_outbox_residue_count(
-    home: &Path,
-    scope: &ContextLatticeScope,
-) -> Result<u64, String> {
+fn subject_outbox_residue_count(home: &Path, scope: &ContextLatticeScope) -> Result<u64, String> {
     let directory = durable_outbox_directory(home, scope);
     if !directory.exists() {
         return Ok(0);
@@ -555,13 +566,11 @@ fn subject_outbox_residue_count(
         .map_err(|_| "ContextLattice durable outbox unavailable".to_string())?;
     let mut count = 0_u64;
     for entry in entries {
-        let _entry =
-            entry.map_err(|_| "ContextLattice durable outbox unavailable".to_string())?;
+        let _entry = entry.map_err(|_| "ContextLattice durable outbox unavailable".to_string())?;
         count = count.saturating_add(1);
     }
     Ok(count)
 }
-
 
 fn remove_outbox_write(path: &Path) -> Result<(), String> {
     fs::remove_file(path)
@@ -574,7 +583,9 @@ fn remove_outbox_write(path: &Path) -> Result<(), String> {
 
 #[derive(Debug, Clone)]
 enum WriteDisposition {
-    Acknowledged { idempotency_key: String },
+    Acknowledged {
+        idempotency_key: String,
+    },
     PendingRetry {
         idempotency_key: String,
         failure_code: &'static str,
@@ -612,9 +623,10 @@ impl ContextLatticeMemoryPlugin {
         // enforced multi-user boundary visible here rather than falling back to
         // a session/config-derived owner.
         match subject.surface() {
-            MemorySurface::Gateway | MemorySurface::Http | MemorySurface::Acp | MemorySurface::Cron => {
-                ContextLatticeScope::new(filter)
-            }
+            MemorySurface::Gateway
+            | MemorySurface::Http
+            | MemorySurface::Acp
+            | MemorySurface::Cron => ContextLatticeScope::new(filter),
             MemorySurface::Cli | MemorySurface::Local => ContextLatticeScope::new(filter),
         }
     }
@@ -806,10 +818,7 @@ impl ContextLatticeMemoryPlugin {
                 if trimmed.is_empty() {
                     return None;
                 }
-                let file = item
-                    .get("file")
-                    .and_then(Value::as_str)
-                    .unwrap_or("memory");
+                let file = item.get("file").and_then(Value::as_str).unwrap_or("memory");
                 Some(format!(
                     "- [{}] {}",
                     file,
@@ -867,7 +876,6 @@ impl ContextLatticeMemoryPlugin {
         payload
     }
 
-
     fn build_write_payload(
         scope: &ContextLatticeScope,
         content: &str,
@@ -883,7 +891,6 @@ impl ContextLatticeMemoryPlugin {
             "content": content,
         }))
     }
-
 
     fn deliver_write(
         config: &ContextLatticeConfig,
@@ -987,15 +994,9 @@ impl ContextLatticeMemoryPlugin {
         retrieval_mode: Option<&str>,
         limit: Option<u64>,
     ) -> Result<Value, ContextLatticeRequestFailure> {
-        let payload = Self::build_search_payload(
-            config,
-            scope,
-            query,
-            topic_suffix,
-            retrieval_mode,
-            limit,
-        )
-        .map_err(|_| ContextLatticeRequestFailure::Decode)?;
+        let payload =
+            Self::build_search_payload(config, scope, query, topic_suffix, retrieval_mode, limit)
+                .map_err(|_| ContextLatticeRequestFailure::Decode)?;
         Self::request_json(
             config,
             Method::POST,
@@ -1040,7 +1041,6 @@ impl ContextLatticeMemoryPlugin {
             .map_err(|_| ContextLatticeRequestFailure::Decode)?;
         Ok(remote.saturating_add(local))
     }
-
 }
 
 impl MemoryProviderPlugin for ContextLatticeMemoryPlugin {
@@ -1372,13 +1372,15 @@ impl MemoryProviderPlugin for ContextLatticeMemoryPlugin {
                     .get("topic_path")
                     .and_then(Value::as_str)
                     .unwrap_or(&config.default_topic_suffix);
-                let payload = match Self::build_write_payload(&scope, content, file_name, topic_suffix) {
-                    Ok(payload) => payload,
-                    Err(error) => return json!({"error": error}).to_string(),
-                };
+                let payload =
+                    match Self::build_write_payload(&scope, content, file_name, topic_suffix) {
+                        Ok(payload) => payload,
+                        Err(error) => return json!({"error": error}).to_string(),
+                    };
                 match Self::submit_durable_write(&config, &scope, payload) {
                     Ok(WriteDisposition::Acknowledged { idempotency_key }) => {
-                        json!({"result":"acknowledged", "idempotency_key": idempotency_key}).to_string()
+                        json!({"result":"acknowledged", "idempotency_key": idempotency_key})
+                            .to_string()
                     }
                     Ok(WriteDisposition::PendingRetry {
                         idempotency_key,
@@ -1521,12 +1523,8 @@ pub(crate) fn write_subject_scoped_checkpoint(
     }
     let config = ContextLatticeConfig::load(hermes_home)?;
     let scope = ContextLatticeMemoryPlugin::scope_for(subject, filter)?;
-    let payload = ContextLatticeMemoryPlugin::build_write_payload(
-        &scope,
-        content,
-        file_name,
-        topic_suffix,
-    )?;
+    let payload =
+        ContextLatticeMemoryPlugin::build_write_payload(&scope, content, file_name, topic_suffix)?;
     match ContextLatticeMemoryPlugin::submit_durable_write(&config, &scope, payload)? {
         WriteDisposition::Acknowledged { .. } => Ok(()),
         WriteDisposition::PendingRetry { .. } => {
@@ -1550,14 +1548,13 @@ fn search_results(value: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use hermes_core::{
         MemoryExportArtifact, MemoryExportCompletion, MemoryExportPage, MemoryExportSink,
-        MemoryExportSinkError, MemoryExportSnapshot, MemoryPrincipalId,
-        MemorySubjectDerivationKey, MemorySurface, MemoryTenantId, MemoryVisibility,
+        MemoryExportSinkError, MemoryExportSnapshot, MemoryPrincipalId, MemorySubjectDerivationKey,
+        MemorySurface, MemoryTenantId, MemoryVisibility,
     };
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc;
@@ -1602,7 +1599,10 @@ mod tests {
         }
     }
 
-    fn subject_and_filter(principal: &str, session: &str) -> (MemorySubject, MemorySubjectStorageKey) {
+    fn subject_and_filter(
+        principal: &str,
+        session: &str,
+    ) -> (MemorySubject, MemorySubjectStorageKey) {
         let subject = MemorySubject::new(
             MemoryTenantId::new("tenant-test").expect("tenant"),
             MemoryPrincipalId::new(principal).expect("principal"),
@@ -1646,9 +1646,7 @@ mod tests {
         *plugin.config.lock().expect("config lock") = Some(config);
     }
 
-    fn scripted_server(
-        responses: Vec<MockResponse>,
-    ) -> (String, mpsc::Receiver<String>) {
+    fn scripted_server(responses: Vec<MockResponse>) -> (String, mpsc::Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
         let address = listener.local_addr().expect("mock address");
         let (sender, receiver) = mpsc::channel();
@@ -1660,7 +1658,11 @@ mod tests {
                     .expect("read timeout");
                 let request = read_http_request(&mut stream);
                 sender.send(request).expect("send mock request");
-                let reason = if response.status == 200 { "OK" } else { "ERROR" };
+                let reason = if response.status == 200 {
+                    "OK"
+                } else {
+                    "ERROR"
+                };
                 let reply = format!(
                     "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     response.status,
@@ -1668,7 +1670,9 @@ mod tests {
                     response.body.len(),
                     response.body,
                 );
-                stream.write_all(reply.as_bytes()).expect("write mock response");
+                stream
+                    .write_all(reply.as_bytes())
+                    .expect("write mock response");
             }
         });
         (format!("http://{address}"), receiver)
@@ -1736,8 +1740,14 @@ mod tests {
     #[test]
     fn search_payloads_and_routes_are_partitioned_per_subject() {
         let (base_url, requests) = scripted_server(vec![
-            MockResponse { status: 200, body: r#"{"results":[]}"# },
-            MockResponse { status: 200, body: r#"{"results":[]}"# },
+            MockResponse {
+                status: 200,
+                body: r#"{"results":[]}"#,
+            },
+            MockResponse {
+                status: 200,
+                body: r#"{"results":[]}"#,
+            },
         ]);
         let home = tempfile::tempdir().expect("home");
         let plugin = ContextLatticeMemoryPlugin::new();
@@ -1781,9 +1791,18 @@ mod tests {
             (&bob_payload, &bob_filter, &alice_filter),
         ] {
             assert_eq!(payload["subject_key"], filter.as_str());
-            assert!(payload["project"].as_str().unwrap().starts_with(filter.as_str()));
-            assert!(payload["topic_path"].as_str().unwrap().starts_with(filter.as_str()));
-            assert!(payload["agent_id"].as_str().unwrap().starts_with(filter.as_str()));
+            assert!(payload["project"]
+                .as_str()
+                .unwrap()
+                .starts_with(filter.as_str()));
+            assert!(payload["topic_path"]
+                .as_str()
+                .unwrap()
+                .starts_with(filter.as_str()));
+            assert!(payload["agent_id"]
+                .as_str()
+                .unwrap()
+                .starts_with(filter.as_str()));
             assert!(!payload.to_string().contains(other.as_str()));
             assert!(!payload.to_string().contains("session-default"));
             assert!(!payload.to_string().contains("hermes-user"));
@@ -1839,16 +1858,30 @@ mod tests {
             subject_outbox_residue_count(home.path(), &scope).expect("outbox residue"),
             1
         );
-        assert!(requests.recv_timeout(StdDuration::from_millis(100)).is_err());
+        assert!(requests
+            .recv_timeout(StdDuration::from_millis(100))
+            .is_err());
     }
 
     #[test]
     fn failed_write_is_durable_and_retries_with_one_idempotency_key() {
         let (base_url, requests) = scripted_server(vec![
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 200, body: r#"{"ok":true}"# },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 200,
+                body: r#"{"ok":true}"#,
+            },
         ]);
         let home = tempfile::tempdir().expect("home");
         let config = test_config(base_url, home.path());
@@ -1888,14 +1921,25 @@ mod tests {
         assert!(keys.windows(2).all(|pair| pair[0] == pair[1]));
     }
 
-
     #[test]
     fn queued_write_is_readback_residue_and_forget_preserves_outbox() {
         let (base_url, requests) = scripted_server(vec![
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 500, body: r#"{"error":"down"}"# },
-            MockResponse { status: 200, body: r#"{"results":[]}"# },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 500,
+                body: r#"{"error":"down"}"#,
+            },
+            MockResponse {
+                status: 200,
+                body: r#"{"results":[]}"#,
+            },
         ]);
         let home = tempfile::tempdir().expect("home");
         let plugin = ContextLatticeMemoryPlugin::new();
@@ -1935,18 +1979,30 @@ mod tests {
             .all(|request| request_target(request).contains(filter.as_str())));
     }
 
-
     #[test]
     fn canonical_key_is_the_only_accepted_remote_prefix() {
-        for invalid in ["", "default", "hermes-user", "hermes", "session-default", "msp1_bad"] {
+        for invalid in [
+            "",
+            "default",
+            "hermes-user",
+            "hermes",
+            "session-default",
+            "msp1_bad",
+        ] {
             assert!(serde_json::from_value::<MemorySubjectStorageKey>(json!(invalid)).is_err());
         }
         let (_, filter) = subject_and_filter("alice", "s1");
         let scope = ContextLatticeScope::new(&filter).expect("canonical scope");
         assert!(scope.project().starts_with(filter.as_str()));
-        assert!(scope.topic_path("ops").unwrap().starts_with(filter.as_str()));
+        assert!(scope
+            .topic_path("ops")
+            .unwrap()
+            .starts_with(filter.as_str()));
         assert!(scope.agent_id().starts_with(filter.as_str()));
-        assert!(scope.file_name("notes.md").unwrap().starts_with(filter.as_str()));
+        assert!(scope
+            .file_name("notes.md")
+            .unwrap()
+            .starts_with(filter.as_str()));
         assert!(relative_scope_suffix("../../other", "memory").is_err());
     }
 
@@ -1955,9 +2011,18 @@ mod tests {
         let secret_api_key = "api-secret-do-not-log";
         let secret_server_body = "server-secret-do-not-log";
         let (base_url, requests) = scripted_server(vec![
-            MockResponse { status: 500, body: secret_server_body },
-            MockResponse { status: 500, body: secret_server_body },
-            MockResponse { status: 500, body: secret_server_body },
+            MockResponse {
+                status: 500,
+                body: secret_server_body,
+            },
+            MockResponse {
+                status: 500,
+                body: secret_server_body,
+            },
+            MockResponse {
+                status: 500,
+                body: secret_server_body,
+            },
         ]);
         let home = tempfile::tempdir().expect("home");
         let mut config = test_config(base_url, home.path());
@@ -1976,7 +2041,9 @@ mod tests {
         assert!(!response.contains(secret_server_body));
         assert!(response.contains("contextlattice_http_failure"));
         let captured = receive_requests(&requests, 3);
-        assert!(captured.iter().all(|request| request_header(request, "authorization").is_some()));
+        assert!(captured
+            .iter()
+            .all(|request| request_header(request, "authorization").is_some()));
     }
 
     #[test]
@@ -2009,9 +2076,18 @@ mod tests {
         let request = receive_requests(&requests, 1).pop().expect("request");
         let payload = request_body(&request);
         assert!(request_target(&request).contains(filter.as_str()));
-        assert!(payload["projectName"].as_str().unwrap().starts_with(filter.as_str()));
-        assert!(payload["topicPath"].as_str().unwrap().starts_with(filter.as_str()));
-        assert!(payload["agentId"].as_str().unwrap().starts_with(filter.as_str()));
+        assert!(payload["projectName"]
+            .as_str()
+            .unwrap()
+            .starts_with(filter.as_str()));
+        assert!(payload["topicPath"]
+            .as_str()
+            .unwrap()
+            .starts_with(filter.as_str()));
+        assert!(payload["agentId"]
+            .as_str()
+            .unwrap()
+            .starts_with(filter.as_str()));
         assert!(!payload.to_string().contains("alice"));
         assert!(!payload.to_string().contains("s1"));
     }
@@ -2141,6 +2217,9 @@ mod tests {
         );
         assert_eq!(payload["retrieval_mode"], "fast");
         assert_eq!(payload["sources"], json!(["topic_rollups"]));
-        assert!(payload["project"].as_str().unwrap().starts_with(filter.as_str()));
+        assert!(payload["project"]
+            .as_str()
+            .unwrap()
+            .starts_with(filter.as_str()));
     }
 }

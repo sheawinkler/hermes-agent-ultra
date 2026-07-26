@@ -4,6 +4,7 @@
 //! private metadata wrapper. The latter leaves this module as plaintext only
 //! after an explicit artifact-read authorization decision.
 
+use crate::run_ledger::{ReplayOperationKind, ReplayOperationOutcome, ReplayOperationPhase};
 use aes_gcm::aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
@@ -20,7 +21,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
 use zeroize::{Zeroize, Zeroizing};
-use crate::run_ledger::{ReplayOperationKind, ReplayOperationOutcome, ReplayOperationPhase};
 
 pub const ARTIFACT_CANONICALIZATION: &str = "rfc8785-jcs";
 pub const ARTIFACT_CANONICALIZATION_VERSION: u8 = 1;
@@ -335,7 +335,9 @@ pub(crate) enum ReplayArtifactPrivateFidelity {
 /// private payload at all.
 pub(crate) enum ReplayArtifactPrivateClassification {
     Exact(ReconstructedPrivateFragment),
-    MetadataOnly { binding: ExactRuntimeEvidenceBinding },
+    MetadataOnly {
+        binding: ExactRuntimeEvidenceBinding,
+    },
 }
 
 impl ReplayArtifactPrivateClassification {
@@ -956,12 +958,15 @@ fn exact_runtime_binding_from_identity<'a>(
     if required_bounded_string(identity, "schema")? != EXACT_RUNTIME_EVIDENCE_SCHEMA
         || !matches!(replay_fidelity, "credential_redacted" | "exact_private")
     {
-        return Err(invalid_artifact("unsupported exact runtime identity schema"));
+        return Err(invalid_artifact(
+            "unsupported exact runtime identity schema",
+        ));
     }
     let artifact_kind = required_bounded_string(identity, "artifact_kind")?;
     let evidence_id = required_bounded_string(identity, "evidence_id")?;
     let evidence_subject = required_bounded_string(identity, "evidence_subject")?;
-    let outcome = ExactRuntimeEvidenceOutcome::parse(required_bounded_string(identity, "outcome")?)?;
+    let outcome =
+        ExactRuntimeEvidenceOutcome::parse(required_bounded_string(identity, "outcome")?)?;
     validate_runtime_evidence_subject(artifact_kind, evidence_subject)?;
     validate_runtime_evidence_id(evidence_subject, evidence_id)?;
     let (schema, phase) = match (artifact_kind, evidence_subject, outcome) {
@@ -1043,8 +1048,7 @@ fn exact_runtime_binding_from_identity<'a>(
             ));
         }
     };
-    if replay_fidelity == "exact_private"
-        && schema != ExactRuntimeEvidenceSchema::DeliveryResultV1
+    if replay_fidelity == "exact_private" && schema != ExactRuntimeEvidenceSchema::DeliveryResultV1
     {
         return Err(invalid_artifact(
             "only the closed delivery result schema may claim exact-private identity",
@@ -1148,7 +1152,9 @@ fn validate_exact_llm_result_private(
             .keys()
             .any(|key| key != "response" && key != "error" && key != "stream")
     {
-        return Err(invalid_artifact("exact LLM result payload shape is invalid"));
+        return Err(invalid_artifact(
+            "exact LLM result payload shape is invalid",
+        ));
     }
     if let Some(response) = payload.get("response") {
         let response = exact_artifact_object(
@@ -1209,7 +1215,9 @@ fn validate_exact_tool_intent_private(
         "exact tool intent payload",
     )?;
     if required_bounded_string(payload, "call_id")? != binding.evidence_id {
-        return Err(invalid_artifact("exact tool intent call ID is not event-bound"));
+        return Err(invalid_artifact(
+            "exact tool intent call ID is not event-bound",
+        ));
     }
     required_safe_bounded_string(payload, "tool_name")?;
     let arguments = payload
@@ -1243,13 +1251,17 @@ fn validate_exact_tool_result_private(
             &["call_id", "error", "outcome", "tool_name"]
         }
         ExactRuntimeEvidenceOutcome::NotApplicable => {
-            return Err(invalid_artifact("exact tool result cannot be not_applicable"));
+            return Err(invalid_artifact(
+                "exact tool result cannot be not_applicable",
+            ));
         }
     };
     if payload.len() != expected_keys.len()
         || expected_keys.iter().any(|key| !payload.contains_key(*key))
     {
-        return Err(invalid_artifact("exact tool result payload shape is invalid"));
+        return Err(invalid_artifact(
+            "exact tool result payload shape is invalid",
+        ));
     }
     if required_bounded_string(payload, "call_id")? != binding.evidence_id
         || required_bounded_string(payload, "outcome")? != binding.outcome.as_str()
@@ -1271,7 +1283,9 @@ fn validate_exact_tool_result_private(
                 .and_then(Value::as_str)
                 .ok_or_else(|| invalid_artifact("exact tool result error must be a string"))?;
             if error.is_empty() {
-                return Err(invalid_artifact("exact tool result error must not be empty"));
+                return Err(invalid_artifact(
+                    "exact tool result error must not be empty",
+                ));
             }
             validate_exact_runtime_string(error, "exact tool result error")
         }
@@ -1331,9 +1345,13 @@ fn validate_exact_delegation_result_private(
         .and_then(Value::as_object)
         .ok_or_else(|| invalid_artifact("exact delegation result payload must be an object"))?;
     let expected_keys: &[&str] = match binding.outcome {
-        ExactRuntimeEvidenceOutcome::Returned => {
-            &["call_id", "invocation_key", "outcome", "response", "tool_name"]
-        }
+        ExactRuntimeEvidenceOutcome::Returned => &[
+            "call_id",
+            "invocation_key",
+            "outcome",
+            "response",
+            "tool_name",
+        ],
         ExactRuntimeEvidenceOutcome::HandlerError
         | ExactRuntimeEvidenceOutcome::EffectNonResumableUnknown => {
             &["call_id", "error", "invocation_key", "outcome", "tool_name"]
@@ -1393,13 +1411,17 @@ fn validate_exact_oauth_result_private(
         ExactRuntimeEvidenceOutcome::HandlerError
         | ExactRuntimeEvidenceOutcome::EffectNonResumableUnknown => &["error_class", "provider"],
         ExactRuntimeEvidenceOutcome::NotApplicable => {
-            return Err(invalid_artifact("exact OAuth result cannot be not_applicable"));
+            return Err(invalid_artifact(
+                "exact OAuth result cannot be not_applicable",
+            ));
         }
     };
     if payload.len() != expected_keys.len()
         || expected_keys.iter().any(|key| !payload.contains_key(*key))
     {
-        return Err(invalid_artifact("exact OAuth result payload shape is invalid"));
+        return Err(invalid_artifact(
+            "exact OAuth result payload shape is invalid",
+        ));
     }
     required_safe_bounded_string(payload, "provider")?;
     if binding.outcome == ExactRuntimeEvidenceOutcome::Returned {
@@ -1477,11 +1499,7 @@ fn validate_exact_delivery_result_private(
     }
     let idempotency_key = required_bounded_string(payload, "idempotency_key")?;
     if !is_lowercase_sha256_hex(idempotency_key)
-        || binding
-            .evidence_subject
-            .rsplit('/')
-            .next()
-            != Some(idempotency_key)
+        || binding.evidence_subject.rsplit('/').next() != Some(idempotency_key)
     {
         return Err(invalid_artifact(
             "exact delivery result payload does not bind its idempotency identity",
@@ -1490,9 +1508,7 @@ fn validate_exact_delivery_result_private(
     let completion = required_bounded_string(payload, "completion")?;
     match completion {
         "acknowledged" => {
-            if !payload
-                .get("delivery_failure")
-                .is_some_and(Value::is_null)
+            if !payload.get("delivery_failure").is_some_and(Value::is_null)
                 || payload.get("delivery_receipt").and_then(Value::as_str)
                     != Some(&format!("alpha-runtime-v1:{idempotency_key}"))
             {
@@ -1502,9 +1518,7 @@ fn validate_exact_delivery_result_private(
             }
         }
         "nacked" => {
-            if !payload
-                .get("delivery_receipt")
-                .is_some_and(Value::is_null)
+            if !payload.get("delivery_receipt").is_some_and(Value::is_null)
                 || !matches!(
                     payload.get("delivery_failure").and_then(Value::as_str),
                     Some(
@@ -1531,7 +1545,9 @@ fn validate_exact_delivery_result_private(
 
 fn validate_exact_runtime_value(value: &Value, depth: usize) -> Result<(), SealedArtifactError> {
     if depth > 64 {
-        return Err(invalid_artifact("exact runtime payload nesting exceeds 64 levels"));
+        return Err(invalid_artifact(
+            "exact runtime payload nesting exceeds 64 levels",
+        ));
     }
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => Ok(()),
@@ -1561,7 +1577,9 @@ fn validate_exact_runtime_string(value: &str, label: &str) -> Result<(), SealedA
         || redact_sensitive_text(value) != value
         || contains_unredacted_credential_token(value)
     {
-        return Err(invalid_artifact(&format!("{label} contains a credential or invalid string")));
+        return Err(invalid_artifact(&format!(
+            "{label} contains a credential or invalid string"
+        )));
     }
     Ok(())
 }
@@ -2589,7 +2607,13 @@ pub(crate) fn prepare_exact_runtime_artifact_bound(
             "RunStart must use the dedicated exact preparation entry point",
         ));
     }
-    prepare_exact_artifact_bound_for(schema, safe_raw, private_evidence, redactor, fingerprint_key)
+    prepare_exact_artifact_bound_for(
+        schema,
+        safe_raw,
+        private_evidence,
+        redactor,
+        fingerprint_key,
+    )
 }
 
 fn prepare_exact_artifact_bound_for(
@@ -4089,10 +4113,7 @@ impl ReconstructedPrivateFragment {
         &self.binding
     }
 
-    pub(crate) fn with_value<R>(
-        &self,
-        read: impl for<'value> FnOnce(&'value Value) -> R,
-    ) -> R {
+    pub(crate) fn with_value<R>(&self, read: impl for<'value> FnOnce(&'value Value) -> R) -> R {
         read(self.private.as_value())
     }
 }
@@ -4106,7 +4127,6 @@ impl std::fmt::Debug for ReconstructedPrivateFragment {
             .finish()
     }
 }
-
 
 fn zeroize_json_value(value: &mut Value) {
     match value {

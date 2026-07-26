@@ -328,11 +328,9 @@ impl<'a> ArtifactAppendCoordinator<'a> {
             Some(replay) => append_request.with_replay_contract(replay.obligation, replay_fidelity),
             None => append_request,
         };
-        let reservation = self.ledger.reserve_append(
-            request.mode,
-            request.owner_lease,
-            append_request,
-        )?;
+        let reservation =
+            self.ledger
+                .reserve_append(request.mode, request.owner_lease, append_request)?;
 
         match reservation {
             AppendReservation::Committed(receipt) => outcome_from_receipt(receipt),

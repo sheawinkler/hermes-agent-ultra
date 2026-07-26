@@ -3,7 +3,6 @@
 //! Initializes logging, parses CLI arguments, and dispatches to the
 //! appropriate subcommand handler.
 
-use std::time::Duration;
 use aes_gcm::aead::Aead;
 use aes_gcm::Aes256Gcm;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -153,6 +152,7 @@ use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast;
 #[cfg(any(
     feature = "gateway-api-server",

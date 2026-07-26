@@ -4,17 +4,17 @@
 //! same parsing, canonicalization, root collection, and deny-list machinery,
 //! but never use delivery's permissive or recency-based fallbacks.
 
-use std::ffi::OsStr;
 #[cfg(unix)]
 use std::ffi::CString;
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::path::Component;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 #[cfg(windows)]
 use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime};
 
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -429,10 +429,7 @@ fn path_under_denied_prefix(resolved: &Path, policy: &MediaDeliveryPolicy) -> bo
     path_under_denied_prefix_with_home_exception(resolved, policy, true)
 }
 
-fn path_under_external_upload_denied_prefix(
-    resolved: &Path,
-    policy: &MediaDeliveryPolicy,
-) -> bool {
+fn path_under_external_upload_denied_prefix(resolved: &Path, policy: &MediaDeliveryPolicy) -> bool {
     path_under_denied_prefix_with_home_exception(resolved, policy, false)
 }
 
@@ -759,9 +756,7 @@ fn open_media_delivery_source_no_follow(path: &Path) -> io::Result<OpenedMediaDe
 }
 
 #[cfg(not(any(unix, windows)))]
-fn open_media_delivery_source_no_follow(
-    _path: &Path,
-) -> io::Result<OpenedMediaDeliverySource> {
+fn open_media_delivery_source_no_follow(_path: &Path) -> io::Result<OpenedMediaDeliverySource> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "secure media staging is unavailable on this platform",
@@ -774,8 +769,8 @@ fn set_owner_only_windows_dacl(path: &Path) -> io::Result<()> {
     use std::ptr;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{
-        EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT,
-        SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+        GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W,
+        NO_MULTIPLE_TRUSTEE, SET_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
         TRUSTEE_W,
     };
     use windows_sys::Win32::Security::{
@@ -833,7 +828,8 @@ fn set_owner_only_windows_dacl(path: &Path) -> io::Result<()> {
         },
     };
     let mut owner_acl: *mut ACL = ptr::null_mut();
-    let acl_status = unsafe { SetEntriesInAclW(1, &mut explicit_access, ptr::null(), &mut owner_acl) };
+    let acl_status =
+        unsafe { SetEntriesInAclW(1, &mut explicit_access, ptr::null(), &mut owner_acl) };
     if acl_status != 0 {
         unsafe {
             LocalFree(security_descriptor);
@@ -867,17 +863,13 @@ fn create_media_delivery_staging_dir() -> io::Result<MediaDeliveryStagingDir> {
     let staging_dir = tempfile::Builder::new()
         .prefix("hermes-media-delivery-")
         .tempdir()?;
-    fs::set_permissions(
-        staging_dir.path(),
-        fs::Permissions::from_mode(0o700),
-    )?;
+    fs::set_permissions(staging_dir.path(), fs::Permissions::from_mode(0o700))?;
     Ok(MediaDeliveryStagingDir::Unix(staging_dir))
 }
 
 #[cfg(windows)]
-fn create_owner_only_windows_security_descriptor() -> io::Result<
-    windows_sys::Win32::Security::PSECURITY_DESCRIPTOR,
-> {
+fn create_owner_only_windows_security_descriptor(
+) -> io::Result<windows_sys::Win32::Security::PSECURITY_DESCRIPTOR> {
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -960,11 +952,7 @@ fn snapshot_media_delivery_path(
     source_path: &Path,
     policy: &MediaDeliveryPolicy,
 ) -> io::Result<ValidatedMediaDelivery> {
-    snapshot_media_delivery_path_with_limit(
-        source_path,
-        policy,
-        MEDIA_DELIVERY_SNAPSHOT_MAX_BYTES,
-    )
+    snapshot_media_delivery_path_with_limit(source_path, policy, MEDIA_DELIVERY_SNAPSHOT_MAX_BYTES)
 }
 
 fn snapshot_media_delivery_path_with_limit(
@@ -976,7 +964,8 @@ fn snapshot_media_delivery_path_with_limit(
         file: source,
         resolved_path,
     } = open_media_delivery_source_no_follow(source_path)?;
-    if validate_media_delivery_path_with_policy(&resolved_path.to_string_lossy(), policy).is_none() {
+    if validate_media_delivery_path_with_policy(&resolved_path.to_string_lossy(), policy).is_none()
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "opened media source is no longer policy-approved",
@@ -993,9 +982,11 @@ fn snapshot_media_delivery_path_with_limit(
     }
 
     let staging_dir = create_media_delivery_staging_dir()?;
-    let staged_path = staging_dir
-        .path()
-        .join(source_path.file_name().unwrap_or_else(|| OsStr::new("media")));
+    let staged_path = staging_dir.path().join(
+        source_path
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("media")),
+    );
     let mut staged_options = OpenOptions::new();
     staged_options.write(true).create_new(true);
     #[cfg(unix)]
@@ -1459,7 +1450,9 @@ mod tests {
         let root_file = root_home.join("deliverable.wav");
 
         assert!(!path_under_denied_prefix(&root_file, &policy));
-        assert!(path_under_external_upload_denied_prefix(&root_file, &policy));
+        assert!(path_under_external_upload_denied_prefix(
+            &root_file, &policy
+        ));
     }
     #[test]
     fn media_delivery_recency_window_rejects_invalid_or_overflowing_seconds() {
@@ -1596,7 +1589,10 @@ mod tests {
 
         std::fs::rename(&source, &displaced_source).unwrap();
         symlink(&secret, &source).unwrap();
-        assert_eq!(std::fs::read(&staged_path).unwrap(), b"original audio bytes");
+        assert_eq!(
+            std::fs::read(&staged_path).unwrap(),
+            b"original audio bytes"
+        );
 
         drop(delivery);
         assert!(!staged_path.exists());

@@ -221,14 +221,25 @@ impl SkillTrustPathGuard {
             character.is_whitespace()
                 || matches!(
                     character,
-                    '\'' | '"' | '`' | ';' | '|' | '&' | '<' | '>' | '(' | ')' | '{' | '}'
-                        | '[' | ']' | ','
+                    '\'' | '"'
+                        | '`'
+                        | ';'
+                        | '|'
+                        | '&'
+                        | '<'
+                        | '>'
+                        | '('
+                        | ')'
+                        | '{'
+                        | '}'
+                        | '['
+                        | ']'
+                        | ','
                 )
         })
         .filter_map(|fragment| {
-            let fragment = fragment.trim_matches(|character| {
-                matches!(character, '\'' | '"' | '`' | ':' | '=')
-            });
+            let fragment = fragment
+                .trim_matches(|character| matches!(character, '\'' | '"' | '`' | ':' | '='));
             if fragment.is_empty() {
                 return None;
             }
@@ -302,8 +313,7 @@ fn path_matches_protected(path: &Path, protected: &Path, recursive: bool) -> boo
     let Some(resolved_path) = canonical_path_with_existing_ancestor(&lexical_path) else {
         return false;
     };
-    let Some(resolved_protected) = canonical_path_with_existing_ancestor(&lexical_protected)
-    else {
+    let Some(resolved_protected) = canonical_path_with_existing_ancestor(&lexical_protected) else {
         return false;
     };
     if recursive {
@@ -594,9 +604,9 @@ pub fn is_write_denied_with_roots_and_safe_root(
     if WRITE_DENY_EXACT_ABSOLUTE
         .iter()
         .any(|candidate| expanded_text == *candidate)
-        || WRITE_DENY_PREFIX_ABSOLUTE
-            .iter()
-            .any(|prefix| expanded_text == *prefix || expanded_text.starts_with(&format!("{prefix}/")))
+        || WRITE_DENY_PREFIX_ABSOLUTE.iter().any(|prefix| {
+            expanded_text == *prefix || expanded_text.starts_with(&format!("{prefix}/"))
+        })
     {
         return true;
     }
@@ -938,11 +948,7 @@ mod tests {
                 path.display()
             );
         }
-        assert!(is_write_denied_with_roots(
-            &lock,
-            None,
-            Some(&hermes_home)
-        ));
+        assert!(is_write_denied_with_roots(&lock, None, Some(&hermes_home)));
         assert!(guard
             .check_write_access(&hermes_home.join("notes.txt"), "safe user data")
             .is_ok());
@@ -1173,8 +1179,7 @@ mod tests {
         std::fs::create_dir_all(&outside).expect("outside");
 
         symlink(&outside, safe_root.join("escape")).expect("escape symlink");
-        symlink(outside.join("missing"), safe_root.join("dangling"))
-            .expect("dangling symlink");
+        symlink(outside.join("missing"), safe_root.join("dangling")).expect("dangling symlink");
 
         assert!(is_write_denied_with_roots_and_safe_root(
             &safe_root.join("escape/new/file.txt"),

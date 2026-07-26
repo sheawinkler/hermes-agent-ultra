@@ -95,7 +95,6 @@ impl SkillCommandResolverConfig {
     }
 }
 
-
 /// Resolved installed-skill slash invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillSlashInvocation {
@@ -268,7 +267,6 @@ fn skill_matches_platform(skill: &SkillInfo, platform: Option<&str>) -> bool {
         .iter()
         .any(|alias| match_platform(skill, alias))
 }
-
 
 fn skill_description(skill: &SkillInfo) -> String {
     skill
@@ -487,12 +485,7 @@ pub fn resolve_installed_skill_slash_command(
 
     let description = skill_description(&skill);
     let provenance = skill.provenance().clone();
-    let message = build_skill_slash_invocation_message(
-        &skill.name,
-        &skill.body,
-        &provenance,
-        args,
-    );
+    let message = build_skill_slash_invocation_message(&skill.name, &skill.body, &provenance, args);
     Ok(Some(SkillSlashInvocation {
         command: format!("/{slug}"),
         skill_name: skill.name,
@@ -780,7 +773,9 @@ mod tests {
                 revoked_at: "2026-07-20T00:00:00Z".to_string(),
             }],
         };
-        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
         store_revocations(root, &revocations).unwrap();
     }
 
@@ -810,13 +805,10 @@ mod tests {
             "Planning",
         );
         let trust = SkillTrustRuntime::fail_closed().unwrap();
-        let mut cached = load_verified_skill_by_selector(
-            &[tmp.path().to_path_buf()],
-            "planning",
-            &trust,
-        )
-        .unwrap()
-        .unwrap();
+        let mut cached =
+            load_verified_skill_by_selector(&[tmp.path().to_path_buf()], "planning", &trust)
+                .unwrap()
+                .unwrap();
         cached.frontmatter.insert(
             "commands".to_string(),
             serde_json::json!([{
@@ -870,11 +862,9 @@ mod tests {
     fn test_handle_unknown_command() {
         let registry = SkillCommandRegistry::new();
         let trust = SkillTrustRuntime::fail_closed().unwrap();
-        assert!(
-            handle_skill_command(&registry, "/unknown", "args", &trust)
-                .unwrap()
-                .is_none()
-        );
+        assert!(handle_skill_command(&registry, "/unknown", "args", &trust)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -942,7 +932,12 @@ mod tests {
             .expect("signed package must load");
         assert_eq!(loaded.skill_name, "signed-skill");
         assert_eq!(loaded.provenance.key_id.as_deref(), Some("test-key"));
-        assert_eq!(installed_skill_slash_command_snapshot(&config).available.len(), 1);
+        assert_eq!(
+            installed_skill_slash_command_snapshot(&config)
+                .available
+                .len(),
+            1
+        );
 
         revoke_signed_remote_skill(tmp.path(), &signer);
         assert!(resolve_installed_skill_slash_command("/signed-skill", "", &config).is_err());
@@ -978,11 +973,9 @@ mod tests {
             platform: Some("linux".to_string()),
             ..SkillCommandResolverConfig::default()
         };
-        assert!(
-            resolve_installed_skill_slash_command("/beta", "", &enabled)
-                .unwrap()
-                .is_some()
-        );
+        assert!(resolve_installed_skill_slash_command("/beta", "", &enabled)
+            .unwrap()
+            .is_some());
     }
 
     #[test]

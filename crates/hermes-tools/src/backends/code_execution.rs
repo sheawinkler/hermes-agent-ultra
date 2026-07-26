@@ -55,7 +55,9 @@ impl LocalCodeExecutionBackend {
             Some(parent) => builder.tempdir_in(parent),
             None => builder.tempdir(),
         }
-        .map_err(|error| ToolError::ExecutionFailed(format!("Failed to create code workspace: {error}")))
+        .map_err(|error| {
+            ToolError::ExecutionFailed(format!("Failed to create code workspace: {error}"))
+        })
     }
 }
 
@@ -123,9 +125,9 @@ fn apply_code_subprocess_environment(cmd: &mut TokioCommand) -> Result<(), ToolE
 
 fn bounded_execution_error(error: BoundedCommandError, timeout_secs: u64) -> ToolError {
     match error {
-        BoundedCommandError::TimedOut => ToolError::Timeout(format!(
-            "Code execution timed out after {timeout_secs}s"
-        )),
+        BoundedCommandError::TimedOut => {
+            ToolError::Timeout(format!("Code execution timed out after {timeout_secs}s"))
+        }
         other => ToolError::ExecutionFailed(format!("Code execution failed: {other:?}")),
     }
 }
@@ -164,7 +166,9 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
             "typescript" | "ts" => {
                 let source = workspace.path().join("snippet.ts");
                 tokio::fs::write(&source, code).await.map_err(|error| {
-                    ToolError::ExecutionFailed(format!("Failed to write TypeScript source: {error}"))
+                    ToolError::ExecutionFailed(format!(
+                        "Failed to write TypeScript source: {error}"
+                    ))
                 })?;
                 let mut command = TokioCommand::new("npx");
                 command.arg("ts-node").arg(source);
@@ -280,7 +284,11 @@ mod tests {
         let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
         let backend = LocalCodeExecutionBackend::default();
         let raw = backend
-            .execute("printf '%s' \"${OPENAI_API_KEY-unset}\"", Some("bash"), Some(5))
+            .execute(
+                "printf '%s' \"${OPENAI_API_KEY-unset}\"",
+                Some("bash"),
+                Some(5),
+            )
             .await
             .expect("bash should run");
         let payload: serde_json::Value = serde_json::from_str(&raw).expect("json payload");
@@ -321,10 +329,7 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&npx, permissions).expect("npx permissions");
         let original_path = std::env::var("PATH").unwrap_or_default();
-        let _path = EnvGuard::set(
-            "PATH",
-            &format!("{}:{original_path}", bin.display()),
-        );
+        let _path = EnvGuard::set("PATH", &format!("{}:{original_path}", bin.display()));
         let backend = LocalCodeExecutionBackend::default().with_temp_parent(parent.path().into());
 
         let output = backend
@@ -337,8 +342,16 @@ mod tests {
         let leftovers = std::fs::read_dir(parent.path())
             .expect("workspace parent entries")
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with("hermes_exec_"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("hermes_exec_")
+            })
             .collect::<Vec<_>>();
-        assert!(leftovers.is_empty(), "temporary code workspaces leaked: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temporary code workspaces leaked: {leftovers:?}"
+        );
     }
 }

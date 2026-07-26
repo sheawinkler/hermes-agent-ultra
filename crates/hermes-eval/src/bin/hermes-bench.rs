@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
-use hermes_config::{load_config, GatewayConfig};
-use hermes_core::SkillProvider;
 #[cfg(feature = "agent-loop")]
 use hermes_agent::RunRuntime;
+use hermes_config::{load_config, GatewayConfig};
+use hermes_core::SkillProvider;
 #[cfg(feature = "agent-loop")]
 use hermes_environments::BackendManager;
 #[cfg(feature = "agent-loop")]

@@ -374,8 +374,7 @@ pub fn evaluate_promotion(
         .evaluation_receipt_digest()
         .as_str()
         .is_empty();
-    let replay_evidence_available =
-        has_replay_proof && has_replay_export && has_evaluation_receipt;
+    let replay_evidence_available = has_replay_proof && has_replay_export && has_evaluation_receipt;
     let gates = [
         policy_gate(policy),
         quality_gate(
@@ -500,11 +499,7 @@ fn policy_gate(policy: &ReleasePromotionPolicy) -> PromotionGateOutcome {
     PromotionGateOutcome::passed(PromotionGate::Policy)
 }
 
-fn quality_gate(
-    candidate: f64,
-    incumbent: f64,
-    maximum_regression: f64,
-) -> PromotionGateOutcome {
+fn quality_gate(candidate: f64, incumbent: f64, maximum_regression: f64) -> PromotionGateOutcome {
     if !valid_quality(candidate) {
         return PromotionGateOutcome::failed(
             PromotionGate::Quality,
@@ -736,8 +731,14 @@ fn required_bindings_gate(
     let holdout = receipt.holdout();
     let reproduction = receipt.reproduction();
     if let Some(failure) = missing_release_binding(&[
-        (!candidate.repository().is_empty(), ReleaseBinding::CandidateRepository),
-        (!candidate.full_sha().is_empty(), ReleaseBinding::CandidateFullSha),
+        (
+            !candidate.repository().is_empty(),
+            ReleaseBinding::CandidateRepository,
+        ),
+        (
+            !candidate.full_sha().is_empty(),
+            ReleaseBinding::CandidateFullSha,
+        ),
         (
             matches!(
                 candidate.revision_algorithm(),
@@ -753,8 +754,14 @@ fn required_bindings_gate(
             !candidate.artifact_digest().as_str().is_empty(),
             ReleaseBinding::CandidateArtifactDigest,
         ),
-        (!incumbent.repository().is_empty(), ReleaseBinding::IncumbentRepository),
-        (!incumbent.full_sha().is_empty(), ReleaseBinding::IncumbentFullSha),
+        (
+            !incumbent.repository().is_empty(),
+            ReleaseBinding::IncumbentRepository,
+        ),
+        (
+            !incumbent.full_sha().is_empty(),
+            ReleaseBinding::IncumbentFullSha,
+        ),
         (
             matches!(
                 incumbent.revision_algorithm(),
@@ -770,7 +777,10 @@ fn required_bindings_gate(
             !incumbent.artifact_digest().as_str().is_empty(),
             ReleaseBinding::IncumbentArtifactDigest,
         ),
-        (!holdout.holdout_id().is_empty(), ReleaseBinding::FixedHoldoutId),
+        (
+            !holdout.holdout_id().is_empty(),
+            ReleaseBinding::FixedHoldoutId,
+        ),
         (
             !holdout.holdout_digest().as_str().is_empty(),
             ReleaseBinding::FixedHoldoutDigest,
@@ -793,9 +803,7 @@ fn required_bindings_gate(
     PromotionGateOutcome::passed(PromotionGate::RequiredBindings)
 }
 
-fn missing_release_binding(
-    bindings: &[(bool, ReleaseBinding)],
-) -> Option<PromotionGateFailure> {
+fn missing_release_binding(bindings: &[(bool, ReleaseBinding)]) -> Option<PromotionGateFailure> {
     bindings
         .iter()
         .find(|(present, _)| !*present)
@@ -1103,12 +1111,7 @@ mod tests {
     #[test]
     fn supplementary_policy_mismatch_rejects_before_duration_checks() {
         assert!(matches!(
-            supplementary_binding_failure(
-                PromotionSupplementaryEvidence::Soak,
-                false,
-                true,
-                true,
-            ),
+            supplementary_binding_failure(PromotionSupplementaryEvidence::Soak, false, true, true,),
             Some(PromotionGateFailure::SupplementaryPolicyMismatch {
                 evidence: PromotionSupplementaryEvidence::Soak,
             })

@@ -255,7 +255,10 @@ fn scoped_body(
     Ok(body)
 }
 
-fn scope_query(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Vec<(&'static str, String)> {
+fn scope_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
     let key = filter.as_str().to_string();
     vec![
         ("subject_key", key.clone()),
@@ -267,7 +270,10 @@ fn scope_query(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Vec
         ),
         ("session_id", key.clone()),
         ("surface", subject.surface().as_str().to_string()),
-        ("visibility", visibility_label(subject.visibility()).to_string()),
+        (
+            "visibility",
+            visibility_label(subject.visibility()).to_string(),
+        ),
     ]
 }
 
@@ -352,7 +358,9 @@ fn remote_memories(
         }),
     )?;
     let response = with_retain_headers(
-        st.client.post(format!("{}/v1/memory/search", st.base)).json(&body),
+        st.client
+            .post(format!("{}/v1/memory/search", st.base))
+            .json(&body),
         &st.token,
     )
     .send()
@@ -389,15 +397,19 @@ fn retain_export_marker(response: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn retain_export_has_more(response: &Value) -> Option<bool> {
-    [Some(response), response.get("meta"), response.get("pagination")]
-        .into_iter()
-        .flatten()
-        .find_map(|scope| {
-            scope
-                .get("has_more")
-                .or_else(|| scope.get("hasMore"))
-                .and_then(Value::as_bool)
-        })
+    [
+        Some(response),
+        response.get("meta"),
+        response.get("pagination"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|scope| {
+        scope
+            .get("has_more")
+            .or_else(|| scope.get("hasMore"))
+            .and_then(Value::as_bool)
+    })
 }
 
 fn stable_retain_export_page(
@@ -440,7 +452,9 @@ fn stable_retain_export_page(
     .send()
     .map_err(|_| RetainExportError::Failed("stable export listing is unavailable"))?;
     if !response.status().is_success() {
-        return Err(RetainExportError::Failed("stable export listing is unavailable"));
+        return Err(RetainExportError::Failed(
+            "stable export listing is unavailable",
+        ));
     }
     let response: Value = response
         .json()
@@ -541,12 +555,15 @@ fn stream_retain_export(
                 .map_err(|_| RetainExportError::Failed("export page evidence is invalid"))?,
             )
             .map_err(|_| RetainExportError::Failed("export sink rejected provider page"))?;
-            exported_records = exported_records
-                .checked_add(record_count)
-                .ok_or(RetainExportError::Failed("stable export record count overflow"))?;
-            page_count = page_count
-                .checked_add(1)
-                .ok_or(RetainExportError::Failed("stable export page count overflow"))?;
+            exported_records =
+                exported_records
+                    .checked_add(record_count)
+                    .ok_or(RetainExportError::Failed(
+                        "stable export record count overflow",
+                    ))?;
+            page_count = page_count.checked_add(1).ok_or(RetainExportError::Failed(
+                "stable export page count overflow",
+            ))?;
 
             let Some(next_cursor) = next_cursor else {
                 break;
@@ -581,12 +598,20 @@ fn delete_remote_memory(
     memory_id: &str,
 ) -> Result<(), String> {
     let memory_id = memory_id.trim();
-    if memory_id.is_empty() || memory_id.contains('/') || memory_id.contains('?') || memory_id.contains('#') {
+    if memory_id.is_empty()
+        || memory_id.contains('/')
+        || memory_id.contains('?')
+        || memory_id.contains('#')
+    {
         return Err("memory_id must be an exact RetainDB memory id".into());
     }
     let response = with_retain_headers(
         st.client
-            .delete(format!("{}/v1/memory/{}", st.base, urlencoding_query(memory_id)))
+            .delete(format!(
+                "{}/v1/memory/{}",
+                st.base,
+                urlencoding_query(memory_id)
+            ))
             .query(&scope_query(subject, filter)),
         &st.token,
     )
@@ -655,7 +680,11 @@ fn retaindb_ingest_file(
     let body = scoped_body(subject, filter, json!({}))?;
     let response = with_retain_headers(
         st.client
-            .post(format!("{}/v1/files/{}/ingest", st.base, urlencoding_query(file_id)))
+            .post(format!(
+                "{}/v1/files/{}/ingest",
+                st.base,
+                urlencoding_query(file_id)
+            ))
             .json(&body),
         &st.token,
     )
@@ -698,7 +727,11 @@ fn tool_dispatch(
             response.json().map_err(|err| err.to_string())
         }
         "retaindb_search" => {
-            let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if query.is_empty() {
                 return Err("query is required".into());
             }
@@ -706,7 +739,11 @@ fn tool_dispatch(
             Ok(json!({"results": remote_memories(st, subject, filter, query, top_k)?}))
         }
         "retaindb_context" => {
-            let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if query.is_empty() {
                 return Err("query is required".into());
             }
@@ -721,7 +758,9 @@ fn tool_dispatch(
                 }),
             )?;
             let response = with_retain_headers(
-                st.client.post(format!("{}/v1/context/query", st.base)).json(&body),
+                st.client
+                    .post(format!("{}/v1/context/query", st.base))
+                    .json(&body),
                 &st.token,
             )
             .send()
@@ -732,7 +771,11 @@ fn tool_dispatch(
             response.json().map_err(|err| err.to_string())
         }
         "retaindb_remember" => {
-            let content = args.get("content").and_then(Value::as_str).unwrap_or("").trim();
+            let content = args
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if content.is_empty() {
                 return Err("content is required".into());
             }
@@ -804,7 +847,9 @@ fn tool_dispatch(
                 .text("team_id", team_filter.to_string())
                 .text("session_id", filter.as_str().to_string());
             let response = with_retain_auth_headers(
-                st.client.post(format!("{}/v1/files", st.base)).multipart(form),
+                st.client
+                    .post(format!("{}/v1/files", st.base))
+                    .multipart(form),
                 &st.token,
             )
             .send()
@@ -824,7 +869,11 @@ fn tool_dispatch(
             Ok(value)
         }
         "retaindb_list_files" => {
-            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200);
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 200);
             let mut query = scope_query(subject, filter);
             query.push(("limit", limit.to_string()));
             if let Some(prefix) = args
@@ -847,7 +896,11 @@ fn tool_dispatch(
             response.json().map_err(|err| err.to_string())
         }
         "retaindb_read_file" => {
-            let file_id = args.get("file_id").and_then(Value::as_str).unwrap_or("").trim();
+            let file_id = args
+                .get("file_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if file_id.is_empty() {
                 return Err("file_id is required".into());
             }
@@ -877,7 +930,9 @@ fn tool_dispatch(
                 return Err(format!("read file content {}", content.status()));
             }
             if !retain_file_is_text(file_info) {
-                return Ok(json!({"file_id": file_id, "content": Value::Null, "note": "binary file"}));
+                return Ok(
+                    json!({"file_id": file_id, "content": Value::Null, "note": "binary file"}),
+                );
             }
             let content_bytes = content.bytes().map_err(|err| err.to_string())?;
             let content = String::from_utf8_lossy(&content_bytes);
@@ -889,20 +944,32 @@ fn tool_dispatch(
             }))
         }
         "retaindb_ingest_file" => {
-            let file_id = args.get("file_id").and_then(Value::as_str).unwrap_or("").trim();
+            let file_id = args
+                .get("file_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if file_id.is_empty() {
                 return Err("file_id is required".into());
             }
             retaindb_ingest_file(st, subject, filter, file_id)
         }
         "retaindb_delete_file" => {
-            let file_id = args.get("file_id").and_then(Value::as_str).unwrap_or("").trim();
+            let file_id = args
+                .get("file_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if file_id.is_empty() {
                 return Err("file_id is required".into());
             }
             let response = with_retain_headers(
                 st.client
-                    .delete(format!("{}/v1/files/{}", st.base, urlencoding_query(file_id)))
+                    .delete(format!(
+                        "{}/v1/files/{}",
+                        st.base,
+                        urlencoding_query(file_id)
+                    ))
                     .query(&scope_query(subject, filter)),
                 &st.token,
             )
@@ -1035,8 +1102,13 @@ fn queue_key(token: &str, subject_key: &str) -> [u8; 32] {
     digest.finalize().into()
 }
 
-fn encrypt_queue_payload(token: &str, subject_key: &str, payload: &Value) -> Result<String, String> {
-    let plaintext = serde_json::to_vec(&redact_queue_value(payload)).map_err(|err| err.to_string())?;
+fn encrypt_queue_payload(
+    token: &str,
+    subject_key: &str,
+    payload: &Value,
+) -> Result<String, String> {
+    let plaintext =
+        serde_json::to_vec(&redact_queue_value(payload)).map_err(|err| err.to_string())?;
     let cipher = Aes256Gcm::new_from_slice(&queue_key(token, subject_key))
         .map_err(|_| "invalid RetainDB queue key".to_string())?;
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
@@ -1055,7 +1127,11 @@ fn encrypt_queue_payload(token: &str, subject_key: &str, payload: &Value) -> Res
     Ok(BASE64_STANDARD.encode(envelope))
 }
 
-fn decrypt_queue_payload(token: &str, subject_key: &str, ciphertext: &str) -> Result<Value, String> {
+fn decrypt_queue_payload(
+    token: &str,
+    subject_key: &str,
+    ciphertext: &str,
+) -> Result<Value, String> {
     let envelope = BASE64_STANDARD
         .decode(ciphertext)
         .map_err(|_| "RetainDB queue ciphertext is invalid".to_string())?;
@@ -1389,7 +1465,10 @@ impl MemoryProviderPlugin for RetainDbMemoryPlugin {
     }
 
     fn is_available(&self) -> bool {
-        !std::env::var("RETAINDB_API_KEY").unwrap_or_default().trim().is_empty()
+        !std::env::var("RETAINDB_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
     }
 
     fn initialize(
@@ -1745,7 +1824,10 @@ mod tests {
         queue: PathBuf,
     ) -> RetainState {
         RetainState {
-            client: Client::builder().timeout(Duration::from_secs(2)).build().expect("client"),
+            client: Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .expect("client"),
             base,
             token: "test-token".to_string(),
             subject: subject.clone(),
@@ -1755,7 +1837,9 @@ mod tests {
     }
 
     fn read_request(stream: &mut std::net::TcpStream) -> String {
-        stream.set_read_timeout(Some(Duration::from_secs(2))).expect("timeout");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("timeout");
         let mut bytes = Vec::new();
         let mut chunk = [0_u8; 4096];
         loop {
@@ -1791,7 +1875,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().expect("accept");
                 sender.send(read_request(&mut stream)).expect("request");
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 let response = format!(
                     "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1810,7 +1898,11 @@ mod tests {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().expect("accept");
                 sender.send(read_request(&mut stream)).expect("request");
-                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                let reason = if (200..300).contains(&status) {
+                    "OK"
+                } else {
+                    "Error"
+                };
                 let response = format!(
                     "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1827,15 +1919,43 @@ mod tests {
         let (alice, alice_filter) = subject("alice", "session-a");
         let (bob, bob_filter) = subject("bob", "session-b");
         let queue = temp.path().join("queue.sqlite");
-        let alice_state = state("http://127.0.0.1:9".to_string(), &alice, alice_filter.clone(), queue.clone());
-        let bob_state = state("http://127.0.0.1:9".to_string(), &bob, bob_filter.clone(), queue.clone());
+        let alice_state = state(
+            "http://127.0.0.1:9".to_string(),
+            &alice,
+            alice_filter.clone(),
+            queue.clone(),
+        );
+        let bob_state = state(
+            "http://127.0.0.1:9".to_string(),
+            &bob,
+            bob_filter.clone(),
+            queue.clone(),
+        );
         let secret = "api_key=sk-retaindb-secret-123456";
-        let alice_payload = scoped_body(&alice, &alice_filter, json!({"messages":[{"content":secret}]})).expect("scope");
-        let bob_payload = scoped_body(&bob, &bob_filter, json!({"messages":[{"content":"bob memory"}]})).expect("scope");
+        let alice_payload = scoped_body(
+            &alice,
+            &alice_filter,
+            json!({"messages":[{"content":secret}]}),
+        )
+        .expect("scope");
+        let bob_payload = scoped_body(
+            &bob,
+            &bob_filter,
+            json!({"messages":[{"content":"bob memory"}]}),
+        )
+        .expect("scope");
         enqueue_retaindb_turn(&alice_state, &alice_payload).expect("alice row");
         enqueue_retaindb_turn(&bob_state, &bob_payload).expect("bob row");
-        assert_eq!(pending_retaindb_rows(&alice_state).expect("alice rows").len(), 1);
-        assert_eq!(pending_retaindb_rows(&bob_state).expect("bob rows").len(), 1);
+        assert_eq!(
+            pending_retaindb_rows(&alice_state)
+                .expect("alice rows")
+                .len(),
+            1
+        );
+        assert_eq!(
+            pending_retaindb_rows(&bob_state).expect("bob rows").len(),
+            1
+        );
         let database = std::fs::read(&queue).expect("database");
         let raw = String::from_utf8_lossy(&database);
         assert!(!raw.contains(secret));
@@ -1858,7 +1978,12 @@ mod tests {
             let subject = subject.clone();
             let filter = filter.clone();
             writers.push(thread::spawn(move || {
-                let payload = scoped_body(&subject, &filter, json!({"messages":[{"content":format!("turn-{index}")}]})).expect("scope");
+                let payload = scoped_body(
+                    &subject,
+                    &filter,
+                    json!({"messages":[{"content":format!("turn-{index}")}]}),
+                )
+                .expect("scope");
                 enqueue_retaindb_turn(&state, &payload).expect("insert");
             }));
         }
@@ -1873,7 +1998,12 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp");
         let (subject, filter) = subject("alice", "session-a");
         let (base, requests) = mock_server(vec![(200, r#"{"results":[]}"#)]);
-        let state = state(base, &subject, filter.clone(), temp.path().join("queue.sqlite"));
+        let state = state(
+            base,
+            &subject,
+            filter.clone(),
+            temp.path().join("queue.sqlite"),
+        );
         let rejected = tool_dispatch(
             &state,
             &subject,
@@ -1883,9 +2013,18 @@ mod tests {
         )
         .expect_err("override rejected");
         assert!(rejected.contains("cannot be overridden"));
-        let value = tool_dispatch(&state, &subject, &filter, "retaindb_search", &json!({"query":"x"})).expect("search");
+        let value = tool_dispatch(
+            &state,
+            &subject,
+            &filter,
+            "retaindb_search",
+            &json!({"query":"x"}),
+        )
+        .expect("search");
         assert_eq!(value["results"], json!([]));
-        let request = requests.recv_timeout(Duration::from_secs(2)).expect("request");
+        let request = requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("request");
         assert!(request.contains(filter.as_str()));
         assert!(!request.contains("alice"));
     }
@@ -1921,7 +2060,12 @@ mod tests {
             r#"{"snapshot":"snapshot-a","revision":"revision-a","results":[{"id":"a"},{"id":"b"}]}"#,
         )]);
         let plugin = RetainDbMemoryPlugin::new();
-        *plugin.state.lock() = Some(state(base, &subject, filter.clone(), temp.path().join("queue.sqlite")));
+        *plugin.state.lock() = Some(state(
+            base,
+            &subject,
+            filter.clone(),
+            temp.path().join("queue.sqlite"),
+        ));
         let actor = MemorySubjectDerivationKey::from_bytes([5; 32]).actor_for_subject(&subject);
         let mut sink = TestExportSink::default();
         let receipt = plugin
@@ -1931,7 +2075,10 @@ mod tests {
         assert_eq!(sink.pages.len(), 1);
         assert_eq!(sink.pages[0].records.len(), 2);
         assert!(sink.completion.as_ref().unwrap().exhausted);
-        assert!(requests.recv_timeout(Duration::from_secs(2)).expect("request").contains(filter.as_str()));
+        assert!(requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("request")
+            .contains(filter.as_str()));
     }
 
     #[test]
@@ -1946,11 +2093,20 @@ mod tests {
         .to_string();
         let (base, requests) = owned_mock_server(vec![(200, semantic_result)]);
         let plugin = RetainDbMemoryPlugin::new();
-        let state = state(base, &subject, filter.clone(), temp.path().join("queue.sqlite"));
+        let state = state(
+            base,
+            &subject,
+            filter.clone(),
+            temp.path().join("queue.sqlite"),
+        );
         enqueue_retaindb_turn(
             &state,
-            &scoped_body(&subject, &filter, json!({"messages":[{"content":"pending"}]}))
-                .expect("payload"),
+            &scoped_body(
+                &subject,
+                &filter,
+                json!({"messages":[{"content":"pending"}]}),
+            )
+            .expect("payload"),
         )
         .expect("queue row");
         *plugin.state.lock() = Some(state.clone());

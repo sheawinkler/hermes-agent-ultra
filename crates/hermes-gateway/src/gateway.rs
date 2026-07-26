@@ -29,15 +29,15 @@ use hermes_config::{
     QuickCommandConfig,
 };
 use hermes_core::errors::GatewayError;
-use hermes_core::{
-    MemoryExportArtifactRef, MemoryExportEvidenceDigest, MemoryProviderGovernanceError,
-    MemorySessionId, MemorySubject, MemorySubjectError,
-};
 use hermes_core::subprocess::CommandNoWindowExt;
 use hermes_core::traits::{
     NativeMediaFailureClass, ParseMode, PlatformAdapter, SendMessageOptions,
 };
 use hermes_core::types::{Message, MessageRole};
+use hermes_core::{
+    MemoryExportArtifactRef, MemoryExportEvidenceDigest, MemoryProviderGovernanceError,
+    MemorySessionId, MemorySubject, MemorySubjectError,
+};
 use hermes_intelligence::{
     build_model_switch_preflight_warning as format_model_switch_preflight_warning,
     estimate_messages_tokens_rough,
@@ -57,8 +57,8 @@ use crate::platforms::helpers::{extract_inline_images, extract_media_markers};
 use crate::session::{ConversationScope, Session, SessionManager};
 use crate::session_control::{
     interrupt_control, ActiveSessionControl, BusyAdmission, BusyInputMode, BusyMessageDecision,
-    BusySessionCoordinator, GatewayRouteOutcome, ProcessingOutcome, QueueAdmission,
-    QueuedIncoming, QueuedTurnKind, ResetAdmission, TurnCompletion, TurnLease,
+    BusySessionCoordinator, GatewayRouteOutcome, ProcessingOutcome, QueueAdmission, QueuedIncoming,
+    QueuedTurnKind, ResetAdmission, TurnCompletion, TurnLease,
 };
 use crate::stream::{StreamConfig, StreamManager};
 
@@ -453,8 +453,8 @@ pub type MessageHandlerWithContext = Arc<
     dyn Fn(
             Vec<Message>,
             GatewayRuntimeContext,
-        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>,
-        > + Send
+        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -464,8 +464,8 @@ pub type StreamingMessageHandler = Arc<
     dyn Fn(
             Vec<Message>,
             Arc<dyn Fn(String) + Send + Sync>,
-        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>,
-        > + Send
+        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -475,8 +475,8 @@ pub type StreamingMessageHandlerWithContext = Arc<
             Vec<Message>,
             GatewayRuntimeContext,
             Arc<dyn Fn(String) + Send + Sync>,
-        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>,
-        > + Send
+        ) -> Pin<Box<dyn Future<Output = Result<String, GatewayError>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -517,7 +517,8 @@ pub struct GatewayMemoryForgetResponse {
 pub type GatewayMemoryForgetHandler = Arc<
     dyn Fn(
             GatewayRuntimeContext,
-        ) -> Pin<Box<dyn Future<Output = Result<GatewayMemoryForgetResponse, GatewayError>> + Send>,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<GatewayMemoryForgetResponse, GatewayError>> + Send>,
         > + Send
         + Sync,
 >;
@@ -570,7 +571,8 @@ pub struct GatewayMemoryExportResponse {
 pub type GatewayMemoryExportHandler = Arc<
     dyn Fn(
             GatewayRuntimeContext,
-        ) -> Pin<Box<dyn Future<Output = Result<GatewayMemoryExportResponse, GatewayError>> + Send>,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<GatewayMemoryExportResponse, GatewayError>> + Send>,
         > + Send
         + Sync,
 >;
@@ -581,8 +583,8 @@ pub type GatewayMemoryExportOpenHandler = Arc<
     dyn Fn(
             GatewayRuntimeContext,
             GatewayMemoryExportArtifact,
-        ) -> Pin<Box<dyn Future<Output = Result<std::fs::File, GatewayError>> + Send>,
-        > + Send
+        ) -> Pin<Box<dyn Future<Output = Result<std::fs::File, GatewayError>> + Send>>
+        + Send
         + Sync,
 >;
 

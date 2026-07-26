@@ -178,12 +178,13 @@ fn resolve_source_probe(
             trusted_environment.git_sha1,
             trusted_environment.source_state,
         ) {
-            (Some(git_sha1), Some(source_state @ (BuildSourceState::Clean | BuildSourceState::Dirty))) => {
-                Ok(SourceIdentity {
-                    git_sha1: Some(git_sha1),
-                    source_state,
-                })
-            }
+            (
+                Some(git_sha1),
+                Some(source_state @ (BuildSourceState::Clean | BuildSourceState::Dirty)),
+            ) => Ok(SourceIdentity {
+                git_sha1: Some(git_sha1),
+                source_state,
+            }),
             _ => Ok(SourceIdentity::unavailable()),
         },
         GitSourceProbe::Indeterminate => Ok(SourceIdentity::unavailable()),
@@ -286,9 +287,9 @@ fn is_valid_git_sha1(value: &str) -> bool {
 fn is_valid_recipe_component(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn is_valid_feature_key(value: &str) -> bool {
@@ -300,7 +301,10 @@ fn is_valid_feature_key(value: &str) -> bool {
 }
 
 fn emit_build_recipe(recipe: &BuildRecipeInputs) {
-    emit_rustc_env("HERMES_EMBEDDED_BUILD_IDENTITY_SCHEMA", BUILD_IDENTITY_SCHEMA);
+    emit_rustc_env(
+        "HERMES_EMBEDDED_BUILD_IDENTITY_SCHEMA",
+        BUILD_IDENTITY_SCHEMA,
+    );
     emit_rustc_env("HERMES_EMBEDDED_BUILD_RECIPE_SCHEMA", BUILD_RECIPE_SCHEMA);
     emit_rustc_env("HERMES_EMBEDDED_BUILD_TARGET", &recipe.target);
     emit_rustc_env("HERMES_EMBEDDED_BUILD_PROFILE", &recipe.profile);
@@ -339,8 +343,14 @@ fn emit_git_rerun_triggers(repo_root: &Path) {
         return;
     };
     let ref_path = Path::new(ref_path);
-    if ref_path.components().all(|component| matches!(component, Component::Normal(_))) {
-        println!("cargo:rerun-if-changed={}", git_dir.join(ref_path).display());
+    if ref_path
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        println!(
+            "cargo:rerun-if-changed={}",
+            git_dir.join(ref_path).display()
+        );
     }
 }
 
@@ -376,7 +386,10 @@ impl fmt::Display for BuildScriptIdentityError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidGitSha1(variable) => {
-                write!(formatter, "{variable} must be exactly 40 lowercase hexadecimal characters")
+                write!(
+                    formatter,
+                    "{variable} must be exactly 40 lowercase hexadecimal characters"
+                )
             }
             Self::ConflictingGitSha1 => write!(
                 formatter,

@@ -20,14 +20,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use parking_lot::Mutex;
-use reqwest::blocking::Client;
-use serde_json::{json, Value};
 use hermes_core::{
     MemoryAuditActor, MemoryExportReceipt, MemoryExportSink, MemoryForgetReceipt,
     MemoryGovernanceOperation, MemoryProviderGovernanceError, MemoryReadbackReceipt,
     MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySubject, MemorySubjectStorageKey,
 };
+use parking_lot::Mutex;
+use reqwest::blocking::Client;
+use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
 use crate::memory_plugins::config_io;
@@ -512,8 +512,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
         let preamble = self
             .config_for(filter)
             .and_then(|config| {
-                (!config.recall_prompt_preamble.is_empty())
-                    .then_some(config.recall_prompt_preamble)
+                (!config.recall_prompt_preamble.is_empty()).then_some(config.recall_prompt_preamble)
             })
             .unwrap_or_else(|| {
                 "# Hindsight Memory (persistent cross-session context)\n\
@@ -556,7 +555,14 @@ impl MemoryProviderPlugin for HindsightPlugin {
             let base = config.api_url.trim_end_matches('/').to_string();
             let bank = urlencode_path(&config.bank_id);
             let result = if config.prefetch_method == "reflect" {
-                hindsight_reflect(&client, &base, &bank, &config.api_key, &query, &config.budget)
+                hindsight_reflect(
+                    &client,
+                    &base,
+                    &bank,
+                    &config.api_key,
+                    &query,
+                    &config.budget,
+                )
             } else {
                 hindsight_recall(
                     &client,
@@ -595,9 +601,11 @@ impl MemoryProviderPlugin for HindsightPlugin {
             return;
         }
         let now = chrono::Utc::now().to_rfc3339();
-        self.session_turns
-            .lock()
-            .push(hindsight_turn_payload(user_content, assistant_content, &now));
+        self.session_turns.lock().push(hindsight_turn_payload(
+            user_content,
+            assistant_content,
+            &now,
+        ));
         let mut counter = self.turn_counter.lock();
         *counter += 1;
         if *counter % config.retain_every_n_turns != 0 {
@@ -707,8 +715,14 @@ impl MemoryProviderPlugin for HindsightPlugin {
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
-                match hindsight_reflect(&client, &base, &bank, &config.api_key, query, &config.budget)
-                {
+                match hindsight_reflect(
+                    &client,
+                    &base,
+                    &bank,
+                    &config.api_key,
+                    query,
+                    &config.budget,
+                ) {
                     Ok(text) if !text.is_empty() => json!({"result": text}).to_string(),
                     Ok(_) => json!({"result": "No relevant memories found."}).to_string(),
                     Err(error) => json!({"error": error}).to_string(),
@@ -791,9 +805,15 @@ impl MemoryProviderPlugin for HindsightPlugin {
         if hindsight_bank_exists(&client, &config)
             .map_err(|_| hindsight_governance_error(MemoryGovernanceOperation::Readback))?
         {
-            return Err(hindsight_governance_error(MemoryGovernanceOperation::Forget));
+            return Err(hindsight_governance_error(
+                MemoryGovernanceOperation::Forget,
+            ));
         }
-        Ok(MemoryForgetReceipt::new("hindsight", filter.clone(), deleted))
+        Ok(MemoryForgetReceipt::new(
+            "hindsight",
+            filter.clone(),
+            deleted,
+        ))
     }
 
     fn retention_sweep(
@@ -934,7 +954,9 @@ fn subject_scoped_bank_id(namespace: &str, filter: &MemorySubjectStorageKey) -> 
     format!("{namespace}--{}", filter.as_str())
 }
 
-fn hindsight_governance_error(operation: MemoryGovernanceOperation) -> MemoryProviderGovernanceError {
+fn hindsight_governance_error(
+    operation: MemoryGovernanceOperation,
+) -> MemoryProviderGovernanceError {
     MemoryProviderGovernanceError::failed("hindsight", operation)
 }
 
@@ -967,9 +989,14 @@ fn hindsight_list_memory_count(
         return Ok(None);
     }
     if !response.status().is_success() {
-        return Err(format!("Hindsight list memories HTTP {}", response.status()));
+        return Err(format!(
+            "Hindsight list memories HTTP {}",
+            response.status()
+        ));
     }
-    let body = response.json::<Value>().map_err(|error| error.to_string())?;
+    let body = response
+        .json::<Value>()
+        .map_err(|error| error.to_string())?;
     let items = body
         .as_array()
         .or_else(|| body.get("items").and_then(Value::as_array))
@@ -993,7 +1020,6 @@ fn hindsight_bank_exists(client: &Client, config: &HindsightConfig) -> Result<bo
         Err(format!("Hindsight bank profile HTTP {}", response.status()))
     }
 }
-
 
 fn hindsight_delete_bank(client: &Client, config: &HindsightConfig) -> Result<(), String> {
     let url = hindsight_bank_base(config);

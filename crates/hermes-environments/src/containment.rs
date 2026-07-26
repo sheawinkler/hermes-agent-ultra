@@ -367,7 +367,8 @@ impl ExecutionContainmentContext {
             &certificate.configuration_digest,
             &invocation.operation,
         );
-        let launch = containment_launch_receipt(certificate, invocation_digest, invocation.operation);
+        let launch =
+            containment_launch_receipt(certificate, invocation_digest, invocation.operation);
         let plan = self
             .inner
             .plan
@@ -412,9 +413,7 @@ impl ExecutionContainmentContext {
             return Err(ExecutionContainmentAdmissionError::UnexpectedCertificateForManual);
         }
         if !certificate.is_closed_execution_certificate() {
-            return Err(ExecutionContainmentAdmissionError::InvalidCertificate {
-                mode: mode.mode,
-            });
+            return Err(ExecutionContainmentAdmissionError::InvalidCertificate { mode: mode.mode });
         }
         Ok(Self {
             inner: Arc::new(ExecutionContainmentInner {
@@ -540,6 +539,8 @@ mod tests {
         .expect("manual context");
         assert!(context.is_manual_host());
         assert!(context.sandbox_digest().is_none());
-        assert!(context.prepare_host_sensitive_invocation("terminal").is_err());
+        assert!(context
+            .prepare_host_sensitive_invocation("terminal")
+            .is_err());
     }
 }

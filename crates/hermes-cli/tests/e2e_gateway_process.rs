@@ -98,10 +98,7 @@ mod unix {
             .args([signal_flag.as_str(), pid_text.as_str()])
             .status()
             .expect("send shutdown signal");
-        assert!(
-            kill_st.success(),
-            "kill {signal_flag} failed: {kill_st:?}"
-        );
+        assert!(kill_st.success(), "kill {signal_flag} failed: {kill_st:?}");
 
         let status = wait_child_exit(&mut child, Instant::now() + EXIT_TIMEOUT);
         assert!(
@@ -181,8 +178,11 @@ mod unix {
         let pid = child.id();
         std::thread::sleep(Duration::from_millis(50));
         fs::write(&pid_path, format!("{pid}\n")).expect("write gateway PID");
-        fs::write(&lock_path, format!(r#"{{"pid":{pid},"kind":"hermes-gateway"}}"#))
-            .expect("write gateway lock");
+        fs::write(
+            &lock_path,
+            format!(r#"{{"pid":{pid},"kind":"hermes-gateway"}}"#),
+        )
+        .expect("write gateway lock");
 
         let output = SysCommand::new(cargo_bin("hermes"))
             .env("HERMES_HOME", home)

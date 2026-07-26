@@ -151,7 +151,10 @@ static ROOT_CONFIG_KEY_SCHEMA: ConfigKeySchema = ConfigKeySchema::Object(ROOT_CO
 
 static ROOT_CONFIG_KEYS: &[(&str, ConfigKeySchema)] = &[
     ("model", ConfigKeySchema::Any),
-    ("model_switch", ConfigKeySchema::Object(MODEL_SWITCH_CONFIG_KEYS)),
+    (
+        "model_switch",
+        ConfigKeySchema::Object(MODEL_SWITCH_CONFIG_KEYS),
+    ),
     ("personality", ConfigKeySchema::Any),
     ("max_turns", ConfigKeySchema::Any),
     ("execution_mode", ConfigKeySchema::Any),
@@ -169,7 +172,10 @@ static ROOT_CONFIG_KEYS: &[(&str, ConfigKeySchema)] = &[
         "platform_toolsets",
         ConfigKeySchema::Map(&ANY_CONFIG_KEY_SCHEMA),
     ),
-    ("delegation", ConfigKeySchema::Object(DELEGATION_CONFIG_KEYS)),
+    (
+        "delegation",
+        ConfigKeySchema::Object(DELEGATION_CONFIG_KEYS),
+    ),
     ("session", ConfigKeySchema::Object(SESSION_CONFIG_KEYS)),
     ("sessions", ConfigKeySchema::Object(SESSIONS_CONFIG_KEYS)),
     ("streaming", ConfigKeySchema::Object(STREAMING_CONFIG_KEYS)),
@@ -498,13 +504,7 @@ fn validate_config_schema(
                         &key_path,
                     ));
                 };
-                validate_config_schema(
-                    value,
-                    child_schema,
-                    document_label,
-                    path,
-                    &key_path,
-                )?;
+                validate_config_schema(value, child_schema, document_label, path, &key_path)?;
             }
             Ok(())
         }
@@ -519,13 +519,7 @@ fn validate_config_schema(
                 } else {
                     format!("{parent_path}.{key}")
                 };
-                validate_config_schema(
-                    value,
-                    value_schema,
-                    document_label,
-                    path,
-                    &key_path,
-                )?;
+                validate_config_schema(value, value_schema, document_label, path, &key_path)?;
             }
             Ok(())
         }
@@ -535,13 +529,7 @@ fn validate_config_schema(
             };
             for (index, item) in items.iter().enumerate() {
                 let item_path = format!("{parent_path}[{index}]");
-                validate_config_schema(
-                    item,
-                    item_schema,
-                    document_label,
-                    path,
-                    &item_path,
-                )?;
+                validate_config_schema(item, item_schema, document_label, path, &item_path)?;
             }
             Ok(())
         }
@@ -1128,7 +1116,10 @@ fn read_config_yaml_as_json(path: &Path) -> Result<Option<serde_json::Value>, Co
         return Ok(Some(serde_json::json!({})));
     }
     let value = serde_yaml::from_str::<serde_json::Value>(&contents).map_err(|err| {
-        ConfigError::ParseError(format!("failed to parse config file {}: {err}", path.display()))
+        ConfigError::ParseError(format!(
+            "failed to parse config file {}: {err}",
+            path.display()
+        ))
     })?;
     if value.is_object() {
         Ok(Some(value))
@@ -1421,16 +1412,14 @@ fn diagnostic_layer_from_presence(
             source,
             message: error.to_string(),
         }),
-        ExecutionModeLayerPresence::Value(value) => validate_raw_execution_mode(
-            value,
-            source,
-            path.as_deref(),
-        )
-        .err()
-        .map(|error| ExecutionModeLayerError {
-            source,
-            message: error.to_string(),
-        }),
+        ExecutionModeLayerPresence::Value(value) => {
+            validate_raw_execution_mode(value, source, path.as_deref())
+                .err()
+                .map(|error| ExecutionModeLayerError {
+                    source,
+                    message: error.to_string(),
+                })
+        }
     };
     ExecutionModeLayerDiagnostic {
         source,
@@ -1511,10 +1500,7 @@ pub fn diagnose_runtime_execution_mode(
         None,
     );
     let mut layers = [built_in, profile, config_file, environment, cli];
-    let error = layers
-        .iter()
-        .skip(1)
-        .find_map(|layer| layer.error.clone());
+    let error = layers.iter().skip(1).find_map(|layer| layer.error.clone());
     if let Some(error) = error {
         return ResolvedConfigDiagnostic {
             mode: None,
@@ -1543,10 +1529,7 @@ pub fn diagnose_runtime_execution_mode(
                 source: error.layer,
                 message: error.to_string(),
             };
-            if let Some(layer) = layers
-                .iter_mut()
-                .find(|layer| layer.source == error.layer)
-            {
+            if let Some(layer) = layers.iter_mut().find(|layer| layer.source == error.layer) {
                 layer.error = Some(layer_error.clone());
             }
             ResolvedConfigDiagnostic {
@@ -1722,9 +1705,9 @@ fn validate_execution_mode_profile_name(raw: &str) -> Result<String, ConfigError
         || name == ".."
         || name.contains('/')
         || name.contains('\\')
-        || !name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
     {
         return Err(ConfigError::ValidationError(
             "selected profile name is invalid".to_string(),
@@ -1735,7 +1718,9 @@ fn validate_execution_mode_profile_name(raw: &str) -> Result<String, ConfigError
 
 fn validate_managed_overlay_keys(overlay: &serde_json::Value) -> Result<(), ConfigError> {
     let value = serde_yaml::to_value(overlay).map_err(|err| {
-        ConfigError::ParseError(format!("failed to inspect managed config overlay keys: {err}"))
+        ConfigError::ParseError(format!(
+            "failed to inspect managed config overlay keys: {err}"
+        ))
     })?;
     validate_config_schema(
         &value,
@@ -1753,7 +1738,9 @@ fn apply_managed_config_overlay(
     validate_managed_overlay_keys(overlay)?;
     let original = config.clone();
     let mut base = serde_json::to_value(&*config).map_err(|err| {
-        ConfigError::ParseError(format!("failed to serialize base config for managed overlay: {err}"))
+        ConfigError::ParseError(format!(
+            "failed to serialize base config for managed overlay: {err}"
+        ))
     })?;
     let overlay_execution_mode_is_null = overlay
         .get("execution_mode")
@@ -1895,7 +1882,6 @@ pub fn load_from_yaml(path: &Path) -> Result<GatewayConfig, ConfigError> {
     load_from_yaml_inner(path, true, ConfigDocumentStrictness::Strict)
 }
 
-
 fn load_from_yaml_preserving_env_refs_with_options(
     path: &Path,
     options: UserConfigLoadOptions,
@@ -1913,10 +1899,16 @@ fn load_from_yaml_inner(
     strictness: ConfigDocumentStrictness,
 ) -> Result<GatewayConfig, ConfigError> {
     let contents = std::fs::read_to_string(path).map_err(|err| {
-        ConfigError::ParseError(format!("failed to read config file {}: {err}", path.display()))
+        ConfigError::ParseError(format!(
+            "failed to read config file {}: {err}",
+            path.display()
+        ))
     })?;
     let mut root: serde_yaml::Value = serde_yaml::from_str(&contents).map_err(|err| {
-        ConfigError::ParseError(format!("failed to parse config file {}: {err}", path.display()))
+        ConfigError::ParseError(format!(
+            "failed to parse config file {}: {err}",
+            path.display()
+        ))
     })?;
     validate_config_document_keys(&root, strictness, "config", path)?;
     if expand_env_refs {
@@ -1942,10 +1934,7 @@ fn load_from_yaml_inner(
     )?;
     normalize_platform_aliases(&mut config);
     validate_config(&config).map_err(|err| {
-        ConfigError::ValidationError(format!(
-            "invalid config file {}: {err}",
-            path.display()
-        ))
+        ConfigError::ValidationError(format!("invalid config file {}: {err}", path.display()))
     })?;
     Ok(config)
 }
@@ -2019,13 +2008,10 @@ fn is_non_env_secret_reference(reference: &str) -> bool {
         return false;
     };
     !reference.starts_with("env:")
-        && source
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| match index {
-                0 => byte.is_ascii_lowercase(),
-                _ => byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-',
-            })
+        && source.bytes().enumerate().all(|(index, byte)| match index {
+            0 => byte.is_ascii_lowercase(),
+            _ => byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-',
+        })
 }
 
 fn mark_platform_enabled_explicit(root: &mut serde_yaml::Value, platform: &str) {
@@ -2212,10 +2198,16 @@ include!("loader/config_write.rs");
 /// Load a GatewayConfig from a JSON file in strict mode.
 pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
     let contents = std::fs::read_to_string(path).map_err(|err| {
-        ConfigError::ParseError(format!("failed to read config file {}: {err}", path.display()))
+        ConfigError::ParseError(format!(
+            "failed to read config file {}: {err}",
+            path.display()
+        ))
     })?;
     let value: serde_json::Value = serde_json::from_str(&contents).map_err(|err| {
-        ConfigError::ParseError(format!("failed to parse config file {}: {err}", path.display()))
+        ConfigError::ParseError(format!(
+            "failed to parse config file {}: {err}",
+            path.display()
+        ))
     })?;
     let yaml_value = serde_yaml::to_value(&value).map_err(|err| {
         ConfigError::ParseError(format!(
@@ -2238,10 +2230,7 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
     )?;
     normalize_platform_aliases(&mut config);
     validate_config(&config).map_err(|err| {
-        ConfigError::ValidationError(format!(
-            "invalid config file {}: {err}",
-            path.display()
-        ))
+        ConfigError::ValidationError(format!("invalid config file {}: {err}", path.display()))
     })?;
     Ok(config)
 }

@@ -159,7 +159,6 @@ fn summarize_value_for_dispatch_policy(value: &Value) -> Value {
     summary
 }
 
-
 fn value_type(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",

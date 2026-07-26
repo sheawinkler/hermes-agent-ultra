@@ -4,8 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use regex::Regex;
 use hermes_core::{Message, MessageRole};
+use regex::Regex;
 
 /// Image reference extracted from generated markdown / HTML.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,11 +265,10 @@ fn markdown_code_ranges(text: &str) -> Vec<(usize, usize)> {
 
     while line_start < bytes.len() {
         let (line_end, next_line) = markdown_line_bounds(bytes, line_start);
-        let opener = markdown_fence_marker(bytes, line_start, line_end).filter(
-            |(marker, _, marker_end)| {
+        let opener =
+            markdown_fence_marker(bytes, line_start, line_end).filter(|(marker, _, marker_end)| {
                 *marker != b'`' || !bytes[*marker_end..line_end].contains(&b'`')
-            },
-        );
+            });
         let Some((marker, minimum_run, _)) = opener else {
             line_start = next_line;
             continue;
@@ -278,8 +277,7 @@ fn markdown_code_ranges(text: &str) -> Vec<(usize, usize)> {
         let mut candidate_start = next_line;
         let mut fence_end = bytes.len();
         while candidate_start < bytes.len() {
-            let (candidate_end, following_line) =
-                markdown_line_bounds(bytes, candidate_start);
+            let (candidate_end, following_line) = markdown_line_bounds(bytes, candidate_start);
             if let Some((candidate_marker, run, marker_end)) =
                 markdown_fence_marker(bytes, candidate_start, candidate_end)
             {
@@ -329,10 +327,7 @@ fn markdown_fence_marker(
     line_end: usize,
 ) -> Option<(u8, usize, usize)> {
     let mut marker_start = line_start;
-    while marker_start < line_end
-        && marker_start - line_start < 3
-        && bytes[marker_start] == b' '
-    {
+    while marker_start < line_end && marker_start - line_start < 3 && bytes[marker_start] == b' ' {
         marker_start += 1;
     }
     let marker = *bytes.get(marker_start)?;
@@ -380,10 +375,7 @@ fn append_inline_code_range_segment(
     let mut runs = Vec::new();
     let mut cursor = start;
     while cursor < end {
-        let Some(relative) = bytes[cursor..end]
-            .iter()
-            .position(|byte| *byte == b'`')
-        else {
+        let Some(relative) = bytes[cursor..end].iter().position(|byte| *byte == b'`') else {
             break;
         };
         let run_start = cursor + relative;
@@ -429,8 +421,8 @@ fn append_inline_image_segment(output: &mut String, segment: &str, normalize_sea
         output.push_str(segment);
         return;
     }
-    let should_trim_horizontal = output.is_empty()
-        || matches!(output.as_bytes().last(), Some(b' ' | b'\t'));
+    let should_trim_horizontal =
+        output.is_empty() || matches!(output.as_bytes().last(), Some(b' ' | b'\t'));
     if should_trim_horizontal {
         let leading_horizontal = segment
             .as_bytes()
@@ -472,11 +464,10 @@ fn terminal_unclosed_fence_closer(text: &str) -> Option<String> {
     let mut line_start = 0;
     while line_start < bytes.len() {
         let (line_end, next_line) = markdown_line_bounds(bytes, line_start);
-        let opener = markdown_fence_marker(bytes, line_start, line_end).filter(
-            |(marker, _, marker_end)| {
+        let opener =
+            markdown_fence_marker(bytes, line_start, line_end).filter(|(marker, _, marker_end)| {
                 *marker != b'`' || !bytes[*marker_end..line_end].contains(&b'`')
-            },
-        );
+            });
         let Some((marker, minimum_run, _)) = opener else {
             line_start = next_line;
             continue;
@@ -485,8 +476,7 @@ fn terminal_unclosed_fence_closer(text: &str) -> Option<String> {
         let mut candidate_start = next_line;
         let mut closed_at = None;
         while candidate_start < bytes.len() {
-            let (candidate_end, following_line) =
-                markdown_line_bounds(bytes, candidate_start);
+            let (candidate_end, following_line) = markdown_line_bounds(bytes, candidate_start);
             if let Some((candidate_marker, run, marker_end)) =
                 markdown_fence_marker(bytes, candidate_start, candidate_end)
             {
@@ -593,10 +583,8 @@ pub fn extract_current_turn_gateway_reply(messages: &[Message]) -> String {
 
     let (_, existing_media) = extract_media_markers(&reply);
     let reply_has_voice_directive = has_active_voice_directive(&reply);
-    let mut seen_paths: HashSet<String> = existing_media
-        .into_iter()
-        .map(|media| media.path)
-        .collect();
+    let mut seen_paths: HashSet<String> =
+        existing_media.into_iter().map(|media| media.path).collect();
     let mut tool_requested_voice = false;
     let mut new_paths = Vec::new();
 
@@ -655,17 +643,16 @@ fn append_media_marker_segment(output: &mut String, segment: &str, normalize_sea
         return;
     }
 
-    let leading_horizontal = if output.is_empty()
-        || matches!(output.as_bytes().last(), Some(b' ' | b'\t'))
-    {
-        segment
-            .as_bytes()
-            .iter()
-            .take_while(|byte| **byte == b' ' || **byte == b'\t')
-            .count()
-    } else {
-        0
-    };
+    let leading_horizontal =
+        if output.is_empty() || matches!(output.as_bytes().last(), Some(b' ' | b'\t')) {
+            segment
+                .as_bytes()
+                .iter()
+                .take_while(|byte| **byte == b' ' || **byte == b'\t')
+                .count()
+        } else {
+            0
+        };
     let segment = &segment[leading_horizontal..];
     let trailing_breaks = trailing_line_break_count(output);
     let leading_breaks = leading_line_break_count(segment);
@@ -697,8 +684,7 @@ fn leading_line_break_count(value: &str) -> usize {
         if bytes[cursor] == b'\n' {
             cursor += 1;
             count += 1;
-        } else if bytes[cursor] == b'\r'
-            && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
+        } else if bytes[cursor] == b'\r' && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
         {
             cursor += 2;
             count += 1;
@@ -716,8 +702,7 @@ fn byte_offset_after_line_breaks(value: &str, count: usize) -> usize {
     while cursor < bytes.len() && consumed < count {
         if bytes[cursor] == b'\n' {
             cursor += 1;
-        } else if bytes[cursor] == b'\r'
-            && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
+        } else if bytes[cursor] == b'\r' && bytes.get(cursor + 1).is_some_and(|byte| *byte == b'\n')
         {
             cursor += 2;
         } else {
@@ -833,7 +818,6 @@ mod tests {
         ogg
     }
 
-
     #[test]
     fn test_split_long_message_short() {
         let chunks = split_long_message("hello world", 100);
@@ -869,7 +853,6 @@ mod tests {
         assert_eq!(urls.len(), 2);
         assert!(urls[0].starts_with("https://"));
     }
-
 
     #[test]
     fn test_extract_inline_images_markdown_and_html() {
@@ -941,8 +924,7 @@ mod tests {
         assert_eq!(consecutive, "");
         assert_eq!(consecutive_images.len(), 2);
 
-        let (multiline, _) =
-            extract_inline_images("A\n![one](https://cdn.example.com/one.png)\nB");
+        let (multiline, _) = extract_inline_images("A\n![one](https://cdn.example.com/one.png)\nB");
         assert_eq!(multiline, "A\n\nB");
     }
 
@@ -1193,17 +1175,11 @@ mod tests {
     fn current_turn_gateway_reply_does_not_scan_arbitrary_tool_text() {
         let messages = vec![
             Message::user("ordinary tool"),
-            Message::tool_result(
-                "other-tool",
-                r#"{"note":"MEDIA:/tmp/not-an-artifact.ogg"}"#,
-            ),
+            Message::tool_result("other-tool", r#"{"note":"MEDIA:/tmp/not-an-artifact.ogg"}"#),
             Message::assistant("No media."),
         ];
 
-        assert_eq!(
-            extract_current_turn_gateway_reply(&messages),
-            "No media."
-        );
+        assert_eq!(extract_current_turn_gateway_reply(&messages), "No media.");
     }
 
     #[test]

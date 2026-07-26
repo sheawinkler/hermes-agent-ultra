@@ -20,19 +20,18 @@ use super::types::{
     AppendKey, AppendLease, AppendReceipt, AppendRequest, AppendReservation,
     ArtifactDegradationReason, ArtifactPhysicalState, ArtifactReferenceState,
     ArtifactReferenceStatus, ArtifactStateReason, ArtifactStateTransition,
-    BranchReplaySourceSnapshot, CanonicalJson,
-    ClaimNext, CreatedRun, DeliveryCompletion, DeliveryCompletionReceipt, DeliveryEvidence,
-    DeliveryFailureReason, Destination, DigestAbsence, DownstreamIdempotencyKey,
-    DurableDeliveryReceipt, EffectIntent, EventId, ExactReplayState, ExactReplayStatus, LeaseToken,
-    NonResumableEffectAttempt, NonResumableEffectLease, NonResumableEffectRecord,
-    NonResumableEffectSnapshot, NonResumableEffectState, NonResumableIdempotencyKey, OutboxLease,
-    OutboxRecord, OutboxRowId, OutboxState, PrivateFingerprint, ProvenanceDigest,
-    ReplayAppendContract, ReplayArtifactFidelity, ReplayObligationFidelity,
-    ReplayObligationSnapshot, ReplayOperationKind, ReplayOperationOutcome, ReplayOperationPhase,
-    RunExecutionCertification, RunExit, RunHeader, RunId, RunOutcome, RunOwnerId, RunOwnerLease,
-    RunProvenance, RunStart, RunStatus, SealedArtifactRef, SessionId, SessionRunEvent,
-    SessionRunEventKind, Sha256Digest, StaleRunRecovery, TerminalReason,
-    CANONICALIZATION_ALGORITHM, CANONICALIZATION_VERSION,
+    BranchReplaySourceSnapshot, CanonicalJson, ClaimNext, CreatedRun, DeliveryCompletion,
+    DeliveryCompletionReceipt, DeliveryEvidence, DeliveryFailureReason, Destination, DigestAbsence,
+    DownstreamIdempotencyKey, DurableDeliveryReceipt, EffectIntent, EventId, ExactReplayState,
+    ExactReplayStatus, LeaseToken, NonResumableEffectAttempt, NonResumableEffectLease,
+    NonResumableEffectRecord, NonResumableEffectSnapshot, NonResumableEffectState,
+    NonResumableIdempotencyKey, OutboxLease, OutboxRecord, OutboxRowId, OutboxState,
+    PrivateFingerprint, ProvenanceDigest, ReplayAppendContract, ReplayArtifactFidelity,
+    ReplayObligationFidelity, ReplayObligationSnapshot, ReplayOperationKind,
+    ReplayOperationOutcome, ReplayOperationPhase, RunExecutionCertification, RunExit, RunHeader,
+    RunId, RunOutcome, RunOwnerId, RunOwnerLease, RunProvenance, RunStart, RunStatus,
+    SealedArtifactRef, SessionId, SessionRunEvent, SessionRunEventKind, Sha256Digest,
+    StaleRunRecovery, TerminalReason, CANONICALIZATION_ALGORITHM, CANONICALIZATION_VERSION,
 };
 use crate::run_export::{LedgerManifestSnapshot, LedgerOutboxSnapshot, LedgerRunSnapshot};
 use crate::run_runtime::CertifiedEffectIntent;
@@ -174,7 +173,9 @@ fn validate_delivery_evidence_binding(
         ReplayArtifactFidelity::ExactPrivate => {
             delivery_result_exact_evidence_identity(lease, completion)
         }
-        ReplayArtifactFidelity::MetadataOnly => delivery_result_evidence_identity(lease, completion),
+        ReplayArtifactFidelity::MetadataOnly => {
+            delivery_result_evidence_identity(lease, completion)
+        }
     };
     if actual != expected {
         return Err(LedgerError::IntegrityViolation(
@@ -420,13 +421,8 @@ impl RunLedger {
     ) -> LedgerResult<CreatedRun> {
         let mut connection = self.factory.open()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let created = self.create_run_and_start_tx(
-            &transaction,
-            mode,
-            owner_id,
-            start,
-            start_artifact,
-        )?;
+        let created =
+            self.create_run_and_start_tx(&transaction, mode, owner_id, start, start_artifact)?;
         transaction.commit()?;
         Ok(created)
     }
@@ -449,12 +445,13 @@ impl RunLedger {
             ..
         } = start;
         let (start_identity, start_sealed_artifact_ref, start_fidelity) = match start_artifact {
-            Some((identity, reference, fidelity)) => (Some(identity), Some(reference), Some(fidelity)),
+            Some((identity, reference, fidelity)) => {
+                (Some(identity), Some(reference), Some(fidelity))
+            }
             None => (None, None, None),
         };
-        let start_exact_private =
-            start_fidelity == Some(ReplayArtifactFidelity::ExactPrivate)
-                && start_sealed_artifact_ref.is_some();
+        let start_exact_private = start_fidelity == Some(ReplayArtifactFidelity::ExactPrivate)
+            && start_sealed_artifact_ref.is_some();
         let provenance_jcs = provenance.canonical_json()?;
         let (prompt_digest, prompt_absence) = provenance.prompt_digest().to_db();
         let (input_digest, input_absence) = provenance.input_digest().to_db();
@@ -596,7 +593,11 @@ impl RunLedger {
                     run_id, exact_replay, state, state_reason, transition_sequence,
                     latched_at_ms, latched_by_event_id
                  ) VALUES (?1, 0, 'unavailable_sanitized', 'sanitized', 1, ?2, ?3)",
-                params![run_id.to_string(), started_at_ms, start_event_id.to_string()],
+                params![
+                    run_id.to_string(),
+                    started_at_ms,
+                    start_event_id.to_string()
+                ],
             )?;
             transaction.execute(
                 "INSERT INTO session_run_replay_obligations (
@@ -965,7 +966,9 @@ impl RunLedger {
                     event_id.to_string(),
                     contract.operation.as_str(),
                     contract.phase.as_str(),
-                    contract.resolution_source_event_id.map(|value| value.to_string()),
+                    contract
+                        .resolution_source_event_id
+                        .map(|value| value.to_string()),
                     request.replay_fidelity.as_str(),
                     now,
                 ],

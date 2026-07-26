@@ -814,9 +814,9 @@ impl AlphaRuntimeV1Adapter {
             } else {
                 DeliveryEvidence::new(identity, reference)
             };
-            Ok::<_, AlphaRuntimeV1Error>(ledger.complete_delivery_with_evidence(
-                mode, lease, completion, evidence,
-            )?)
+            Ok::<_, AlphaRuntimeV1Error>(
+                ledger.complete_delivery_with_evidence(mode, lease, completion, evidence)?,
+            )
         })
     }
 }

@@ -583,7 +583,6 @@ CREATE TABLE session_run_replay_obligations (
 )
 "#;
 
-
 const SESSION_RUN_REPLAY_OBLIGATIONS_DDL: &str = r#"
 CREATE TABLE session_run_replay_obligations (
     run_id TEXT NOT NULL REFERENCES session_runs(run_id) ON DELETE RESTRICT,
@@ -1057,7 +1056,11 @@ const V4_TABLES: &[TableSpec] = &[
             "state_changed_at_ms",
         ],
         foreign_keys: &[
-            ForeignKeySpec::new("session_run_artifact_objects", "envelope_digest", "envelope_digest"),
+            ForeignKeySpec::new(
+                "session_run_artifact_objects",
+                "envelope_digest",
+                "envelope_digest",
+            ),
             ForeignKeySpec::new("session_run_events", "event_id", "event_id"),
             ForeignKeySpec::new("session_runs", "run_id", "run_id"),
         ],
@@ -1094,7 +1097,11 @@ const V4_TABLES: &[TableSpec] = &[
             "created_at_ms",
         ],
         foreign_keys: &[
-            ForeignKeySpec::new("session_run_artifact_refs", "envelope_digest", "envelope_digest"),
+            ForeignKeySpec::new(
+                "session_run_artifact_refs",
+                "envelope_digest",
+                "envelope_digest",
+            ),
             ForeignKeySpec::new("session_run_artifact_refs", "event_id", "event_id"),
             ForeignKeySpec::new("session_run_events", "audit_event_id", "event_id"),
             ForeignKeySpec::new("session_runs", "run_id", "run_id"),
@@ -1246,7 +1253,6 @@ const V6_TABLES: &[TableSpec] = &[
     },
 ];
 const V6_INDEXES: &[IndexSpec] = V5_INDEXES;
-
 
 // Do not derive this from the current event definition: a v3 marker must
 // continue to validate against the exact frozen v3 DDL before v3→v4 rebuild.
@@ -1534,7 +1540,8 @@ impl LedgerConnectionFactory {
         let mut connection = self.open_configured()?;
         suspend_foreign_keys(&connection)?;
         let migration = (|| {
-            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             ensure_state_meta(&transaction)?;
             let schema_marker = read_meta(&transaction, "run_ledger_schema_version")?;
             let primary_marker = read_meta(&transaction, "ledger_primary")?;
@@ -2121,10 +2128,7 @@ fn restore_foreign_keys(connection: &Connection) -> LedgerResult<()> {
     Ok(())
 }
 
-fn finalize_v6_cutover(
-    transaction: Transaction<'_>,
-    abort: MigrationAbort,
-) -> LedgerResult<()> {
+fn finalize_v6_cutover(transaction: Transaction<'_>, abort: MigrationAbort) -> LedgerResult<()> {
     validate_schema(&transaction)?;
     validate_foreign_key_integrity(&transaction)?;
     if abort == MigrationAbort::AfterSchemaValidation {
@@ -2148,10 +2152,7 @@ fn finalize_v6_cutover(
         return Err(LedgerError::MigrationAborted);
     }
     validate_markers_and_schema(&transaction)?;
-    abort_at(
-        abort,
-        MigrationCheckpoint::before(MigrationStep::Commit),
-    )?;
+    abort_at(abort, MigrationCheckpoint::before(MigrationStep::Commit))?;
     transaction.commit()?;
     Ok(())
 }
@@ -2317,14 +2318,10 @@ fn migrate_v2_to_v3_schema(
     }
     validate_v2_artifact_reference_aliases(transaction)?;
 
-    run_migration_operation(
-        abort,
-        MigrationStep::DropV2EventSequenceIndex,
-        || {
-            transaction.execute_batch("DROP INDEX idx_session_run_events_run_sequence")?;
-            Ok(())
-        },
-    )?;
+    run_migration_operation(abort, MigrationStep::DropV2EventSequenceIndex, || {
+        transaction.execute_batch("DROP INDEX idx_session_run_events_run_sequence")?;
+        Ok(())
+    })?;
     let rebuilt_events_sql = SESSION_RUN_EVENTS_V3_DDL.replacen(
         "CREATE TABLE session_run_events",
         "CREATE TABLE session_run_events_v3_rebuild",
@@ -2457,14 +2454,10 @@ fn migrate_v3_to_v4_schema(
             "cannot migrate over unexpected table {REBUILT_EVENTS_TABLE:?}"
         )));
     }
-    run_migration_operation(
-        abort,
-        MigrationStep::DropV3EventSequenceIndex,
-        || {
-            transaction.execute_batch("DROP INDEX idx_session_run_events_run_sequence")?;
-            Ok(())
-        },
-    )?;
+    run_migration_operation(abort, MigrationStep::DropV3EventSequenceIndex, || {
+        transaction.execute_batch("DROP INDEX idx_session_run_events_run_sequence")?;
+        Ok(())
+    })?;
     let rebuilt_events_sql = SESSION_RUN_EVENTS_V4_DDL.replacen(
         "CREATE TABLE session_run_events",
         "CREATE TABLE session_run_events_v4_rebuild",
@@ -2600,7 +2593,6 @@ fn migrate_v5_to_v6_schema(transaction: &Transaction<'_>) -> LedgerResult<()> {
     Ok(())
 }
 
-
 fn validate_v2_artifact_reference_aliases(connection: &Connection) -> LedgerResult<()> {
     let conflict: Option<String> = connection
         .query_row(
@@ -2673,7 +2665,9 @@ pub(crate) fn validate_markers_and_schema(connection: &Connection) -> LedgerResu
             })
         }
         (Some(schema), Some(primary), Some(fingerprint))
-            if schema == "5" && primary == "1" && fingerprint == &expected_v5_schema_fingerprint() =>
+            if schema == "5"
+                && primary == "1"
+                && fingerprint == &expected_v5_schema_fingerprint() =>
         {
             validate_v5_schema(connection)?;
             Err(LedgerError::SchemaValidation(
@@ -2686,7 +2680,9 @@ pub(crate) fn validate_markers_and_schema(connection: &Connection) -> LedgerResu
             })
         }
         (Some(schema), Some(primary), Some(fingerprint))
-            if schema == "4" && primary == "1" && fingerprint == &expected_v4_schema_fingerprint() =>
+            if schema == "4"
+                && primary == "1"
+                && fingerprint == &expected_v4_schema_fingerprint() =>
         {
             validate_v4_schema(connection)?;
             Err(LedgerError::SchemaValidation(
@@ -2699,7 +2695,9 @@ pub(crate) fn validate_markers_and_schema(connection: &Connection) -> LedgerResu
             })
         }
         (Some(schema), Some(primary), Some(fingerprint))
-            if schema == "3" && primary == "1" && fingerprint == &expected_v3_schema_fingerprint() =>
+            if schema == "3"
+                && primary == "1"
+                && fingerprint == &expected_v3_schema_fingerprint() =>
         {
             validate_v3_schema(connection)?;
             Err(LedgerError::SchemaValidation(
@@ -2959,11 +2957,7 @@ fn expected_v1_schema_fingerprint() -> String {
     schema_fingerprint(V1_SCHEMA_FINGERPRINT_DOMAIN, V1_TABLES, V1_INDEXES)
 }
 
-fn schema_fingerprint(
-    domain: &[u8],
-    tables: &[TableSpec],
-    indexes: &[IndexSpec],
-) -> String {
+fn schema_fingerprint(domain: &[u8], tables: &[TableSpec], indexes: &[IndexSpec]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     for table in tables {

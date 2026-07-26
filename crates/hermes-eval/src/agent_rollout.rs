@@ -194,7 +194,10 @@ mod tests {
         assert_eq!(telemetry.total_turns, Telemetry::Available(2));
         assert!(matches!(telemetry.tokens_input, Telemetry::Unavailable));
         assert!(matches!(telemetry.tokens_output, Telemetry::Unavailable));
-        assert!(matches!(telemetry.cost_usd.as_ref(), Telemetry::Unavailable));
+        assert!(matches!(
+            telemetry.cost_usd.as_ref(),
+            Telemetry::Unavailable
+        ));
         assert!(matches!(telemetry.retry_count, Telemetry::Unavailable));
         assert_eq!(
             telemetry.provenance,
@@ -221,7 +224,10 @@ mod tests {
         assert_eq!(telemetry.tokens_input, Telemetry::Available(13));
         assert_eq!(telemetry.tokens_output, Telemetry::Available(7));
         assert_eq!(telemetry.total_turns, Telemetry::Available(2));
-        assert!(matches!(telemetry.cost_usd.as_ref(), Telemetry::Unavailable));
+        assert!(matches!(
+            telemetry.cost_usd.as_ref(),
+            Telemetry::Unavailable
+        ));
     }
 
     #[tokio::test]

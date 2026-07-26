@@ -3,9 +3,9 @@ use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::session::SessionManager;
 use async_trait::async_trait;
 use hermes_config::session::SessionConfig;
-use hermes_core::Skill;
 use hermes_core::errors::PartialDelivery;
 use hermes_core::traits::NativeMediaFailureClass;
+use hermes_core::Skill;
 use hermes_skills::{
     store_local_owner_keyring_file, FileSkillStore, LocalOwnerKeyring, LocalOwnerSigningKey,
     SkillStore,
@@ -156,12 +156,7 @@ impl Drop for HermesHomeEnvGuard {
     }
 }
 
-async fn install_attested_local_skill(
-    root: &Path,
-    name: &str,
-    content: &str,
-    description: &str,
-) {
+async fn install_attested_local_skill(root: &Path, name: &str, content: &str, description: &str) {
     std::fs::create_dir_all(root).expect("create skill root");
     let home = root.parent().expect("skills root has a home");
     let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(home)
@@ -179,18 +174,14 @@ async fn install_attested_local_skill(
     }
 
     let signer = LocalOwnerSigningKey::from_seed([7; 32]);
-    let local_owner_keys = vec![signer.trusted_key(
-        "gateway-test-owner",
-        "gateway-test-key",
-        true,
-    )];
+    let local_owner_keys = vec![signer.trusted_key("gateway-test-owner", "gateway-test-key", true)];
     let keyring =
         LocalOwnerKeyring::new(local_owner_keys.clone()).expect("create local owner keyring");
     store_local_owner_keyring_file(root, layout.local_owner_keyring_file(), &keyring)
         .expect("store local owner keyring");
 
-    let store = FileSkillStore::new(root.to_path_buf())
-        .with_trusted_local_owner_keys(local_owner_keys);
+    let store =
+        FileSkillStore::new(root.to_path_buf()).with_trusted_local_owner_keys(local_owner_keys);
     store
         .save(&Skill {
             name: name.to_string(),
@@ -298,9 +289,7 @@ fn gateway_runtime_context_derives_private_subject_and_rejects_missing_identity(
     missing_platform.platform.clear();
     assert!(matches!(
         missing_platform.memory_subject(),
-        Err(hermes_core::MemorySubjectError::MissingAuthenticatedField {
-            field: "platform"
-        })
+        Err(hermes_core::MemorySubjectError::MissingAuthenticatedField { field: "platform" })
     ));
 
     let mut delimiter = context.clone();
@@ -967,7 +956,10 @@ impl PlatformAdapter for NativeMediaFailureAdapter {
         file_path: &str,
         _caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        self.file_attempts.lock().unwrap().push(file_path.to_string());
+        self.file_attempts
+            .lock()
+            .unwrap()
+            .push(file_path.to_string());
         Err(self.media_failure())
     }
 
@@ -981,10 +973,7 @@ impl PlatformAdapter for NativeMediaFailureAdapter {
         self.send_file(chat_id, file_path, caption).await
     }
 
-    fn classify_native_media_failure(
-        &self,
-        _error: &GatewayError,
-    ) -> NativeMediaFailureClass {
+    fn classify_native_media_failure(&self, _error: &GatewayError) -> NativeMediaFailureClass {
         match self.failure {
             NativeMediaFixtureFailure::ExplicitlyUnsupported => {
                 NativeMediaFailureClass::Unsupported
@@ -1060,7 +1049,6 @@ impl PlatformAdapter for ThreadOptionTestAdapter {
     ) -> Result<(), GatewayError> {
         Ok(())
     }
-
 
     fn is_running(&self) -> bool {
         true
@@ -1714,7 +1702,10 @@ async fn gateway_stop_all_attempts_every_adapter_and_aggregates_sanitized_failur
         1,
         "a panicking adapter is attempted once"
     );
-    assert!(summary.contains("failing:auth"), "missing typed error: {summary}");
+    assert!(
+        summary.contains("failing:auth"),
+        "missing typed error: {summary}"
+    );
     assert!(
         summary.contains("panicking:panic"),
         "missing typed panic: {summary}"
@@ -1836,10 +1827,7 @@ async fn gateway_pre_admission_capacity_returns_typed_backpressure_without_handl
         .store(MAX_INGRESS_WORKERS, std::sync::atomic::Ordering::SeqCst);
 
     let outcome = gw
-        .route_message_from_sender_outcome(
-            &test_incoming("capacity"),
-            IncomingSender::unknown(),
-        )
+        .route_message_from_sender_outcome(&test_incoming("capacity"), IncomingSender::unknown())
         .await
         .expect("pre-admission backpressure is a typed route result");
 
@@ -2093,7 +2081,10 @@ async fn gateway_send_message_extracts_media_markers_and_delivers_files() {
 
     assert_eq!(
         messages.lock().unwrap().as_slice(),
-        &[("chat1".to_string(), "Here is the result.\n\nDone".to_string())]
+        &[(
+            "chat1".to_string(),
+            "Here is the result.\n\nDone".to_string()
+        )]
     );
     let files = files.lock().unwrap();
     assert_eq!(files.len(), 3);
@@ -2296,7 +2287,8 @@ async fn memory_forget_test_gateway(
 #[tokio::test]
 async fn authenticated_memory_forget_is_private_to_direct_and_group_subjects() {
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let (gateway, sent) = memory_forget_test_gateway(seen.clone(), verified_memory_forget_response()).await;
+    let (gateway, sent) =
+        memory_forget_test_gateway(seen.clone(), verified_memory_forget_response()).await;
 
     gateway
         .route_message_from_sender(&test_incoming("/memory forget"), IncomingSender::human())
@@ -2316,8 +2308,14 @@ async fn authenticated_memory_forget_is_private_to_direct_and_group_subjects() {
     assert_eq!(contexts.len(), 2);
     let direct_subject = contexts[0].memory_subject().expect("direct subject");
     let group_subject = contexts[1].memory_subject().expect("group subject");
-    assert_eq!(direct_subject.visibility(), hermes_core::MemoryVisibility::Private);
-    assert_eq!(group_subject.visibility(), hermes_core::MemoryVisibility::Private);
+    assert_eq!(
+        direct_subject.visibility(),
+        hermes_core::MemoryVisibility::Private
+    );
+    assert_eq!(
+        group_subject.visibility(),
+        hermes_core::MemoryVisibility::Private
+    );
     assert_ne!(direct_subject, group_subject);
     drop(contexts);
     let replies = sent.lock().expect("gateway replies");
@@ -2370,7 +2368,12 @@ async fn memory_forget_command_cannot_be_shadowed_by_a_quick_command() {
         .expect("memory command");
 
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let reply = sent.lock().expect("gateway replies").pop().expect("reply").1;
+    let reply = sent
+        .lock()
+        .expect("gateway replies")
+        .pop()
+        .expect("reply")
+        .1;
     assert!(reply.contains("Persistent memory was removed"));
     assert!(!reply.contains("Gateway status"));
 }
@@ -2378,7 +2381,8 @@ async fn memory_forget_command_cannot_be_shadowed_by_a_quick_command() {
 #[tokio::test]
 async fn memory_forget_rejects_spoofed_target_args_and_unauthenticated_or_missing_identity() {
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let (gateway, sent) = memory_forget_test_gateway(seen.clone(), verified_memory_forget_response()).await;
+    let (gateway, sent) =
+        memory_forget_test_gateway(seen.clone(), verified_memory_forget_response()).await;
 
     gateway
         .route_message_from_sender(
@@ -2436,7 +2440,12 @@ async fn incomplete_memory_forget_never_renders_success_and_keeps_provider_error
         .expect("incomplete command response");
 
     assert_eq!(seen.lock().expect("seen contexts").len(), 1);
-    let reply = sent.lock().expect("gateway replies").pop().expect("reply").1;
+    let reply = sent
+        .lock()
+        .expect("gateway replies")
+        .pop()
+        .expect("reply")
+        .1;
     assert!(!reply.contains("Persistent memory was removed"));
     assert!(!reply.to_ascii_lowercase().contains("erased"));
     assert!(reply.contains("remote: unsupported (forget)"));
@@ -2467,7 +2476,11 @@ fn verified_memory_export_response() -> GatewayMemoryExportResponse {
 async fn memory_export_test_gateway(
     seen: Arc<Mutex<Vec<GatewayRuntimeContext>>>,
     response: GatewayMemoryExportResponse,
-) -> (Gateway, Arc<Mutex<Vec<(String, String)>>>, tempfile::TempDir) {
+) -> (
+    Gateway,
+    Arc<Mutex<Vec<(String, String)>>>,
+    tempfile::TempDir,
+) {
     let temp = tempfile::tempdir().expect("export tempdir");
     let export_path = temp.path().join("committed-export.jsonl");
     std::fs::write(&export_path, b"{\"record\":\"verified export\"}\n")
@@ -2635,7 +2648,12 @@ async fn incomplete_memory_export_never_issues_or_renders_a_download_reference()
         .expect("incomplete export response");
 
     assert_eq!(seen.lock().expect("seen contexts").len(), 1);
-    let reply = sent.lock().expect("gateway replies").pop().expect("reply").1;
+    let reply = sent
+        .lock()
+        .expect("gateway replies")
+        .pop()
+        .expect("reply")
+        .1;
     assert!(reply.contains("Persistent-memory export was not completed"));
     assert!(reply.contains("Restore the configured memory provider"));
     assert!(!reply.contains("One-time download reference"));

@@ -56,10 +56,7 @@ const LEDGER_SCHEMA_DESCRIPTOR: &str = concat!(
 #[derive(Debug, Error)]
 pub enum ReleaseCandidateReceiptError {
     #[error("invalid {field}: {reason}")]
-    InvalidField {
-        field: &'static str,
-        reason: String,
-    },
+    InvalidField { field: &'static str, reason: String },
 
     #[error("canonical JSON encoding failed: {0}")]
     Canonicalization(String),
@@ -148,15 +145,31 @@ macro_rules! label_type {
     };
 }
 
-label_type!(ReleaseReceiptId, "receipt_id", "Immutable release receipt identifier.");
-label_type!(ReleaseTenantId, "tenant_id", "Authenticated tenant scope identifier.");
+label_type!(
+    ReleaseReceiptId,
+    "receipt_id",
+    "Immutable release receipt identifier."
+);
+label_type!(
+    ReleaseTenantId,
+    "tenant_id",
+    "Authenticated tenant scope identifier."
+);
 label_type!(
     AuthenticatedSubject,
     "authenticated_subject",
     "Authenticated principal within a tenant scope."
 );
-label_type!(ReleasePolicyId, "policy_id", "Frozen release-promotion policy identifier.");
-label_type!(ReleaseSigningKeyId, "key_id", "Trusted release-signing key identifier.");
+label_type!(
+    ReleasePolicyId,
+    "policy_id",
+    "Frozen release-promotion policy identifier."
+);
+label_type!(
+    ReleaseSigningKeyId,
+    "key_id",
+    "Trusted release-signing key identifier."
+);
 
 /// Canonical lowercase hexadecimal SHA-256 digest.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -173,11 +186,11 @@ impl ReleaseDigest {
                 "must be exactly 64 lowercase hexadecimal characters",
             ));
         }
-        if !value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
-            return Err(invalid(
-                "digest",
-                "must be lowercase hexadecimal",
-            ));
+        if !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(invalid("digest", "must be lowercase hexadecimal"));
         }
         Ok(Self(value))
     }
@@ -251,7 +264,6 @@ impl ReleaseRevisionAlgorithm {
         }
     }
 }
-
 
 /// Immutable repository, revision algorithm/commit, tree, and artifact identity
 /// for a release.
@@ -465,11 +477,7 @@ pub struct ReleaseSecurityEvidence {
 
 impl ReleaseSecurityEvidence {
     /// Creates complete security-report evidence.
-    pub fn new(
-        critical_findings: u64,
-        high_findings: u64,
-        report_digest: ReleaseDigest,
-    ) -> Self {
+    pub fn new(critical_findings: u64, high_findings: u64, report_digest: ReleaseDigest) -> Self {
         Self {
             critical_findings,
             high_findings,
@@ -624,8 +632,7 @@ pub fn exact_replay_evidence_from_verified_p3(
             "reconstruction_digest",
         ));
     }
-    if exact_run_evidence.policy_id()
-        != evaluation_evidence.signature_verification().policy_id()
+    if exact_run_evidence.policy_id() != evaluation_evidence.signature_verification().policy_id()
         || exact_run_evidence.policy_digest()
             != evaluation_evidence
                 .signature_verification()
@@ -639,8 +646,10 @@ pub fn exact_replay_evidence_from_verified_p3(
     if !matches!(
         evaluation_evidence.run_export_integrity(),
         RunExportIntegrityStatus::Verified
-    ) || !matches!(evaluation_evidence.terminal_validity(), TerminalValidity::Verified)
-    {
+    ) || !matches!(
+        evaluation_evidence.terminal_validity(),
+        TerminalValidity::Verified
+    ) {
         return Err(ReleaseCandidateReceiptError::P3Evidence(
             "exact evaluation receipt lacks verified export/terminal evidence".into(),
         ));
@@ -685,7 +694,9 @@ fn bind_inputs_to_verified_p3(
         || inputs.holdout.seed() != fixed_holdout.seed()
         || inputs.holdout.sample_count() != fixed_holdout.sample_count()
     {
-        return Err(ReleaseCandidateReceiptError::P3EvidenceMismatch("fixed_holdout"));
+        return Err(ReleaseCandidateReceiptError::P3EvidenceMismatch(
+            "fixed_holdout",
+        ));
     }
 
     let reproduction = evaluation_evidence.reproduction_artifact();
@@ -715,11 +726,9 @@ fn bind_inputs_to_verified_p3(
     .into_iter()
     .try_fold(0_u64, |total, count| {
         let value = required_p3_count(count)?;
-        total
-            .checked_add(value)
-            .ok_or_else(|| ReleaseCandidateReceiptError::P3Evidence(
-                "operation lineage total overflow".into(),
-            ))
+        total.checked_add(value).ok_or_else(|| {
+            ReleaseCandidateReceiptError::P3Evidence("operation lineage total overflow".into())
+        })
     })?;
     let derived_lineage = ReleaseOperationLineage::new(total_operations, total_operations)?;
     if inputs.operation_lineage != derived_lineage {
@@ -898,7 +907,10 @@ impl ReleasePromotionPolicy {
             ));
         }
         if policy.policy_digest != claimed_digest {
-            return Err(invalid("policy_digest", "does not match frozen policy settings"));
+            return Err(invalid(
+                "policy_digest",
+                "does not match frozen policy settings",
+            ));
         }
         Ok(policy)
     }
@@ -1126,7 +1138,6 @@ impl ReleaseCandidateReceipt {
         }
     }
 
-
     /// Parses a signed-wire candidate into an untrusted, private intermediate.
     /// It cannot create a verified wrapper without a fresh P3 binding.
     fn parse_untrusted_canonical_bytes(bytes: &[u8]) -> ReleaseCandidateReceiptResult<Self> {
@@ -1137,10 +1148,16 @@ impl ReleaseCandidateReceipt {
             ));
         }
         let raw: RawReceipt = serde_json::from_slice(bytes).map_err(|error| {
-            invalid("receipt_bytes", format!("must be a valid receipt object: {error}"))
+            invalid(
+                "receipt_bytes",
+                format!("must be a valid receipt object: {error}"),
+            )
         })?;
         if raw.schema != RELEASE_CANDIDATE_RECEIPT_SCHEMA {
-            return Err(invalid("schema", "is not the release-candidate receipt schema"));
+            return Err(invalid(
+                "schema",
+                "is not the release-candidate receipt schema",
+            ));
         }
         if raw.schema_version != RELEASE_CANDIDATE_RECEIPT_SCHEMA_VERSION {
             return Err(invalid(
@@ -1201,7 +1218,6 @@ pub(crate) fn release_candidate_receipt_fixture(
     ReleaseCandidateReceipt::from_bound_inputs(inputs, exact_replay_evidence)
 }
 
-
 /// Detached Ed25519 signature metadata for a canonical receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseCandidateReceiptEnvelope {
@@ -1234,7 +1250,10 @@ impl ReleaseCandidateReceiptEnvelope {
             ));
         }
         let raw: RawEnvelope = serde_json::from_slice(bytes).map_err(|error| {
-            invalid("envelope_bytes", format!("must be a valid envelope object: {error}"))
+            invalid(
+                "envelope_bytes",
+                format!("must be a valid envelope object: {error}"),
+            )
         })?;
         if raw.schema != RELEASE_CANDIDATE_RECEIPT_ENVELOPE_SCHEMA
             || raw.schema_version != RELEASE_CANDIDATE_RECEIPT_ENVELOPE_SCHEMA_VERSION
@@ -1490,7 +1509,9 @@ impl ReleaseCandidateReceiptLedger {
             )
             .optional()
             .map_err(|error| ReleaseCandidateReceiptError::Sqlite(error.to_string()))?
-            .ok_or_else(|| ReleaseCandidateReceiptError::Sqlite("conflicting row disappeared".into()))?;
+            .ok_or_else(|| {
+                ReleaseCandidateReceiptError::Sqlite("conflicting row disappeared".into())
+            })?;
         if existing.0 == receipt.receipt_digest.as_str()
             && existing.1 == verified.canonical_receipt_bytes
             && existing.2 == verified.canonical_envelope_bytes
@@ -1702,9 +1723,8 @@ fn signature_message(
             .and_then(|total| total.checked_add(length))
             .ok_or_else(|| invalid("signature preimage", "length overflow"))
     })?;
-    let mut message = Vec::with_capacity(
-        RELEASE_CANDIDATE_SIGNATURE_DOMAIN.len() + 1 + encoded_lengths,
-    );
+    let mut message =
+        Vec::with_capacity(RELEASE_CANDIDATE_SIGNATURE_DOMAIN.len() + 1 + encoded_lengths);
     message.extend_from_slice(RELEASE_CANDIDATE_SIGNATURE_DOMAIN.as_bytes());
     message.push(0);
     for value in [key_id, receipt_digest, receipt_bytes] {
@@ -2035,8 +2055,7 @@ mod tests {
     }
 
     fn policy(name: &str) -> ReleasePromotionPolicy {
-        ReleasePromotionPolicy::new(ReleasePolicyId::new(name).expect("policy ID"))
-            .expect("policy")
+        ReleasePromotionPolicy::new(ReleasePolicyId::new(name).expect("policy ID")).expect("policy")
     }
 
     fn source(name: &str, byte: char) -> ReleaseSource {
@@ -2050,7 +2069,10 @@ mod tests {
         .expect("source")
     }
 
-    fn receipt_inputs(receipt_id: &str, policy: ReleasePromotionPolicy) -> ReleaseCandidateReceiptInputs {
+    fn receipt_inputs(
+        receipt_id: &str,
+        policy: ReleasePromotionPolicy,
+    ) -> ReleaseCandidateReceiptInputs {
         ReleaseCandidateReceiptInputs {
             receipt_id: ReleaseReceiptId::new(receipt_id).expect("receipt ID"),
             tenant_id: ReleaseTenantId::new("tenant-a").expect("tenant"),
@@ -2105,7 +2127,10 @@ mod tests {
         let (receipt, envelope, bytes, trust, _) = signed_fixture("receipt-valid", policy("p4"));
         let verified = verify_release_candidate_receipt_fixture(&bytes, &envelope, &trust)
             .expect("verified receipt");
-        assert_eq!(verified.receipt().receipt_digest(), receipt.receipt_digest());
+        assert_eq!(
+            verified.receipt().receipt_digest(),
+            receipt.receipt_digest()
+        );
 
         let temporary = TempDir::new().expect("temporary DB directory");
         let database = temporary.path().join("receipts.sqlite");
@@ -2140,7 +2165,9 @@ mod tests {
             ),
             ..trust.clone()
         };
-        assert!(verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_tenant).is_err());
+        assert!(
+            verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_tenant).is_err()
+        );
 
         let wrong_subject = TestTrust {
             scope: ReleaseReceiptScope::new(
@@ -2149,13 +2176,17 @@ mod tests {
             ),
             ..trust.clone()
         };
-        assert!(verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_subject).is_err());
+        assert!(
+            verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_subject).is_err()
+        );
 
         let wrong_policy = TestTrust {
             policy: policy("p4-other"),
             ..trust
         };
-        assert!(verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_policy).is_err());
+        assert!(
+            verify_release_candidate_receipt_fixture(&bytes, &envelope, &wrong_policy).is_err()
+        );
     }
 
     #[test]
@@ -2163,11 +2194,15 @@ mod tests {
         let (_, envelope, bytes, trust, _) = signed_fixture("receipt-altered", policy("p4"));
         let mut noncanonical = bytes.clone();
         noncanonical.push(b' ');
-        assert!(verify_release_candidate_receipt_fixture(&noncanonical, &envelope, &trust).is_err());
+        assert!(
+            verify_release_candidate_receipt_fixture(&noncanonical, &envelope, &trust).is_err()
+        );
 
         let mut altered_signature = envelope;
         altered_signature.signature[0] ^= 0x80;
-        assert!(verify_release_candidate_receipt_fixture(&bytes, &altered_signature, &trust).is_err());
+        assert!(
+            verify_release_candidate_receipt_fixture(&bytes, &altered_signature, &trust).is_err()
+        );
     }
 
     #[test]
@@ -2208,18 +2243,20 @@ mod tests {
             Value::String("git_sha256".into());
         let unsupported_algorithm =
             canonical_json(&unsupported_algorithm).expect("canonical unsupported algorithm");
-        assert!(ReleaseCandidateReceipt::parse_untrusted_canonical_bytes(&unsupported_algorithm).is_err());
+        assert!(
+            ReleaseCandidateReceipt::parse_untrusted_canonical_bytes(&unsupported_algorithm)
+                .is_err()
+        );
 
         let mut algorithm_length_mismatch: Value =
             serde_json::from_slice(&canonical).expect("receipt JSON");
-        algorithm_length_mismatch["candidate_source"]["full_sha"] =
-            Value::String("a".repeat(64));
+        algorithm_length_mismatch["candidate_source"]["full_sha"] = Value::String("a".repeat(64));
         let algorithm_length_mismatch =
             canonical_json(&algorithm_length_mismatch).expect("canonical mismatched source");
-        assert!(
-            ReleaseCandidateReceipt::parse_untrusted_canonical_bytes(&algorithm_length_mismatch)
-                .is_err()
-        );
+        assert!(ReleaseCandidateReceipt::parse_untrusted_canonical_bytes(
+            &algorithm_length_mismatch
+        )
+        .is_err());
     }
 
     #[test]
@@ -2258,12 +2295,15 @@ mod tests {
             ReleaseCandidateReceiptAppendResult::Inserted
         );
         assert_eq!(
-            ledger.append_verified(&verified).expect("idempotent insert"),
+            ledger
+                .append_verified(&verified)
+                .expect("idempotent insert"),
             ReleaseCandidateReceiptAppendResult::AlreadyPresent
         );
 
         let mut conflicting_inputs = receipt_inputs("receipt-duplicate", policy("p4"));
-        conflicting_inputs.candidate_metrics = ReleaseMetrics::new(0.80, 1.0, 10.0).expect("metrics");
+        conflicting_inputs.candidate_metrics =
+            ReleaseMetrics::new(0.80, 1.0, 10.0).expect("metrics");
         let conflicting = release_candidate_receipt_fixture(
             conflicting_inputs,
             exact_replay_evidence_fixture(digest('1'), digest('2'), digest('3')),

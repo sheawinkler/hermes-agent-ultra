@@ -8,9 +8,7 @@
 
 use std::sync::Arc;
 
-use hermes_core::{
-    AgentError, MemorySubject, MemorySubjectStorageKey, MemoryVisibility,
-};
+use hermes_core::{AgentError, MemorySubject, MemorySubjectStorageKey, MemoryVisibility};
 use hermes_intelligence::redact_sensitive_text;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -69,16 +67,25 @@ fn subject_scope(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> s
     })
 }
 
-fn subject_query(subject: &MemorySubject, filter: &MemorySubjectStorageKey) -> Vec<(&'static str, String)> {
+fn subject_query(
+    subject: &MemorySubject,
+    filter: &MemorySubjectStorageKey,
+) -> Vec<(&'static str, String)> {
     let key = filter.as_str().to_string();
     vec![
         ("subject_key", key.clone()),
         ("tenant_id", key.clone()),
         ("principal_id", key.clone()),
-        ("team_id", subject.team_id().map(|_| key.clone()).unwrap_or_default()),
+        (
+            "team_id",
+            subject.team_id().map(|_| key.clone()).unwrap_or_default(),
+        ),
         ("session_id", key),
         ("surface", subject.surface().as_str().to_string()),
-        ("visibility", visibility_label(subject.visibility()).to_string()),
+        (
+            "visibility",
+            visibility_label(subject.visibility()).to_string(),
+        ),
     ]
 }
 
@@ -274,7 +281,8 @@ impl MemoryProviderPlugin for HonchoProvider {
 
     fn system_prompt_block(&self) -> String {
         if self.bound_filter.lock().is_some() {
-            "# Honcho Memory\nActive only in the authenticated memory subject partition.".to_string()
+            "# Honcho Memory\nActive only in the authenticated memory subject partition."
+                .to_string()
         } else {
             String::new()
         }
@@ -413,7 +421,10 @@ mod tests {
             .initialize(&alice, &alice_filter, "/unused")
             .expect("initialize");
 
-        assert!(provider.cached_context(&alice, &alice_filter).expect("alice").is_none());
+        assert!(provider
+            .cached_context(&alice, &alice_filter)
+            .expect("alice")
+            .is_none());
         assert!(provider.cached_context(&bob, &bob_filter).is_err());
         assert_eq!(provider.prefetch(&bob, &alice_filter, "ignored"), "");
         assert_ne!(alice_filter, bob_filter);

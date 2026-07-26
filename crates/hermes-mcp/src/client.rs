@@ -685,11 +685,7 @@ fn decode_mcp_resource_bytes(blob: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn cache_mcp_resource_bytes(
-    bytes: &[u8],
-    uri: &str,
-    mime_type: &str,
-) -> Result<PathBuf, String> {
+fn cache_mcp_resource_bytes(bytes: &[u8], uri: &str, mime_type: &str) -> Result<PathBuf, String> {
     let cache_dir = mcp_resource_cache_dir();
     std::fs::create_dir_all(&cache_dir)
         .map_err(|err| format!("resource cache directory could not be created: {err}"))?;
@@ -719,7 +715,10 @@ fn cache_mcp_resource_bytes(
 }
 
 fn cache_mcp_audio_block(item: &Value) -> Option<String> {
-    let typ = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let typ = item
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     if !typ.eq_ignore_ascii_case("audio") && !typ.eq_ignore_ascii_case("audio_content") {
         return None;
     }
@@ -751,7 +750,10 @@ fn mcp_resource_link_marker(item: &Value, server_name: Option<&str>) -> Option<S
     if uri.is_empty() {
         return Some("[MCP resource link omitted an URI]".to_string());
     }
-    let name = item.get("name").and_then(|value| value.as_str()).unwrap_or("");
+    let name = item
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     let mime_type = item
         .get("mimeType")
         .or_else(|| item.get("mime_type"))
@@ -773,7 +775,10 @@ fn mcp_resource_link_marker(item: &Value, server_name: Option<&str>) -> Option<S
 }
 
 fn render_mcp_resource_block(item: &Value, server_name: Option<&str>) -> Option<String> {
-    let typ = item.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let typ = item
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     if typ.eq_ignore_ascii_case("resource_link") {
         return mcp_resource_link_marker(item, server_name);
     }
@@ -791,18 +796,19 @@ fn render_mcp_resource_block(item: &Value, server_name: Option<&str>) -> Option<
     let Some(blob) = resource.get("blob").and_then(|value| value.as_str()) else {
         return Some("[MCP embedded resource has no text or blob content]".to_string());
     };
-    let uri = resource.get("uri").and_then(|value| value.as_str()).unwrap_or("");
+    let uri = resource
+        .get("uri")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     let mime_type = resource
         .get("mimeType")
         .or_else(|| resource.get("mime_type"))
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    match decode_mcp_resource_bytes(blob)
-        .and_then(|bytes| {
-            let byte_len = bytes.len();
-            cache_mcp_resource_bytes(&bytes, uri, mime_type)
-                .map(|path| (path, byte_len))
-        }) {
+    match decode_mcp_resource_bytes(blob).and_then(|bytes| {
+        let byte_len = bytes.len();
+        cache_mcp_resource_bytes(&bytes, uri, mime_type).map(|path| (path, byte_len))
+    }) {
         Ok((path, byte_len)) => Some(format!(
             "[MCP resource saved to {} ({}; {} bytes) — read it with file or terminal tools]",
             path.display(),
@@ -835,12 +841,14 @@ fn render_mcp_resource_contents(result: &Value, server_name: Option<&str>) -> Op
                 parts.push(rendered);
             }
         } else {
-            warn!("MCP resources/read returned an unsupported content block: {}", item);
+            warn!(
+                "MCP resources/read returned an unsupported content block: {}",
+                item
+            );
         }
     }
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
-
 
 fn mcp_image_extension_for_mime_type(mime_type: &str) -> &'static str {
     match mime_type

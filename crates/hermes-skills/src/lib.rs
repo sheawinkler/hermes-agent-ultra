@@ -10,8 +10,8 @@ mod provenance;
 mod skill;
 mod store;
 mod sync;
-mod usage;
 mod trust;
+mod usage;
 mod version;
 
 pub use guard::{
@@ -39,12 +39,6 @@ pub use sync::{
     PristineBundledSkillSkip, RemovePristineBundledSkillsResult, SkillResetResult, SkillSyncConfig,
     SkillSyncResult, NO_BUNDLED_SKILLS_MARKER,
 };
-pub use usage::{
-    agent_created_report, archive_skill, bump_patch, bump_use, bump_view, forget, get_record,
-    is_agent_created, is_protected_skill, list_agent_created_skill_names, load_usage,
-    mark_agent_created, restore_skill, save_usage, set_pinned, set_state, usage_file,
-    SkillUsageRecord, SkillUsageReportRow, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
-};
 pub use trust::{
     canonical_bundle_digest, full_skill_scan, install_signed_remote_keyring_from_file,
     load_keyring, load_local_owner_keyring_file, load_lock, load_lock_for_migration,
@@ -53,20 +47,25 @@ pub use trust::{
     provision_remote_trust_root_from_file, skill_keyring_path, skill_lock_path,
     skill_revocations_path, store_keyring, store_local_owner_keyring_file, store_lock,
     store_remote_keyring_audit_file, store_remote_trust_root_file, store_revocations,
-    store_signed_remote_keyring,
-    LocalOwnerAttestation, LocalOwnerKeyring, LocalOwnerSigningKey, PendingOwnerAttestation,
-    SignedRemoteSkillKeyring, SignedSkillRevocationList, SkillAdmission, SkillAdmissionDecision,
-    SkillCompatibility, SkillLockEntryV2, SkillLockLoad, SkillLockV2, SkillPackageDependency,
-    SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof, SkillPackageSource,
-    SkillPermission, SkillPermissions, SkillQuarantine, SkillQuarantineReason,
+    store_signed_remote_keyring, LocalOwnerAttestation, LocalOwnerKeyring, LocalOwnerSigningKey,
+    PendingOwnerAttestation, SignedRemoteSkillKeyring, SignedSkillRevocationList, SkillAdmission,
+    SkillAdmissionDecision, SkillCompatibility, SkillLockEntryV2, SkillLockLoad, SkillLockV2,
+    SkillPackageDependency, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
+    SkillPackageSource, SkillPermission, SkillPermissions, SkillQuarantine, SkillQuarantineReason,
     SkillRemoteKeyringAudit, SkillRemoteKeyringAuditEntry, SkillRemoteTrustConfig,
-    SkillRemoteTrustRoot, SkillRevocation, SkillScanResultV2, SkillScanVerdictV2,
-    SkillSigningKey, SkillSignature, SkillTrustAuthorityPaths, SkillTrustError,
-    SkillTrustKeyring, SkillTrustLoad, SkillTrustPolicy, SkillTrustRead, SkillTrustRootRotation,
-    SkillTrustStore, SkillTrustVerifier, TrustedLocalOwnerKey, TrustedPublisherSkillKey,
-    TrustedSkillKey, VerifiedSkillPackage, SKILL_LOCK_FILE, SKILL_LOCK_SCHEMA_VERSION,
-    SKILL_PACKAGE_SCHEMA_VERSION, SKILL_REMOTE_KEYRING_AUDIT_SCHEMA_VERSION,
-    SKILL_REMOTE_KEYRING_SCHEMA_VERSION, SKILL_REMOTE_TRUST_ROOT_SCHEMA_VERSION,
-    SKILL_REVOCATIONS_FILE, SKILL_REVOCATION_SCHEMA_VERSION,
+    SkillRemoteTrustRoot, SkillRevocation, SkillScanResultV2, SkillScanVerdictV2, SkillSignature,
+    SkillSigningKey, SkillTrustAuthorityPaths, SkillTrustError, SkillTrustKeyring, SkillTrustLoad,
+    SkillTrustPolicy, SkillTrustRead, SkillTrustRootRotation, SkillTrustStore, SkillTrustVerifier,
+    TrustedLocalOwnerKey, TrustedPublisherSkillKey, TrustedSkillKey, VerifiedSkillPackage,
+    SKILL_LOCK_FILE, SKILL_LOCK_SCHEMA_VERSION, SKILL_PACKAGE_SCHEMA_VERSION,
+    SKILL_REMOTE_KEYRING_AUDIT_SCHEMA_VERSION, SKILL_REMOTE_KEYRING_SCHEMA_VERSION,
+    SKILL_REMOTE_TRUST_ROOT_SCHEMA_VERSION, SKILL_REVOCATIONS_FILE,
+    SKILL_REVOCATION_SCHEMA_VERSION,
+};
+pub use usage::{
+    agent_created_report, archive_skill, bump_patch, bump_use, bump_view, forget, get_record,
+    is_agent_created, is_protected_skill, list_agent_created_skill_names, load_usage,
+    mark_agent_created, restore_skill, save_usage, set_pinned, set_state, usage_file,
+    SkillUsageRecord, SkillUsageReportRow, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
 };
 pub use version::{compare_versions, compute_version, track_change, SkillChange, SkillVersion};

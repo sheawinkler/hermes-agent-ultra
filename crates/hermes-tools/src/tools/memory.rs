@@ -113,26 +113,28 @@ impl ToolHandler for MemoryHandler {
                 let old_text =
                     params
                         .get("old_text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        ToolError::InvalidParams("Missing 'old_text' parameter".into())
-                    })?;
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            ToolError::InvalidParams("Missing 'old_text' parameter".into())
+                        })?;
                 let content = params
                     .get("content")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| {
                         ToolError::InvalidParams("Missing 'content' parameter".into())
                     })?;
-                self.backend.replace(filter, target, old_text, content).await
+                self.backend
+                    .replace(filter, target, old_text, content)
+                    .await
             }
             "remove" => {
                 let old_text =
                     params
                         .get("old_text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        ToolError::InvalidParams("Missing 'old_text' parameter".into())
-                    })?;
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            ToolError::InvalidParams("Missing 'old_text' parameter".into())
+                        })?;
                 self.backend.remove(filter, target, old_text).await
             }
             other => Err(ToolError::InvalidParams(format!(
@@ -192,9 +194,10 @@ mod tests {
             "memory-handler-test",
         )
         .expect("subject");
-        subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes([43_u8; 32]))
+        subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes(
+            [43_u8; 32],
+        ))
     }
-
 
     struct MockMemoryBackend;
     #[async_trait]

@@ -143,8 +143,7 @@ fn throwaway_cron_scheduler() -> Arc<CronScheduler> {
     let root =
         std::env::temp_dir().join(format!("hermes-api-server-test-{}", uuid::Uuid::new_v4()));
     let run_runtime = Arc::new(
-        hermes_cron::RunRuntime::open_for_ephemeral_testing(&root)
-            .expect("ephemeral run runtime"),
+        hermes_cron::RunRuntime::open_for_ephemeral_testing(&root).expect("ephemeral run runtime"),
     );
     test_cron_scheduler(root.join("cron"), run_runtime)
 }
@@ -578,10 +577,7 @@ async fn responses_endpoint_accepts_input_and_quoted_false_without_storing() {
 
 #[tokio::test]
 async fn status_updates_do_not_complete_pending_http_mailbox() {
-    let adapter = ApiServerAdapter::new(
-        ApiServerConfig::default(),
-        throwaway_cron_scheduler(),
-    );
+    let adapter = ApiServerAdapter::new(ApiServerConfig::default(), throwaway_cron_scheduler());
     let (reply_tx, mut reply_rx) = mpsc::channel(1);
     adapter
         .mailbox

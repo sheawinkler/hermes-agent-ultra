@@ -175,8 +175,7 @@ fn contextlattice_index_retains_fixture_reference_non_authoritative_scope() {
             "ContextLattice fixtures must match matrix for {id}"
         );
         assert_eq!(
-            group["fixture_reference_categories"],
-            domain["fixture_reference_categories"],
+            group["fixture_reference_categories"], domain["fixture_reference_categories"],
             "ContextLattice categories must match matrix for {id}"
         );
         assert_eq!(

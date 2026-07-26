@@ -54,8 +54,8 @@ fn slack_block_sanitizer_drops_invalid_blocks_and_clamps_limits() {
     ];
     blocks.extend((0..SLACK_MAX_BLOCKS).map(|_| serde_json::json!({ "type": "divider" })));
 
-    let sanitized = sanitize_slack_blocks(&serde_json::Value::Array(blocks))
-        .expect("valid blocks remain");
+    let sanitized =
+        sanitize_slack_blocks(&serde_json::Value::Array(blocks)).expect("valid blocks remain");
     let sanitized = sanitized.as_array().expect("sanitized block array");
 
     assert_eq!(sanitized.len(), SLACK_MAX_BLOCKS);

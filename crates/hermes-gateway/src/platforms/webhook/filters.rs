@@ -81,9 +81,7 @@ impl WebhookRouteProcessor {
             Value::Array(items) if items.is_empty() => true,
             Value::Object(items) if items.is_empty() => true,
             Value::String(value) if value.is_empty() => true,
-            Value::Number(value) if value.as_i64() == Some(0) || value.as_u64() == Some(0) => {
-                true
-            }
+            Value::Number(value) if value.as_i64() == Some(0) || value.as_u64() == Some(0) => true,
             Value::Object(_) => self.filter_matches(filters, payload, event_type, headers),
             Value::Array(items) => items
                 .iter()
@@ -218,7 +216,8 @@ impl WebhookRouteProcessor {
         }
         drop(stdin);
 
-        let output = match tokio::time::timeout(self.script_timeout, child.wait_with_output()).await {
+        let output = match tokio::time::timeout(self.script_timeout, child.wait_with_output()).await
+        {
             Ok(Ok(output)) => output,
             Ok(Err(error)) => {
                 warn!(%error, path = %path.display(), "webhook script wait failed");
@@ -280,8 +279,12 @@ impl WebhookRouteProcessor {
             return Err("script path is empty".to_string());
         }
         let scripts_root = self.home.join("scripts");
-        let root = std::fs::canonicalize(&scripts_root)
-            .map_err(|_| format!("script directory is unavailable: {}", scripts_root.display()))?;
+        let root = std::fs::canonicalize(&scripts_root).map_err(|_| {
+            format!(
+                "script directory is unavailable: {}",
+                scripts_root.display()
+            )
+        })?;
         let candidate = if raw == "~/.hermes" || raw.starts_with("~/.hermes/") {
             resolve_profile_path(&self.home, &raw).unwrap_or_else(|| scripts_root.clone())
         } else {
@@ -300,7 +303,10 @@ impl WebhookRouteProcessor {
         let metadata = std::fs::metadata(&candidate)
             .map_err(|_| format!("script not found: {}", candidate.display()))?;
         if !metadata.is_file() {
-            return Err(format!("script path is not a file: {}", candidate.display()));
+            return Err(format!(
+                "script path is not a file: {}",
+                candidate.display()
+            ));
         }
         Ok(candidate)
     }
@@ -344,9 +350,7 @@ impl FilterValue<'_> {
     fn contains(self, needle: &Value) -> bool {
         match self {
             Self::Missing => false,
-            Self::Text(value) => needle
-                .as_str()
-                .is_some_and(|needle| value.contains(needle)),
+            Self::Text(value) => needle.as_str().is_some_and(|needle| value.contains(needle)),
             Self::Json(Value::Array(items)) => items.iter().any(|item| item == needle),
             Self::Json(Value::Object(items)) => needle
                 .as_str()
@@ -355,9 +359,10 @@ impl FilterValue<'_> {
                 .as_str()
                 .map(|value| stringify_filter_value(&Value::String(value.to_string())))
                 .is_some_and(|value| {
-                    needle
-                        .as_str()
-                        .map_or_else(|| value.contains(&stringify_filter_value(needle)), |needle| value.contains(needle))
+                    needle.as_str().map_or_else(
+                        || value.contains(&stringify_filter_value(needle)),
+                        |needle| value.contains(needle),
+                    )
                 }),
         }
     }
@@ -377,7 +382,11 @@ fn resolve_filter_field<'a>(
     event_type: &'a str,
     headers: &'a HashMap<String, String>,
 ) -> FilterValue<'a> {
-    let Some(field) = field.and_then(Value::as_str).map(str::trim).filter(|field| !field.is_empty()) else {
+    let Some(field) = field
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+    else {
         return FilterValue::Missing;
     };
     let mut parts = field.split('.').filter(|part| !part.is_empty());
@@ -424,7 +433,11 @@ fn traverse_filter_value<'a>(mut value: &'a Value, parts: &[&str]) -> FilterValu
                 Some(value) => value,
                 None => return FilterValue::Missing,
             },
-            Value::Array(values) => match part.parse::<usize>().ok().and_then(|index| values.get(index)) {
+            Value::Array(values) => match part
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| values.get(index))
+            {
                 Some(value) => value,
                 None => return FilterValue::Missing,
             },
@@ -471,7 +484,12 @@ fn stringify_sorted_object(items: &Map<String, Value>) -> String {
         if index != 0 {
             output.push(',');
         }
-        let _ = write!(output, "{}:{}", serde_json::to_string(key).unwrap_or_default(), stringify_filter_value(&items[key]));
+        let _ = write!(
+            output,
+            "{}:{}",
+            serde_json::to_string(key).unwrap_or_default(),
+            stringify_filter_value(&items[key])
+        );
     }
     output.push('}');
     output
@@ -493,7 +511,10 @@ fn expand_environment_variables(input: &str) -> String {
         let (name, end) = if bytes.get(index) == Some(&b'{') {
             let name_start = index + 1;
             match input[name_start..].find('}') {
-                Some(offset) => (&input[name_start..name_start + offset], name_start + offset + 1),
+                Some(offset) => (
+                    &input[name_start..name_start + offset],
+                    name_start + offset + 1,
+                ),
                 None => {
                     output.push('$');
                     continue;
@@ -561,7 +582,10 @@ fn load_filter_file_values(home: &Path, path_value: &Value) -> Vec<Value> {
     };
     match serde_json::from_str::<Value>(&raw) {
         Ok(Value::Array(items)) => items,
-        Ok(Value::Object(items)) => items.into_iter().map(|(key, _)| Value::String(key)).collect(),
+        Ok(Value::Object(items)) => items
+            .into_iter()
+            .map(|(key, _)| Value::String(key))
+            .collect(),
         Ok(value) => vec![value],
         Err(_) => raw
             .lines()
@@ -586,8 +610,7 @@ mod tests {
         let home = tempdir().expect("home");
         let data = home.path().join("data");
         std::fs::create_dir_all(&data).expect("data");
-        std::fs::write(data.join("watchlist.json"), "[\"chat-1\", \"chat-2\"]")
-            .expect("watchlist");
+        std::fs::write(data.join("watchlist.json"), "[\"chat-1\", \"chat-2\"]").expect("watchlist");
         let processor = WebhookRouteProcessor::with_home(home.path().to_path_buf(), 30);
         let decision = processor
             .apply(
@@ -659,8 +682,11 @@ mod tests {
         let home = tempdir().expect("home");
         let scripts = home.path().join("scripts");
         std::fs::create_dir_all(&scripts).expect("scripts");
-        std::fs::write(scripts.join("silent.sh"), "#!/usr/bin/env bash\nprintf '[SILENT]'\n")
-            .expect("script");
+        std::fs::write(
+            scripts.join("silent.sh"),
+            "#!/usr/bin/env bash\nprintf '[SILENT]'\n",
+        )
+        .expect("script");
         let processor = WebhookRouteProcessor::with_home(home.path().to_path_buf(), 30);
         let decision = processor
             .apply(

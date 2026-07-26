@@ -120,7 +120,6 @@ impl CertifiedOutboxDestinationHandler {
     }
 }
 
-
 #[derive(Default)]
 pub struct OutboxRouteRegistry {
     handlers: HashMap<Destination, Arc<dyn DurableOutboxDestinationHandler>>,

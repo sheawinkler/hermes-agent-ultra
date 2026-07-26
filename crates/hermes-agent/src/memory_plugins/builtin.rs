@@ -53,9 +53,10 @@ impl BuiltinMemoryPlugin {
         filter: &MemorySubjectStorageKey,
         operation: MemoryGovernanceOperation,
     ) -> Result<Arc<FileMemoryBackend>, MemoryProviderGovernanceError> {
-        let bound = self.bound.lock().map_err(|_| {
-            MemoryProviderGovernanceError::failed(Self::NAME, operation)
-        })?;
+        let bound = self
+            .bound
+            .lock()
+            .map_err(|_| MemoryProviderGovernanceError::failed(Self::NAME, operation))?;
         let Some(bound) = bound.as_ref() else {
             return Err(MemoryProviderGovernanceError::failed(Self::NAME, operation));
         };
@@ -122,8 +123,7 @@ impl MemoryProviderPlugin for BuiltinMemoryPlugin {
         tool_name: &str,
         args: &Value,
     ) -> String {
-        let backend = match self.bound_backend(subject, filter, MemoryGovernanceOperation::Write)
-        {
+        let backend = match self.bound_backend(subject, filter, MemoryGovernanceOperation::Write) {
             Ok(backend) => backend,
             Err(_) => return json!({"error": "memory_subject_binding_rejected"}).to_string(),
         };

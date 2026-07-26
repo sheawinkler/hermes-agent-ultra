@@ -133,7 +133,9 @@ pub enum DashboardOidcConfigError {
     WeakSessionSecret,
     #[error("HERMES_DASHBOARD_OIDC_ISSUER must be an absolute HTTPS URL or loopback HTTP URL")]
     InvalidIssuer,
-    #[error("HERMES_DASHBOARD_OIDC_REDIRECT_URI must be an absolute HTTPS URL or loopback HTTP URL")]
+    #[error(
+        "HERMES_DASHBOARD_OIDC_REDIRECT_URI must be an absolute HTTPS URL or loopback HTTP URL"
+    )]
     InvalidRedirectUri,
     #[error("HERMES_DASHBOARD_OIDC_REDIRECT_URI must use {CALLBACK_PATH} or an explicitly allowlisted callback path")]
     CallbackPathNotAllowed,
@@ -200,7 +202,10 @@ impl std::fmt::Debug for DashboardOidcConfig {
             .field("allow_machine_bearer", &self.allow_machine_bearer)
             .field("enable_provider_logout", &self.enable_provider_logout)
             .field("http_timeout", &self.http_timeout)
-            .field("session_secret_configured", &!self.session_secret.is_empty())
+            .field(
+                "session_secret_configured",
+                &!self.session_secret.is_empty(),
+            )
             .finish()
     }
 }
@@ -748,8 +753,8 @@ fn session_from_headers(
     config: &DashboardOidcConfig,
 ) -> Result<DashboardSessionClaims, DashboardSessionError> {
     let raw = cookie_value(headers, SESSION_COOKIE).ok_or(DashboardSessionError::MissingCookie)?;
-    let session: DashboardSessionClaims =
-        verify_signed_json(raw, config.session_secret()).map_err(|_| DashboardSessionError::InvalidCookie)?;
+    let session: DashboardSessionClaims = verify_signed_json(raw, config.session_secret())
+        .map_err(|_| DashboardSessionError::InvalidCookie)?;
     if session.iss != config.issuer {
         return Err(DashboardSessionError::IssuerMismatch);
     }
@@ -849,7 +854,12 @@ pub async fn oidc_login(Query(params): Query<OidcLoginParams>) -> Response {
     };
     let metadata = match resolve_metadata(&client, &oidc).await {
         Ok(metadata) => metadata,
-        Err(err) => return json_response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": err.to_string()}),
+            )
+        }
     };
 
     let pkce = hermes_auth::generate_pkce_pair();
@@ -871,12 +881,22 @@ pub async fn oidc_login(Query(params): Query<OidcLoginParams>) -> Response {
         oidc.cookie_secure,
     ) {
         Ok(cookie) => cookie,
-        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": err.to_string()}),
+            )
+        }
     };
     let auth_url = match build_authorization_url(&oidc, &metadata, &state, &nonce, &pkce.challenge)
     {
         Ok(url) => url,
-        Err(err) => return json_response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": err.to_string()}),
+            )
+        }
     };
 
     redirect_with_cookie(&auth_url, &login_cookie)
@@ -892,7 +912,10 @@ pub async fn oidc_callback(
         return oidc_unavailable_response(&auth);
     };
     if !oidc.is_callback_path(uri.path()) {
-        return json_response(StatusCode::NOT_FOUND, json!({"error": "OIDC callback path is not configured"}));
+        return json_response(
+            StatusCode::NOT_FOUND,
+            json!({"error": "OIDC callback path is not configured"}),
+        );
     }
     let Some(state) = params
         .state
@@ -910,7 +933,12 @@ pub async fn oidc_callback(
     };
     let login: LoginCookie = match verify_signed_json(raw_login, oidc.session_secret()) {
         Ok(login) => login,
-        Err(_) => return json_response(StatusCode::UNAUTHORIZED, json!({"error": "invalid OIDC login cookie"})),
+        Err(_) => {
+            return json_response(
+                StatusCode::UNAUTHORIZED,
+                json!({"error": "invalid OIDC login cookie"}),
+            )
+        }
     };
     if login.exp <= Utc::now().timestamp() {
         return json_response(
@@ -949,11 +977,18 @@ pub async fn oidc_callback(
     };
     let metadata = match resolve_metadata(&client, &oidc).await {
         Ok(metadata) => metadata,
-        Err(err) => return json_response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": err.to_string()}),
+            )
+        }
     };
     let token = match exchange_code(&client, &oidc, &metadata, code, &login.code_verifier).await {
         Ok(token) => token,
-        Err(err) => return json_response(StatusCode::BAD_GATEWAY, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(StatusCode::BAD_GATEWAY, json!({"error": err.to_string()}))
+        }
     };
     let claims = match verify_id_token(
         &client,
@@ -995,7 +1030,12 @@ pub async fn oidc_callback(
         oidc.cookie_secure,
     ) {
         Ok(cookie) => cookie,
-        Err(err) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": err.to_string()})),
+        Err(err) => {
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": err.to_string()}),
+            )
+        }
     };
     let refresh_token = match encrypt_refresh_token(token.refresh_token, oidc.session_secret()) {
         Ok(token) => token,
@@ -1086,7 +1126,8 @@ pub async fn oidc_refresh(headers: HeaderMap) -> Response {
         Ok(cookie) => cookie,
         Err(_) => return refresh_failure_response(oidc.cookie_secure),
     };
-    let next_refresh_token = match encrypt_refresh_token(token.refresh_token, oidc.session_secret()) {
+    let next_refresh_token = match encrypt_refresh_token(token.refresh_token, oidc.session_secret())
+    {
         Ok(Some(token)) => Some(token),
         Ok(None) => record.refresh_token,
         Err(()) => return refresh_failure_response(oidc.cookie_secure),
@@ -1317,13 +1358,16 @@ async fn verify_id_token(
         select_jwk(&jwks, header.kid.as_deref(), header.alg),
         Err(JwkSelectionError::Missing)
     ) {
-        cache
-            .get_or_fetch(client, &metadata.jwks_uri, true)
-            .await?
+        cache.get_or_fetch(client, &metadata.jwks_uri, true).await?
     } else {
         jwks
     };
-    Ok(verify_id_token_with_jwks(token, &jwks, config, expected_nonce)?)
+    Ok(verify_id_token_with_jwks(
+        token,
+        &jwks,
+        config,
+        expected_nonce,
+    )?)
 }
 
 pub fn verify_id_token_with_jwks(
@@ -1368,7 +1412,11 @@ pub fn verify_id_token_with_jwks(
 fn ensure_supported_algorithm(algorithm: Algorithm) -> Result<(), OidcTokenVerificationError> {
     if matches!(
         algorithm,
-        Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 | Algorithm::ES256 | Algorithm::ES384
+        Algorithm::RS256
+            | Algorithm::RS384
+            | Algorithm::RS512
+            | Algorithm::ES256
+            | Algorithm::ES384
     ) {
         Ok(())
     } else {
@@ -1419,7 +1467,11 @@ fn select_jwk<'a>(
         .common
         .key_operations
         .as_ref()
-        .is_some_and(|operations| !operations.iter().any(|operation| matches!(operation, KeyOperations::Verify)));
+        .is_some_and(|operations| {
+            !operations
+                .iter()
+                .any(|operation| matches!(operation, KeyOperations::Verify))
+        });
     if key_use_is_invalid || key_operations_are_invalid {
         return Err(JwkSelectionError::KeyUseMismatch);
     }
@@ -1467,21 +1519,22 @@ fn jwks_cache_ttl(headers: &HeaderMap, fallback_ttl: Duration, max_ttl: Duration
     else {
         return fallback_ttl.min(max_ttl);
     };
-    if cache_control
-        .split(',')
-        .map(str::trim)
-        .any(|directive| directive.eq_ignore_ascii_case("no-store") || directive.eq_ignore_ascii_case("no-cache"))
-    {
+    if cache_control.split(',').map(str::trim).any(|directive| {
+        directive.eq_ignore_ascii_case("no-store") || directive.eq_ignore_ascii_case("no-cache")
+    }) {
         return Duration::ZERO;
     }
-    let max_age = cache_control.split(',').map(str::trim).find_map(|directive| {
-        let (name, value) = directive.split_once('=')?;
-        if name.trim().eq_ignore_ascii_case("max-age") {
-            value.trim().trim_matches('"').parse::<u64>().ok()
-        } else {
-            None
-        }
-    });
+    let max_age = cache_control
+        .split(',')
+        .map(str::trim)
+        .find_map(|directive| {
+            let (name, value) = directive.split_once('=')?;
+            if name.trim().eq_ignore_ascii_case("max-age") {
+                value.trim().trim_matches('"').parse::<u64>().ok()
+            } else {
+                None
+            }
+        });
     max_age
         .map(Duration::from_secs)
         .unwrap_or(fallback_ttl)
@@ -1640,7 +1693,8 @@ fn sign_cookie<T: Serialize>(
 fn sign_json<T: Serialize>(payload: &T, secret: &[u8]) -> Result<String, SignedCookieError> {
     let body = serde_json::to_vec(payload).map_err(|_| SignedCookieError::Serialize)?;
     let body_b64 = URL_SAFE_NO_PAD.encode(body);
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| SignedCookieError::SignerInit)?;
+    let mut mac =
+        <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| SignedCookieError::SignerInit)?;
     mac.update(body_b64.as_bytes());
     let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     Ok(format!("{body_b64}.{sig}"))
@@ -1654,7 +1708,8 @@ fn verify_signed_json<T: DeserializeOwned>(
     let expected = URL_SAFE_NO_PAD
         .decode(sig_b64.as_bytes())
         .map_err(|_| SignedCookieError::SignatureMalformed)?;
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| SignedCookieError::SignerInit)?;
+    let mut mac =
+        <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| SignedCookieError::SignerInit)?;
     mac.update(body_b64.as_bytes());
     mac.verify_slice(&expected)
         .map_err(|_| SignedCookieError::SignatureMismatch)?;
@@ -1715,8 +1770,12 @@ fn local_logout_response(secure: bool, provider_logout: &str) -> Response {
     response
 }
 
-fn provider_logout_location(endpoint: &str, redirect_uri: &str) -> Result<String, OidcProtocolError> {
-    let mut endpoint = parse_safe_http_url(endpoint).map_err(|_| OidcProtocolError::InvalidMetadata)?;
+fn provider_logout_location(
+    endpoint: &str,
+    redirect_uri: &str,
+) -> Result<String, OidcProtocolError> {
+    let mut endpoint =
+        parse_safe_http_url(endpoint).map_err(|_| OidcProtocolError::InvalidMetadata)?;
     let mut local_return =
         parse_safe_http_url(redirect_uri).map_err(|_| OidcProtocolError::InvalidMetadata)?;
     local_return.set_path("/");
@@ -1863,8 +1922,8 @@ fn validate_session_secret(secret: &[u8]) -> Result<(), DashboardOidcConfigError
     let all_same = secret
         .first()
         .is_some_and(|first| secret.iter().all(|byte| byte == first));
-    let repeated_half = secret.len() % 2 == 0
-        && secret[..secret.len() / 2] == secret[secret.len() / 2..];
+    let repeated_half =
+        secret.len() % 2 == 0 && secret[..secret.len() / 2] == secret[secret.len() / 2..];
     if secret.len() < MIN_SESSION_SECRET_BYTES || all_same || repeated_half {
         return Err(DashboardOidcConfigError::WeakSessionSecret);
     }
@@ -1896,7 +1955,8 @@ fn validate_redirect_uri(
     input: &str,
     callback_allowlist: &HashSet<String>,
 ) -> Result<(String, String, bool), DashboardOidcConfigError> {
-    let url = parse_safe_http_url(input).map_err(|_| DashboardOidcConfigError::InvalidRedirectUri)?;
+    let url =
+        parse_safe_http_url(input).map_err(|_| DashboardOidcConfigError::InvalidRedirectUri)?;
     if url.fragment().is_some() {
         return Err(DashboardOidcConfigError::InvalidRedirectUri);
     }
@@ -1993,7 +2053,10 @@ mod tests {
         let verified = verify_session_from_headers(&headers, &cfg).expect("verify");
         assert_eq!(verified.sub, "user-1");
 
-        let tampered = format!("{SESSION_COOKIE}={}.bad", signed.split('.').next().expect("body"));
+        let tampered = format!(
+            "{SESSION_COOKIE}={}.bad",
+            signed.split('.').next().expect("body")
+        );
         let mut bad = HeaderMap::new();
         bad.insert(COOKIE, HeaderValue::from_str(&tampered).expect("header"));
         assert!(matches!(
@@ -2001,7 +2064,10 @@ mod tests {
             Err(DashboardSessionError::InvalidCookie)
         ));
 
-        let expired = DashboardSessionClaims { exp: Utc::now().timestamp() - 1, ..session };
+        let expired = DashboardSessionClaims {
+            exp: Utc::now().timestamp() - 1,
+            ..session
+        };
         let expired = sign_json(&expired, cfg.session_secret()).expect("sign");
         headers.insert(
             COOKIE,
@@ -2021,7 +2087,10 @@ mod tests {
             .expect("encryption")
             .expect("nonempty token");
         assert_ne!(encrypted.ciphertext.as_slice(), raw.as_bytes());
-        assert_eq!(decrypt_refresh_token(&encrypted, secret).as_deref(), Some(raw));
+        assert_eq!(
+            decrypt_refresh_token(&encrypted, secret).as_deref(),
+            Some(raw)
+        );
         assert!(decrypt_refresh_token(&encrypted, b"different-session-secret").is_none());
         encrypted.ciphertext[0] ^= 1;
         assert!(decrypt_refresh_token(&encrypted, secret).is_none());
@@ -2072,7 +2141,10 @@ mod tests {
         let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(query.get("response_type"), Some(&"code".to_string()));
         assert_eq!(query.get("redirect_uri"), Some(&cfg.redirect_uri));
-        assert_eq!(query.get("code_challenge_method"), Some(&"S256".to_string()));
+        assert_eq!(
+            query.get("code_challenge_method"),
+            Some(&"S256".to_string())
+        );
         assert_eq!(query.get("nonce"), Some(&"nonce-1".to_string()));
     }
 
@@ -2098,7 +2170,10 @@ mod tests {
         cfg.allowed_domains.clear();
         cfg.allowed_domains.insert("other.example".to_string());
         assert!(!claim_allowed(&claims, &cfg));
-        assert_eq!(sanitize_return_to(Some("/dashboard?tab=1")), "/dashboard?tab=1");
+        assert_eq!(
+            sanitize_return_to(Some("/dashboard?tab=1")),
+            "/dashboard?tab=1"
+        );
         assert_eq!(sanitize_return_to(Some("https://evil.example")), "/");
         assert_eq!(sanitize_return_to(Some("//evil.example")), "/");
         assert_eq!(sanitize_return_to(Some("/\\evil.example")), "/");
@@ -2205,11 +2280,10 @@ mod tests {
 
     #[test]
     fn redirect_validation_requires_exact_loopback_or_https_callback() {
-        assert!(validate_redirect_uri(
-            "http://127.0.0.1:8787/auth/oidc/callback",
-            &HashSet::new()
-        )
-        .is_ok());
+        assert!(
+            validate_redirect_uri("http://127.0.0.1:8787/auth/oidc/callback", &HashSet::new())
+                .is_ok()
+        );
         assert!(validate_redirect_uri(
             "http://dashboard.example/auth/oidc/callback",
             &HashSet::new()
@@ -2220,11 +2294,11 @@ mod tests {
             &HashSet::new()
         )
         .is_ok());
-        let allowed = HashSet::from([
-            "/auth/custom/callback".to_string(),
-            "/callback".to_string(),
-        ]);
-        assert!(validate_redirect_uri("https://dashboard.example/auth/custom/callback", &allowed).is_ok());
+        let allowed = HashSet::from(["/auth/custom/callback".to_string(), "/callback".to_string()]);
+        assert!(
+            validate_redirect_uri("https://dashboard.example/auth/custom/callback", &allowed)
+                .is_ok()
+        );
         assert!(validate_redirect_uri("https://dashboard.example/callback", &allowed).is_ok());
         assert!(!is_safe_callback_path("/v1/rpc"));
         assert!(!is_safe_callback_path("/health"));
@@ -2254,7 +2328,11 @@ mod tests {
     fn jwks_cache_is_bounded_and_honors_no_cache() {
         let cache = JwksCache::new(1, Duration::from_secs(1), Duration::from_secs(1));
         let jwks: JwkSet = serde_json::from_value(json!({"keys": []})).expect("jwks");
-        cache.insert("one".to_string(), Arc::new(jwks.clone()), Duration::from_secs(1));
+        cache.insert(
+            "one".to_string(),
+            Arc::new(jwks.clone()),
+            Duration::from_secs(1),
+        );
         cache.insert("two".to_string(), Arc::new(jwks), Duration::from_secs(1));
         assert_eq!(cache.entry_count(), 1);
         assert!(cache.get("one").is_none());

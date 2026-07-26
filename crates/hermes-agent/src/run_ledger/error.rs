@@ -125,9 +125,7 @@ pub enum LedgerError {
     #[error("sealed artifact digest {digest} aliases conflicting immutable reference metadata")]
     ArtifactReferenceAliasConflict { digest: String },
 
-    #[error(
-        "sealed artifact reference {event_id}/{digest} was not found for run {run_id}"
-    )]
+    #[error("sealed artifact reference {event_id}/{digest} was not found for run {run_id}")]
     ArtifactReferenceNotFound {
         run_id: String,
         event_id: String,

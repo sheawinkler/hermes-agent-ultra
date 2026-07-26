@@ -389,8 +389,7 @@ mod tests {
     fn make_backend() -> ScheduledCronjobBackend {
         let root = tempdir().expect("tempdir").keep();
         let run_runtime = Arc::new(
-            crate::RunRuntime::open_for_ephemeral_testing(&root)
-                .expect("ephemeral run runtime"),
+            crate::RunRuntime::open_for_ephemeral_testing(&root).expect("ephemeral run runtime"),
         );
         let execution_mode = hermes_core::ResolvedExecutionMode::default();
         let execution_containment = Arc::new(

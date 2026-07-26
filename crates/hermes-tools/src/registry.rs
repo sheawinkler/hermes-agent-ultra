@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use hermes_core::{MemorySubjectStorageKey, ToolError, ToolHandler, ToolSchema};
 use hermes_environments::{ContainmentInvocation, ExecutionContainmentContext};
+use parking_lot::Mutex;
 
 use serde_json::{json, Value};
 use tracing::warn;
@@ -25,7 +25,6 @@ use crate::tool_policy::{
     ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode,
 };
 use crate::tools::disk_cleanup::{CleanupSummary, DiskCleanupAutoTracker};
-
 
 fn explicit_manual_execution_containment() -> Arc<ExecutionContainmentContext> {
     Arc::new(
@@ -130,9 +129,7 @@ struct PolicyDispatchPlan {
     decision: ToolPolicyDecision,
     action: PolicyDispatchAction,
     containment_context: Option<Arc<ExecutionContainmentContext>>,
-
 }
-
 
 #[derive(Clone)]
 pub struct RuntimeToolDefinition {
@@ -247,7 +244,6 @@ pub struct ToolEntry {
     /// The exact home and backend captured only by canonical built-in memory
     /// registration. Arbitrary handlers cannot populate this binding.
     canonical_memory_backend: Option<CanonicalMemoryBackendBinding>,
-
 }
 
 // ---------------------------------------------------------------------------
@@ -340,10 +336,7 @@ impl ToolRegistry {
 
     /// Bind the exact execution context that containment-sensitive handlers
     /// must consume. Replacing it affects only future dispatches.
-    pub fn set_execution_containment_context(
-        &self,
-        context: Arc<ExecutionContainmentContext>,
-    ) {
+    pub fn set_execution_containment_context(&self, context: Arc<ExecutionContainmentContext>) {
         let mut inner = self.inner.lock();
         inner.execution_containment = context;
     }
@@ -358,8 +351,7 @@ impl ToolRegistry {
         external_authority_paths: Vec<PathBuf>,
     ) {
         let mut inner = self.inner.lock();
-        inner.skill_trust_paths =
-            SkillTrustPathGuard::new(skills_root, external_authority_paths);
+        inner.skill_trust_paths = SkillTrustPathGuard::new(skills_root, external_authority_paths);
     }
 
     /// Bind the registry to a fully validated, explicitly provisioned skill
@@ -507,9 +499,9 @@ impl ToolRegistry {
     ) {
         let hermes_home = backend.hermes_home().to_path_buf();
         let memory_backend: Arc<dyn crate::tools::memory::MemoryBackend> = backend;
-        let handler: Arc<dyn ToolHandler> = Arc::new(
-            crate::tools::memory::MemoryHandler::new(Arc::clone(&memory_backend)),
-        );
+        let handler: Arc<dyn ToolHandler> = Arc::new(crate::tools::memory::MemoryHandler::new(
+            Arc::clone(&memory_backend),
+        ));
         let schema = handler.schema();
         let description = schema.description.clone();
         self.register_inner(
@@ -531,7 +523,6 @@ impl ToolRegistry {
             }),
         );
     }
-
 
     /// Register a built-in host-sensitive handler that can consume the exact
     /// registry-issued containment invocation token.
@@ -716,7 +707,6 @@ impl ToolRegistry {
         })
     }
 
-
     /// Dispatch a tool call by name, catching all errors.
     ///
     /// On success, returns the tool result string.
@@ -762,9 +752,9 @@ impl ToolRegistry {
                 tool = name,
                 "blocked tool dispatch referencing verifier-only skill trust state"
             );
-            return RuntimeDispatchOutcome::RejectedBeforeInvoke(
-                Self::skill_trust_dispatch_error(name),
-            );
+            return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::skill_trust_dispatch_error(
+                name,
+            ));
         }
         let plan = {
             let inner = self.inner.lock();
@@ -782,9 +772,9 @@ impl ToolRegistry {
             self.record_policy_decision(&plan);
             maybe_log_policy(name, &plan);
             return match plan.action {
-                PolicyDispatchAction::Reject => {
-                    RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::tool_policy_error(name, &plan))
-                }
+                PolicyDispatchAction::Reject => RuntimeDispatchOutcome::RejectedBeforeInvoke(
+                    Self::tool_policy_error(name, &plan),
+                ),
                 PolicyDispatchAction::Preview => RuntimeDispatchOutcome::RejectedBeforeInvoke(
                     policy_synthetic_preview(name, &plan),
                 ),
@@ -811,9 +801,9 @@ impl ToolRegistry {
             let entry = match inner.tools.get(name) {
                 Some(entry) => entry,
                 None => {
-                    return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::tool_error(&format!(
-                        "Tool not found: {name}"
-                    )))
+                    return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::tool_error(
+                        &format!("Tool not found: {name}"),
+                    ))
                 }
             };
             if expected_registration_id.is_some_and(|expected| expected != entry.registration_id) {
@@ -840,9 +830,9 @@ impl ToolRegistry {
                 tool = name,
                 "blocked rewritten tool dispatch referencing verifier-only skill trust state"
             );
-            return RuntimeDispatchOutcome::RejectedBeforeInvoke(
-                Self::skill_trust_dispatch_error(name),
-            );
+            return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::skill_trust_dispatch_error(
+                name,
+            ));
         }
         let containment_invocation = match (&plan.containment_context, &containment_handler) {
             (Some(context), Some(_)) => match context.prepare_host_sensitive_invocation(name) {
@@ -850,9 +840,9 @@ impl ToolRegistry {
                 Err(error) => {
                     self.record_policy_decision(&plan);
                     maybe_log_policy(name, &plan);
-                    return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::tool_error(&format!(
-                        "Certified containment dispatch could not start: {error}"
-                    )));
+                    return RuntimeDispatchOutcome::RejectedBeforeInvoke(Self::tool_error(
+                        &format!("Certified containment dispatch could not start: {error}"),
+                    ));
                 }
             },
             (Some(_), None) => {
@@ -1436,9 +1426,9 @@ mod tests {
         MemorySubject, MemorySubjectDerivationKey, MemorySurface, ResolvedExecutionMode, ToolError,
     };
     use serde_json::json;
-    use std::time::Instant;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
     use crate::tool_policy::{ToolPolicyEngine, ToolPolicyMode};
 
@@ -1470,7 +1460,11 @@ mod tests {
         }
 
         fn schema(&self) -> ToolSchema {
-            tool_schema(self.name, "Counting test handler", JsonSchema::new("object"))
+            tool_schema(
+                self.name,
+                "Counting test handler",
+                JsonSchema::new("object"),
+            )
         }
     }
 
@@ -1881,9 +1875,8 @@ mod tests {
                 "",
                 None,
             );
-            registry.set_policy(
-                ToolPolicyEngine::new(mode).with_denylist(&["terminal", "write_file"]),
-            );
+            registry
+                .set_policy(ToolPolicyEngine::new(mode).with_denylist(&["terminal", "write_file"]));
 
             let terminal = registry
                 .dispatch_async(
@@ -1952,12 +1945,14 @@ mod tests {
         let registry = ToolRegistry::new();
         registry.set_execution_containment_context(context.clone());
         let host_calls = Arc::new(AtomicUsize::new(0));
-        let terminal = Arc::new(crate::tools::terminal::TerminalHandler::with_execution_context(
-            Arc::new(HostFallbackProbe {
-                calls: host_calls.clone(),
-            }),
-            context.clone(),
-        ));
+        let terminal = Arc::new(
+            crate::tools::terminal::TerminalHandler::with_execution_context(
+                Arc::new(HostFallbackProbe {
+                    calls: host_calls.clone(),
+                }),
+                context.clone(),
+            ),
+        );
         assert!(Arc::ptr_eq(
             &context,
             &registry.execution_containment_context()
@@ -1988,10 +1983,9 @@ mod tests {
         assert!(enforced_decision.allow);
 
         registry.set_policy(ToolPolicyEngine::new(ToolPolicyMode::Simulate));
-        let simulated: Value = serde_json::from_str(
-            &registry.dispatch_async("terminal", params).await,
-        )
-        .expect("synthetic simulation result");
+        let simulated: Value =
+            serde_json::from_str(&registry.dispatch_async("terminal", params).await)
+                .expect("synthetic simulation result");
         assert_eq!(simulated["status"], "preview");
         assert_eq!(simulated["will_execute"], false);
         assert_eq!(simulated["policy"]["allow"], enforced_decision.allow);
@@ -2034,12 +2028,14 @@ mod tests {
         registry.set_execution_containment_context(registry_context);
         registry.set_policy(ToolPolicyEngine::new(ToolPolicyMode::Enforce));
         let host_calls = Arc::new(AtomicUsize::new(0));
-        let terminal = Arc::new(crate::tools::terminal::TerminalHandler::with_execution_context(
-            Arc::new(HostFallbackProbe {
-                calls: host_calls.clone(),
-            }),
-            handler_context,
-        ));
+        let terminal = Arc::new(
+            crate::tools::terminal::TerminalHandler::with_execution_context(
+                Arc::new(HostFallbackProbe {
+                    calls: host_calls.clone(),
+                }),
+                handler_context,
+            ),
+        );
         let schema = terminal.schema();
         let name = schema.name.clone();
         let description = schema.description.clone();
@@ -2096,8 +2092,7 @@ mod tests {
         let remote_audit = temp.path().join("remote-keyring-audit.json");
         let local_owner_keyring = temp.path().join("local-owner-keyring.json");
         for authority_path in [&remote_root, &remote_audit, &local_owner_keyring] {
-            std::fs::write(authority_path, "owner-only authority state")
-                .expect("authority state");
+            std::fs::write(authority_path, "owner-only authority state").expect("authority state");
         }
         #[cfg(unix)]
         {
@@ -2123,7 +2118,11 @@ mod tests {
             link.join("candidate").join("SKILL.md")
         };
         #[cfg(not(unix))]
-        let terminal_target = skills_root.join("scratch").join("..").join("candidate").join("SKILL.md");
+        let terminal_target = skills_root
+            .join("scratch")
+            .join("..")
+            .join("candidate")
+            .join("SKILL.md");
         let file_target = skills_root
             .join("scratch")
             .join("..")
@@ -2343,11 +2342,7 @@ mod tests {
             .find(|definition| definition.schema().name == "memory")
             .expect("dynamic runtime definition");
         let error = registry
-            .bind_canonical_memory_subject(
-                &definition,
-                home.path(),
-                memory_filter("dynamic", 63),
-            )
+            .bind_canonical_memory_subject(&definition, home.path(), memory_filter("dynamic", 63))
             .expect_err("dynamic registration must not bind as canonical memory");
         assert!(error
             .to_string()

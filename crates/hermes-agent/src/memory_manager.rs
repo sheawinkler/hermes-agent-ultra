@@ -24,13 +24,13 @@ use hermes_core::{
     MemoryAuditActor, MemoryExportArtifact, MemoryExportArtifactRef, MemoryExportCompletion,
     MemoryExportEvidenceDigest, MemoryExportPage, MemoryExportReceipt, MemoryExportSink,
     MemoryExportSinkError, MemoryExportSnapshot, MemoryForgetReceipt, MemoryGovernanceOperation,
-    MemoryPrincipalId, MemoryProviderGovernanceError, MemoryReadbackReceipt,
-    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySessionId, MemorySubject,
-    MemorySubjectDerivationKey, MemorySubjectStorageKey, MemorySurface, Message,
+    MemoryPrincipalId, MemoryProviderGovernanceError, MemoryReadbackReceipt, MemoryRetentionPolicy,
+    MemoryRetentionReceipt, MemorySessionId, MemorySubject, MemorySubjectDerivationKey,
+    MemorySubjectStorageKey, MemorySurface, Message,
 };
-use sha2::{Digest, Sha256};
 use regex::Regex;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use hermes_intelligence::redact_sensitive_text;
 
@@ -337,12 +337,10 @@ impl MemoryForgetReport {
         !self.providers.is_empty()
             && self.providers.iter().all(|entry| {
                 entry.error.is_none()
-                    && entry
-                        .forget
-                        .as_ref()
-                        .is_some_and(|receipt| {
-                            receipt.provider == entry.provider && receipt.subject_key == self.subject_key
-                        })
+                    && entry.forget.as_ref().is_some_and(|receipt| {
+                        receipt.provider == entry.provider
+                            && receipt.subject_key == self.subject_key
+                    })
                     && entry.readback.as_ref().is_some_and(|receipt| {
                         receipt.provider == entry.provider
                             && receipt.subject_key == self.subject_key
@@ -371,14 +369,13 @@ impl MemoryRetentionReport {
         !self.providers.is_empty()
             && self.providers.iter().all(|entry| {
                 entry.error.is_none()
-                    && entry
-                        .retention
-                        .as_ref()
-                        .is_some_and(|receipt| {
-                            receipt.provider == entry.provider && receipt.subject_key == self.subject_key
-                        })
+                    && entry.retention.as_ref().is_some_and(|receipt| {
+                        receipt.provider == entry.provider
+                            && receipt.subject_key == self.subject_key
+                    })
                     && entry.readback.as_ref().is_some_and(|receipt| {
-                        receipt.provider == entry.provider && receipt.subject_key == self.subject_key
+                        receipt.provider == entry.provider
+                            && receipt.subject_key == self.subject_key
                     })
             })
     }
@@ -558,7 +555,8 @@ impl MemoryAuditStore {
     ) -> Result<bool, MemoryManagerError> {
         let file = open_existing_owner_only(&self.path, false)
             .map_err(|_| MemoryManagerError::AuditStore)?;
-        file.lock_shared().map_err(|_| MemoryManagerError::AuditStore)?;
+        file.lock_shared()
+            .map_err(|_| MemoryManagerError::AuditStore)?;
         let result = (|| {
             let reader = BufReader::new(&file);
             let mut committed_providers = BTreeSet::new();
@@ -607,11 +605,9 @@ impl MemoryAuditStore {
 
                 let matches_verified_forget = export_committed
                     && event.get("version").and_then(Value::as_u64) == Some(2)
-                    && event.get("kind").and_then(Value::as_str)
-                        == Some("governance_terminal")
+                    && event.get("kind").and_then(Value::as_str) == Some("governance_terminal")
                     && event.get("action").and_then(Value::as_str) == Some("forget")
-                    && event.get("outcome").and_then(Value::as_str)
-                        == Some("verified_absent")
+                    && event.get("outcome").and_then(Value::as_str) == Some("verified_absent")
                     && subject_and_actor_match
                     && event.get("residual_records").and_then(Value::as_u64) == Some(0);
                 if matches_verified_forget {
@@ -722,16 +718,17 @@ impl MemoryProviderInventory {
             "provider": provider,
         });
         let result = (|| {
-            serde_json::to_writer(&mut file, &event).map_err(|_| MemoryManagerError::SubjectState)?;
+            serde_json::to_writer(&mut file, &event)
+                .map_err(|_| MemoryManagerError::SubjectState)?;
             file.write_all(b"\n")
                 .map_err(|_| MemoryManagerError::SubjectState)?;
-            file.sync_data().map_err(|_| MemoryManagerError::SubjectState)
+            file.sync_data()
+                .map_err(|_| MemoryManagerError::SubjectState)
         })();
         let _ = fs2::FileExt::unlock(&file);
         result
     }
 }
-
 
 const MEMORY_EXPORT_ARTIFACT_DIRECTORY: &str = "memory-exports";
 
@@ -778,12 +775,8 @@ impl MemoryExportArtifactStore {
         subject_key: MemorySubjectStorageKey,
         expected_providers: BTreeSet<String>,
     ) -> Result<SecureMemoryExportTransaction, MemoryManagerError> {
-        SecureMemoryExportTransaction::begin(
-            self.root.clone(),
-            subject_key,
-            expected_providers,
-        )
-        .map_err(|_| MemoryManagerError::ExportArtifact)
+        SecureMemoryExportTransaction::begin(self.root.clone(), subject_key, expected_providers)
+            .map_err(|_| MemoryManagerError::ExportArtifact)
     }
 
     fn open_committed(
@@ -795,8 +788,8 @@ impl MemoryExportArtifactStore {
         ensure_owner_only_directory(&self.root).map_err(|_| MemoryManagerError::ExportArtifact)?;
         let reference = artifact.artifact_ref.as_str();
         let manifest_path = self.root.join(format!("{reference}.manifest.json"));
-        let mut manifest_file =
-            open_existing_owner_only(&manifest_path, false).map_err(|_| MemoryManagerError::ExportArtifact)?;
+        let mut manifest_file = open_existing_owner_only(&manifest_path, false)
+            .map_err(|_| MemoryManagerError::ExportArtifact)?;
         manifest_file
             .lock_shared()
             .map_err(|_| MemoryManagerError::ExportArtifact)?;
@@ -806,14 +799,13 @@ impl MemoryExportArtifactStore {
             .map_err(|_| MemoryManagerError::ExportArtifact);
         let _ = fs2::FileExt::unlock(&manifest_file);
         manifest_result?;
-        let observed_manifest_digest = MemoryExportEvidenceDigest::from_sha256_bytes(
-            Sha256::digest(&manifest_bytes).into(),
-        );
+        let observed_manifest_digest =
+            MemoryExportEvidenceDigest::from_sha256_bytes(Sha256::digest(&manifest_bytes).into());
         if observed_manifest_digest != artifact.manifest_digest {
             return Err(MemoryManagerError::ExportArtifact);
         }
-        let manifest: ExportArtifactManifest =
-            serde_json::from_slice(&manifest_bytes).map_err(|_| MemoryManagerError::ExportArtifact)?;
+        let manifest: ExportArtifactManifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|_| MemoryManagerError::ExportArtifact)?;
         if manifest.version != 1
             || manifest.kind != "memory_export_manifest"
             || manifest.artifact_ref != artifact.artifact_ref
@@ -853,8 +845,8 @@ impl MemoryExportArtifactStore {
         // Open and verify the exact descriptor that will be returned. A later
         // path replacement cannot affect this bound descriptor.
         let data_path = self.root.join(format!("{reference}.jsonl"));
-        let mut data_file =
-            open_existing_owner_only(&data_path, false).map_err(|_| MemoryManagerError::ExportArtifact)?;
+        let mut data_file = open_existing_owner_only(&data_path, false)
+            .map_err(|_| MemoryManagerError::ExportArtifact)?;
         data_file
             .lock_shared()
             .map_err(|_| MemoryManagerError::ExportArtifact)?;
@@ -896,7 +888,9 @@ impl MemoryExportArtifactStore {
     }
 }
 
-fn hash_open_export_file(file: &mut fs::File) -> Result<MemoryExportEvidenceDigest, MemoryManagerError> {
+fn hash_open_export_file(
+    file: &mut fs::File,
+) -> Result<MemoryExportEvidenceDigest, MemoryManagerError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| MemoryManagerError::ExportArtifact)?;
     let mut digest = Sha256::new();
@@ -970,7 +964,8 @@ impl SecureMemoryExportTransaction {
         {
             return Err(MemoryExportSinkError::Rejected);
         }
-        ensure_owner_only_directory(&root).map_err(|_| MemoryExportSinkError::ArtifactUnavailable)?;
+        ensure_owner_only_directory(&root)
+            .map_err(|_| MemoryExportSinkError::ArtifactUnavailable)?;
         let (artifact_ref, stage_path, file) = (0..8)
             .find_map(|_| {
                 let artifact_ref = new_export_artifact_ref();
@@ -1058,7 +1053,8 @@ impl SecureMemoryExportTransaction {
         page: MemoryExportPage,
     ) -> Result<(), MemoryExportSinkError> {
         self.ensure_active()?;
-        let record_count = u64::try_from(page.records.len()).map_err(|_| MemoryExportSinkError::Rejected)?;
+        let record_count =
+            u64::try_from(page.records.len()).map_err(|_| MemoryExportSinkError::Rejected)?;
         {
             let state = self
                 .providers
@@ -1171,9 +1167,7 @@ impl SecureMemoryExportTransaction {
         !self.aborted
             && self.expected_providers.iter().all(|provider| {
                 self.providers.get(provider).is_some_and(|state| {
-                    state.snapshot.is_some()
-                        && state.finished
-                        && state.expected_cursor.is_none()
+                    state.snapshot.is_some() && state.finished && state.expected_cursor.is_none()
                 })
             })
     }
@@ -1220,11 +1214,10 @@ impl SecureMemoryExportTransaction {
             "provider_count": provider_count,
             "providers": providers,
         });
-        let manifest_bytes =
-            serde_json::to_vec(&manifest).map_err(|_| MemoryExportSinkError::ArtifactUnavailable)?;
-        let manifest_digest = MemoryExportEvidenceDigest::from_sha256_bytes(
-            Sha256::digest(&manifest_bytes).into(),
-        );
+        let manifest_bytes = serde_json::to_vec(&manifest)
+            .map_err(|_| MemoryExportSinkError::ArtifactUnavailable)?;
+        let manifest_digest =
+            MemoryExportEvidenceDigest::from_sha256_bytes(Sha256::digest(&manifest_bytes).into());
         Ok((
             MemoryExportArtifact::new(
                 self.artifact_ref.clone(),
@@ -1321,7 +1314,8 @@ impl MemoryExportSink for ProviderExportSink<'_> {
         &mut self,
         snapshot: MemoryExportSnapshot,
     ) -> Result<(), MemoryExportSinkError> {
-        self.transaction.begin_provider_inner(self.provider, snapshot)
+        self.transaction
+            .begin_provider_inner(self.provider, snapshot)
     }
 
     fn append_page(&mut self, page: MemoryExportPage) -> Result<(), MemoryExportSinkError> {
@@ -1332,7 +1326,8 @@ impl MemoryExportSink for ProviderExportSink<'_> {
         &mut self,
         completion: MemoryExportCompletion,
     ) -> Result<(), MemoryExportSinkError> {
-        self.transaction.finish_provider_inner(self.provider, completion)
+        self.transaction
+            .finish_provider_inner(self.provider, completion)
     }
 
     fn abort(&mut self) {
@@ -1734,10 +1729,7 @@ impl MemoryManager {
 
     /// Governance callers may not replace the actor derived from this
     /// manager's authenticated subject.
-    pub fn require_audit_actor(
-        &self,
-        actor: &MemoryAuditActor,
-    ) -> Result<(), MemoryManagerError> {
+    pub fn require_audit_actor(&self, actor: &MemoryAuditActor) -> Result<(), MemoryManagerError> {
         if &self.audit_actor == actor {
             Ok(())
         } else {
@@ -2253,13 +2245,7 @@ impl MemoryManager {
             {
                 return;
             }
-            provider.on_memory_write(
-                &self.subject,
-                &self.subject_key,
-                action,
-                target,
-                &content,
-            );
+            provider.on_memory_write(&self.subject, &self.subject_key, action, target, &content);
         }
     }
 
@@ -2399,12 +2385,7 @@ impl MemoryManager {
                 Some(provider) => {
                     let provider_result = {
                         let mut sink = transaction.scoped(provider_name);
-                        provider.export_subject(
-                            &self.subject,
-                            &self.subject_key,
-                            actor,
-                            &mut sink,
-                        )
+                        provider.export_subject(&self.subject, &self.subject_key, actor, &mut sink)
                     };
                     match provider_result {
                         Err(error) => MemoryExportProviderReceipt {
@@ -2672,20 +2653,20 @@ impl MemoryManager {
             .collect::<BTreeSet<_>>();
         if !self
             .audit_store
-            .has_committed_export(
-                &self.subject_key,
-                actor,
-                artifact,
-                &expected_providers,
-            )
+            .has_committed_export(&self.subject_key, actor, artifact, &expected_providers)
             .map_err(|_| MemoryManagerError::ExportArtifact)?
         {
             return Err(MemoryManagerError::ExportArtifact);
         }
-        let file = self
-            .artifact_store
-            .open_committed(&self.subject_key, &expected_providers, artifact)?;
-        self.audit(MemoryAuditAction::Read, None, "export_artifact_opened", actor)?;
+        let file =
+            self.artifact_store
+                .open_committed(&self.subject_key, &expected_providers, artifact)?;
+        self.audit(
+            MemoryAuditAction::Read,
+            None,
+            "export_artifact_opened",
+            actor,
+        )?;
         Ok(file)
     }
 
@@ -2908,128 +2889,128 @@ impl MemoryManager {
                 }
             };
 
-            let (mut entry, outcome, receipt_count, residual_records) =
-                if let Some(provider) = self.provider_for_governance(&provider_name) {
-                    match provider.retention_sweep(&self.subject, &self.subject_key, policy, actor)
-                    {
-                        Err(error) => (
-                            MemoryRetentionProviderReceipt {
-                                provider: provider_name.clone(),
-                                retention: None,
-                                readback: None,
-                                error: Some(error),
-                            },
-                            "provider_error",
-                            None,
-                            None,
-                        ),
-                        Ok(retention)
-                            if retention.provider != provider_name
-                                || retention.subject_key != self.subject_key =>
-                        {
-                            let deleted_records = retention.deleted_records;
-                            (
-                                MemoryRetentionProviderReceipt {
-                                    provider: provider_name.clone(),
-                                    retention: Some(retention),
-                                    readback: None,
-                                    error: Some(MemoryProviderGovernanceError::failed(
-                                        provider_name.clone(),
-                                        MemoryGovernanceOperation::RetentionSweep,
-                                    )),
-                                },
-                                "invalid_receipt",
-                                Some(deleted_records),
-                                None,
-                            )
-                        }
-                        Ok(retention) => {
-                            let deleted_records = retention.deleted_records;
-                            let readback = if self
-                                .audit(
-                                    MemoryAuditAction::Read,
-                                    Some(&provider_name),
-                                    "requested",
-                                    actor,
-                                )
-                                .is_err()
-                            {
-                                Err(MemoryProviderGovernanceError::failed(
-                                    provider_name.clone(),
-                                    MemoryGovernanceOperation::Readback,
-                                ))
-                            } else {
-                                provider.verify_subject_absent(&self.subject, &self.subject_key)
-                            };
-                            match readback {
-                                Ok(readback)
-                                    if readback.provider == provider_name
-                                        && readback.subject_key == self.subject_key =>
-                                {
-                                    let residual_records = readback.residual_records;
-                                    (
-                                        MemoryRetentionProviderReceipt {
-                                            provider: provider_name.clone(),
-                                            retention: Some(retention),
-                                            readback: Some(readback),
-                                            error: None,
-                                        },
-                                        if residual_records == 0 {
-                                            "verified_absent"
-                                        } else {
-                                            "verified_residual"
-                                        },
-                                        Some(deleted_records),
-                                        Some(residual_records),
-                                    )
-                                }
-                                Ok(readback) => {
-                                    let residual_records = readback.residual_records;
-                                    (
-                                        MemoryRetentionProviderReceipt {
-                                            provider: provider_name.clone(),
-                                            retention: Some(retention),
-                                            readback: Some(readback),
-                                            error: Some(MemoryProviderGovernanceError::failed(
-                                                provider_name.clone(),
-                                                MemoryGovernanceOperation::Readback,
-                                            )),
-                                        },
-                                        "invalid_readback",
-                                        Some(deleted_records),
-                                        Some(residual_records),
-                                    )
-                                }
-                                Err(error) => (
-                                    MemoryRetentionProviderReceipt {
-                                        provider: provider_name.clone(),
-                                        retention: Some(retention),
-                                        readback: None,
-                                        error: Some(error),
-                                    },
-                                    "readback_error",
-                                    Some(deleted_records),
-                                    None,
-                                ),
-                            }
-                        }
-                    }
-                } else {
-                    (
+            let (mut entry, outcome, receipt_count, residual_records) = if let Some(provider) =
+                self.provider_for_governance(&provider_name)
+            {
+                match provider.retention_sweep(&self.subject, &self.subject_key, policy, actor) {
+                    Err(error) => (
                         MemoryRetentionProviderReceipt {
                             provider: provider_name.clone(),
                             retention: None,
                             readback: None,
-                            error: Some(MemoryProviderGovernanceError::failed(
-                                provider_name.clone(),
-                                MemoryGovernanceOperation::RetentionSweep,
-                            )),
+                            error: Some(error),
                         },
-                        "unavailable",
+                        "provider_error",
                         None,
                         None,
-                    )
-                };
+                    ),
+                    Ok(retention)
+                        if retention.provider != provider_name
+                            || retention.subject_key != self.subject_key =>
+                    {
+                        let deleted_records = retention.deleted_records;
+                        (
+                            MemoryRetentionProviderReceipt {
+                                provider: provider_name.clone(),
+                                retention: Some(retention),
+                                readback: None,
+                                error: Some(MemoryProviderGovernanceError::failed(
+                                    provider_name.clone(),
+                                    MemoryGovernanceOperation::RetentionSweep,
+                                )),
+                            },
+                            "invalid_receipt",
+                            Some(deleted_records),
+                            None,
+                        )
+                    }
+                    Ok(retention) => {
+                        let deleted_records = retention.deleted_records;
+                        let readback = if self
+                            .audit(
+                                MemoryAuditAction::Read,
+                                Some(&provider_name),
+                                "requested",
+                                actor,
+                            )
+                            .is_err()
+                        {
+                            Err(MemoryProviderGovernanceError::failed(
+                                provider_name.clone(),
+                                MemoryGovernanceOperation::Readback,
+                            ))
+                        } else {
+                            provider.verify_subject_absent(&self.subject, &self.subject_key)
+                        };
+                        match readback {
+                            Ok(readback)
+                                if readback.provider == provider_name
+                                    && readback.subject_key == self.subject_key =>
+                            {
+                                let residual_records = readback.residual_records;
+                                (
+                                    MemoryRetentionProviderReceipt {
+                                        provider: provider_name.clone(),
+                                        retention: Some(retention),
+                                        readback: Some(readback),
+                                        error: None,
+                                    },
+                                    if residual_records == 0 {
+                                        "verified_absent"
+                                    } else {
+                                        "verified_residual"
+                                    },
+                                    Some(deleted_records),
+                                    Some(residual_records),
+                                )
+                            }
+                            Ok(readback) => {
+                                let residual_records = readback.residual_records;
+                                (
+                                    MemoryRetentionProviderReceipt {
+                                        provider: provider_name.clone(),
+                                        retention: Some(retention),
+                                        readback: Some(readback),
+                                        error: Some(MemoryProviderGovernanceError::failed(
+                                            provider_name.clone(),
+                                            MemoryGovernanceOperation::Readback,
+                                        )),
+                                    },
+                                    "invalid_readback",
+                                    Some(deleted_records),
+                                    Some(residual_records),
+                                )
+                            }
+                            Err(error) => (
+                                MemoryRetentionProviderReceipt {
+                                    provider: provider_name.clone(),
+                                    retention: Some(retention),
+                                    readback: None,
+                                    error: Some(error),
+                                },
+                                "readback_error",
+                                Some(deleted_records),
+                                None,
+                            ),
+                        }
+                    }
+                }
+            } else {
+                (
+                    MemoryRetentionProviderReceipt {
+                        provider: provider_name.clone(),
+                        retention: None,
+                        readback: None,
+                        error: Some(MemoryProviderGovernanceError::failed(
+                            provider_name.clone(),
+                            MemoryGovernanceOperation::RetentionSweep,
+                        )),
+                    },
+                    "unavailable",
+                    None,
+                    None,
+                )
+            };
             if self
                 .record_governance_terminal(
                     MemoryAuditAction::RetentionSweep,
@@ -3122,7 +3103,8 @@ fn ensure_owner_only_directory(path: &Path) -> Result<(), MemoryManagerError> {
                 fs::set_permissions(path, fs::Permissions::from_mode(0o700))
                     .map_err(|_| MemoryManagerError::SubjectState)?;
             }
-            let metadata = fs::symlink_metadata(path).map_err(|_| MemoryManagerError::SubjectState)?;
+            let metadata =
+                fs::symlink_metadata(path).map_err(|_| MemoryManagerError::SubjectState)?;
             if metadata.file_type().is_symlink()
                 || !metadata.is_dir()
                 || !is_owner_only_directory(&metadata)
@@ -3167,9 +3149,7 @@ fn load_or_provision_subject_derivation_key(
     let path = state_dir.join("memory-subject-key-v1.bin");
     match fs::symlink_metadata(&path) {
         Ok(_) => read_subject_derivation_key(&path),
-        Err(error)
-            if error.kind() == std::io::ErrorKind::NotFound && existing_subject_state =>
-        {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && existing_subject_state => {
             Err(MemoryManagerError::SubjectState)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -3219,7 +3199,8 @@ fn ensure_owner_only_file(path: &Path, create_if_missing: bool) -> Result<(), Me
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(_) => return Err(MemoryManagerError::AuditStore),
             }
-            let metadata = fs::symlink_metadata(path).map_err(|_| MemoryManagerError::AuditStore)?;
+            let metadata =
+                fs::symlink_metadata(path).map_err(|_| MemoryManagerError::AuditStore)?;
             if metadata.file_type().is_symlink() || !metadata.is_file() || !is_owner_only(&metadata)
             {
                 return Err(MemoryManagerError::AuditStore);
@@ -3233,7 +3214,9 @@ fn ensure_owner_only_file(path: &Path, create_if_missing: bool) -> Result<(), Me
 fn open_owner_only_for_append(path: &Path) -> Result<fs::File, MemoryManagerError> {
     ensure_owner_only_file(path, false)?;
     let file = open_existing_owner_only(path, true).map_err(|_| MemoryManagerError::AuditStore)?;
-    let metadata = file.metadata().map_err(|_| MemoryManagerError::AuditStore)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| MemoryManagerError::AuditStore)?;
     if !metadata.is_file() || !is_owner_only(&metadata) {
         return Err(MemoryManagerError::AuditStore);
     }
@@ -3262,16 +3245,25 @@ fn open_existing_owner_only(path: &Path, append: bool) -> Result<fs::File, Memor
     let file = {
         use std::os::unix::fs::OpenOptionsExt;
         let mut options = OpenOptions::new();
-        options.read(!append).append(append).custom_flags(libc::O_NOFOLLOW);
-        options.open(path).map_err(|_| MemoryManagerError::SubjectState)?
+        options
+            .read(!append)
+            .append(append)
+            .custom_flags(libc::O_NOFOLLOW);
+        options
+            .open(path)
+            .map_err(|_| MemoryManagerError::SubjectState)?
     };
     #[cfg(not(unix))]
     let file = {
         let mut options = OpenOptions::new();
         options.read(!append).append(append);
-        options.open(path).map_err(|_| MemoryManagerError::SubjectState)?
+        options
+            .open(path)
+            .map_err(|_| MemoryManagerError::SubjectState)?
     };
-    let metadata = file.metadata().map_err(|_| MemoryManagerError::SubjectState)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| MemoryManagerError::SubjectState)?;
     if !metadata.is_file() || !is_owner_only(&metadata) {
         return Err(MemoryManagerError::SubjectState);
     }
@@ -3321,7 +3313,6 @@ fn is_owner_only_directory(_metadata: &fs::Metadata) -> bool {
 fn is_owner_only(_metadata: &fs::Metadata) -> bool {
     true
 }
-
 
 #[derive(Debug, Clone)]
 struct FusedMemoryCandidate {

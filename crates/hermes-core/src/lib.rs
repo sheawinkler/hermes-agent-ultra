@@ -31,10 +31,10 @@ pub use memory_subject::{
     MemoryAuditActor, MemoryExportArtifact, MemoryExportArtifactRef, MemoryExportCompletion,
     MemoryExportEvidenceDigest, MemoryExportPage, MemoryExportReceipt, MemoryExportSink,
     MemoryExportSinkError, MemoryExportSnapshot, MemoryForgetReceipt, MemoryGovernanceOperation,
-    MemoryPrincipalId, MemoryProviderGovernanceError, MemoryReadbackReceipt,
-    MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySessionId, MemorySubject,
-    MemorySubjectDerivationKey, MemorySubjectError, MemorySubjectStorageKey, MemorySurface,
-    MemoryTeamId, MemoryTenantId, MemoryVisibility, MEMORY_SUBJECT_KEY_VERSION,
+    MemoryPrincipalId, MemoryProviderGovernanceError, MemoryReadbackReceipt, MemoryRetentionPolicy,
+    MemoryRetentionReceipt, MemorySessionId, MemorySubject, MemorySubjectDerivationKey,
+    MemorySubjectError, MemorySubjectStorageKey, MemorySurface, MemoryTeamId, MemoryTenantId,
+    MemoryVisibility, MEMORY_SUBJECT_KEY_VERSION,
 };
 
 // Re-export all core types

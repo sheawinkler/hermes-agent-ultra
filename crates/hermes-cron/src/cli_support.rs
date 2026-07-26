@@ -9,12 +9,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use hermes_agent::{agent_loop::ToolRegistry, RunRuntime};
-use hermes_environments::ExecutionContainmentContext;
 use hermes_config::GatewayConfig;
 use hermes_core::{
     AgentError, LlmProvider, LlmResponse, Message, ResolvedExecutionMode, StreamChunk, StreamDelta,
     ToolSchema,
 };
+use hermes_environments::ExecutionContainmentContext;
 
 use crate::persistence::FileJobPersistence;
 use crate::runner::CronRunner;

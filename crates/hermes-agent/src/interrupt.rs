@@ -124,8 +124,7 @@ impl InterruptController {
     /// Wait only for a terminal cancellation or deadline. Steering remains
     /// pending for the tool-batch boundary that durably attaches it.
     pub async fn fatal_cancelled(&self) {
-        self.wait_until_pending(InterruptCause::is_fatal)
-            .await;
+        self.wait_until_pending(InterruptCause::is_fatal).await;
     }
 
     async fn wait_until_pending(&self, accepts: impl Fn(InterruptCause) -> bool) {
@@ -214,10 +213,7 @@ impl InterruptController {
             .pending
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if !pending
-            .as_ref()
-            .is_some_and(|signal| accepts(signal.cause))
-        {
+        if !pending.as_ref().is_some_and(|signal| accepts(signal.cause)) {
             return None;
         }
         let signal = pending.take();
@@ -227,9 +223,9 @@ impl InterruptController {
 
     fn agent_error_from_parts(cause: InterruptCause, message: Option<String>) -> AgentError {
         match cause {
-            InterruptCause::Timeout => AgentError::Timeout(
-                message.unwrap_or_else(|| "agent deadline expired".to_string()),
-            ),
+            InterruptCause::Timeout => {
+                AgentError::Timeout(message.unwrap_or_else(|| "agent deadline expired".to_string()))
+            }
             InterruptCause::Cancellation | InterruptCause::Steer => {
                 AgentError::Interrupted { message }
             }
@@ -402,7 +398,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn concurrent_consume_never_erases_a_second_signal() {
         fn error_message(error: AgentError) -> String {
@@ -442,7 +437,8 @@ mod tests {
                 .map(error_message)
                 .collect::<Vec<_>>();
             assert!(
-                seen.iter().any(|message| message == &format!("second-{sequence}")),
+                seen.iter()
+                    .any(|message| message == &format!("second-{sequence}")),
                 "second signal was erased: {seen:?}"
             );
         }

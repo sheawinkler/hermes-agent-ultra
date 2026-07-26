@@ -5,10 +5,10 @@ use fs2::FileExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -70,14 +70,12 @@ impl FileMemoryTarget {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMemoryInventory {
     pub records: u64,
     pub governed_files: u64,
     pub temporary_residues: u64,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SubjectRecordIndex {
@@ -357,7 +355,10 @@ impl FileMemoryBackend {
         Self::ensure_safe_regular_file(path)?;
         let tmp = Self::temp_path_for(path);
         let mut file = Self::open_owner_only(&tmp, true)?;
-        if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
+        if let Err(error) = file
+            .write_all(content.as_bytes())
+            .and_then(|_| file.sync_all())
+        {
             let _ = std::fs::remove_file(&tmp);
             return Err(ToolError::ExecutionFailed(format!(
                 "Failed to write temporary memory file '{}': {}",
@@ -533,7 +534,9 @@ impl FileMemoryBackend {
         index: &SubjectRecordIndex,
     ) -> Result<(), ToolError> {
         let serialized = serde_json::to_string(index).map_err(|error| {
-            ToolError::ExecutionFailed(format!("Failed to serialize memory record metadata: {error}"))
+            ToolError::ExecutionFailed(format!(
+                "Failed to serialize memory record metadata: {error}"
+            ))
         })?;
         self.write_file(filter, &self.records_path(filter)?, &serialized)
     }
@@ -758,10 +761,7 @@ impl FileMemoryBackend {
     }
 
     #[cfg(unix)]
-    fn sync_subject_directory(
-        &self,
-        filter: &MemorySubjectStorageKey,
-    ) -> Result<(), ToolError> {
+    fn sync_subject_directory(&self, filter: &MemorySubjectStorageKey) -> Result<(), ToolError> {
         let directory = self.subject_dir(filter)?;
         File::open(&directory)
             .and_then(|file| file.sync_all())
@@ -775,10 +775,7 @@ impl FileMemoryBackend {
     }
 
     #[cfg(not(unix))]
-    fn sync_subject_directory(
-        &self,
-        _filter: &MemorySubjectStorageKey,
-    ) -> Result<(), ToolError> {
+    fn sync_subject_directory(&self, _filter: &MemorySubjectStorageKey) -> Result<(), ToolError> {
         Err(ToolError::ExecutionFailed(
             "Subject memory storage requires directory fsync support.".to_string(),
         ))
@@ -901,10 +898,7 @@ impl FileMemoryBackend {
         ))
     }
 
-    fn export_cursor(
-        snapshot: &MemoryExportSnapshot,
-        offset: usize,
-    ) -> MemoryExportEvidenceDigest {
+    fn export_cursor(snapshot: &MemoryExportSnapshot, offset: usize) -> MemoryExportEvidenceDigest {
         MemoryExportEvidenceDigest::sha256_bytes(
             format!(
                 "builtin-memory-export-cursor-v1:{}:{offset}",
@@ -955,8 +949,8 @@ impl FileMemoryBackend {
             } else {
                 Some(Self::export_cursor(&snapshot, start))
             };
-            let next_cursor = (end < records.records.len())
-                .then(|| Self::export_cursor(&snapshot, end));
+            let next_cursor =
+                (end < records.records.len()).then(|| Self::export_cursor(&snapshot, end));
             let record_ids = records.records[start..end]
                 .iter()
                 .map(Self::export_record_id)
@@ -992,7 +986,10 @@ impl FileMemoryBackend {
             page_count = page_count.saturating_add(1);
         }
         if sink
-            .finish_provider(MemoryExportCompletion::exhausted(exported_records, page_count))
+            .finish_provider(MemoryExportCompletion::exhausted(
+                exported_records,
+                page_count,
+            ))
             .is_err()
         {
             sink.abort();
@@ -1040,9 +1037,9 @@ impl FileMemoryBackend {
             .governed_file_paths(filter)
             .map_err(|error| Self::governance_failed(MemoryGovernanceOperation::Forget, error))?
         {
-            if Self::remove_governed_file(&path)
-                .map_err(|error| Self::governance_failed(MemoryGovernanceOperation::Forget, error))?
-            {
+            if Self::remove_governed_file(&path).map_err(|error| {
+                Self::governance_failed(MemoryGovernanceOperation::Forget, error)
+            })? {
                 deleted_files = deleted_files.saturating_add(1);
             }
         }
@@ -1050,9 +1047,9 @@ impl FileMemoryBackend {
             .temporary_residue_paths(filter)
             .map_err(|error| Self::governance_failed(MemoryGovernanceOperation::Forget, error))?
         {
-            if Self::remove_governed_file(&path)
-                .map_err(|error| Self::governance_failed(MemoryGovernanceOperation::Forget, error))?
-            {
+            if Self::remove_governed_file(&path).map_err(|error| {
+                Self::governance_failed(MemoryGovernanceOperation::Forget, error)
+            })? {
                 deleted_files = deleted_files.saturating_add(1);
             }
         }
@@ -1100,11 +1097,9 @@ impl FileMemoryBackend {
         filter: &MemorySubjectStorageKey,
         policy: &MemoryRetentionPolicy,
     ) -> Result<MemoryRetentionReceipt, MemoryProviderGovernanceError> {
-        let _lock = self
-            .acquire_mutation_lock(filter)
-            .map_err(|error| {
-                Self::governance_failed(MemoryGovernanceOperation::RetentionSweep, error)
-            })?;
+        let _lock = self.acquire_mutation_lock(filter).map_err(|error| {
+            Self::governance_failed(MemoryGovernanceOperation::RetentionSweep, error)
+        })?;
         let snapshot = self.read_subject_snapshot(filter).map_err(|error| {
             Self::governance_failed(MemoryGovernanceOperation::RetentionSweep, error)
         })?;
@@ -1116,15 +1111,10 @@ impl FileMemoryBackend {
         }
         let mut deleted = HashSet::<(FileMemoryTarget, String)>::new();
         if let Some(max_age_days) = policy.max_age_days {
-            let cutoff = Self::now_millis().saturating_sub(
-                u64::from(max_age_days).saturating_mul(24 * 60 * 60 * 1_000),
-            );
+            let cutoff = Self::now_millis()
+                .saturating_sub(u64::from(max_age_days).saturating_mul(24 * 60 * 60 * 1_000));
             for record in &snapshot.records {
-                if record
-                    .created_at_ms
-                    .expect("complete age metadata")
-                    < cutoff
-                {
+                if record.created_at_ms.expect("complete age metadata") < cutoff {
                     deleted.insert((record.target, Self::fingerprint(&record.content)));
                 }
             }
@@ -1144,10 +1134,7 @@ impl FileMemoryBackend {
                     .cmp(&left.created_at_ms)
                     .then_with(|| right_index.cmp(left_index))
             });
-            for (_, record) in retained_candidates
-                .into_iter()
-                .skip(max_records as usize)
-            {
+            for (_, record) in retained_candidates.into_iter().skip(max_records as usize) {
                 deleted.insert((record.target, Self::fingerprint(&record.content)));
             }
         }
@@ -1171,8 +1158,7 @@ impl FileMemoryBackend {
                 )
             })
             .collect::<Vec<_>>();
-        let (index, _) =
-            Self::reconcile_record_index(Some(snapshot.index.clone()), &entries, None);
+        let (index, _) = Self::reconcile_record_index(Some(snapshot.index.clone()), &entries, None);
         for (target, records) in &entries {
             let path = self
                 .path_for(filter, target.as_tool_target())
@@ -1186,10 +1172,7 @@ impl FileMemoryBackend {
             } else {
                 self.write_file(filter, &path, &Self::format_entries(records))
                     .map_err(|error| {
-                        Self::governance_failed(
-                            MemoryGovernanceOperation::RetentionSweep,
-                            error,
-                        )
+                        Self::governance_failed(MemoryGovernanceOperation::RetentionSweep, error)
                     })?;
             }
         }
@@ -1343,8 +1326,7 @@ impl MemoryBackend for FileMemoryBackend {
             )));
         }
         entries = candidate;
-        let index =
-            self.updated_record_index(filter, target_kind, &entries, Some(new_content))?;
+        let index = self.updated_record_index(filter, target_kind, &entries, Some(new_content))?;
         self.write_file(filter, &path, &Self::format_entries(&entries))?;
         self.write_record_index(filter, &index)?;
         Ok(Self::success_response(target, &entries, "Entry replaced."))
@@ -1416,12 +1398,12 @@ mod tests {
     use std::sync::Arc;
 
     fn filter(label: &str) -> MemorySubjectStorageKey {
-        let subject = hermes_core::MemorySubject::local_owner(
-            hermes_core::MemorySurface::Local,
-            label,
-        )
-        .expect("subject");
-        subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes([53_u8; 32]))
+        let subject =
+            hermes_core::MemorySubject::local_owner(hermes_core::MemorySurface::Local, label)
+                .expect("subject");
+        subject.storage_key(&hermes_core::MemorySubjectDerivationKey::from_bytes(
+            [53_u8; 32],
+        ))
     }
 
     #[cfg(unix)]
@@ -1477,17 +1459,32 @@ mod tests {
         let backend = FileMemoryBackend::with_home(temp.path().to_path_buf());
         let alice = filter("alice");
         let bob = filter("bob");
-        backend.add(&alice, "memory", "Alice-only memory").await.unwrap();
-        backend.add(&bob, "memory", "Bob-only memory").await.unwrap();
+        backend
+            .add(&alice, "memory", "Alice-only memory")
+            .await
+            .unwrap();
+        backend
+            .add(&bob, "memory", "Bob-only memory")
+            .await
+            .unwrap();
 
         let alice_path = backend.path_for(&alice, "memory").unwrap();
         let bob_path = backend.path_for(&bob, "memory").unwrap();
         assert_ne!(alice_path, bob_path);
         assert!(alice_path.starts_with(
-            temp.path().join("memories").join("subjects").join(alice.as_str())
+            temp.path()
+                .join("memories")
+                .join("subjects")
+                .join(alice.as_str())
         ));
-        assert_eq!(std::fs::read_to_string(&alice_path).unwrap(), "Alice-only memory");
-        assert_eq!(std::fs::read_to_string(&bob_path).unwrap(), "Bob-only memory");
+        assert_eq!(
+            std::fs::read_to_string(&alice_path).unwrap(),
+            "Alice-only memory"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&bob_path).unwrap(),
+            "Bob-only memory"
+        );
         #[cfg(unix)]
         assert_eq!(
             std::fs::metadata(&alice_path).unwrap().permissions().mode() & 0o077,
@@ -1524,7 +1521,11 @@ mod tests {
                 .temporary_residue_paths(&subject)
                 .unwrap()
                 .iter()
-                .filter(|entry| entry.file_name().unwrap().to_string_lossy().contains("MEMORY.md.bak."))
+                .filter(|entry| entry
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("MEMORY.md.bak."))
                 .count(),
             1
         );
@@ -1571,7 +1572,10 @@ mod tests {
             write.await.expect("task");
         }
         let path = backend.path_for(&subject, "memory").unwrap();
-        assert_eq!(FileMemoryBackend::parse_entries(&std::fs::read_to_string(path).unwrap()).len(), 24);
+        assert_eq!(
+            FileMemoryBackend::parse_entries(&std::fs::read_to_string(path).unwrap()).len(),
+            24
+        );
     }
 
     #[tokio::test]
@@ -1605,15 +1609,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(path).unwrap(), "legacy record");
     }
 
-
-
     #[tokio::test]
     async fn retention_uses_record_creation_boundary_not_file_mtime() {
         let temp = tempfile::tempdir().unwrap();
         let backend = FileMemoryBackend::with_home(temp.path().to_path_buf());
         let subject = filter("retention-boundary");
-        backend.add(&subject, "memory", "expired record").await.unwrap();
-        backend.add(&subject, "memory", "boundary record").await.unwrap();
+        backend
+            .add(&subject, "memory", "expired record")
+            .await
+            .unwrap();
+        backend
+            .add(&subject, "memory", "boundary record")
+            .await
+            .unwrap();
         let mut index = backend
             .load_record_index(&subject)
             .unwrap()
@@ -1669,7 +1677,10 @@ mod tests {
             .pages
             .iter()
             .flat_map(|page| page.records.iter())
-            .all(|record| record["content"].as_str().unwrap().starts_with("alice record")));
+            .all(|record| record["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("alice record")));
         assert_eq!(
             sink.pages
                 .iter()

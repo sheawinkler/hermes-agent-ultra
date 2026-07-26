@@ -29,17 +29,17 @@ pub use config::{
     PlatformDisplayConfig, ProfileConfig, ProxyConfig, QuickCommandConfig, SecurityConfig,
     SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig, StaleAuxiliaryAssignment,
     TerminalBackendType, TerminalConfig, TerminalHomeMode, ToolOutputConfig, ToolsSettings,
-    WebConfig, WebsiteBlocklistConfig, DEFAULT_TOOL_OUTPUT_MAX_BYTES, DEFAULT_TOOL_OUTPUT_MAX_LINES,
-    DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
+    WebConfig, WebsiteBlocklistConfig, DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+    DEFAULT_TOOL_OUTPUT_MAX_LINES, DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
 };
 pub use loader::{
     apply_user_config_patch, atomic_json_write, atomic_json_write_pretty, atomic_replace_file,
     atomic_write_bytes, atomic_yaml_write, load_config, load_effective_config_yaml_value,
-    load_prefill_messages, load_prefill_messages_file, load_user_config_file, managed_scope_dir,
-    redact_url_credentials_for_display, resolve_prefill_messages_file,
-    resolve_prefill_messages_path, save_config_yaml, set_user_config_value,
-    user_config_field_display, validate_config, ConfigError, ConfigSetResult,
-    load_selected_profile_execution_mode, resolve_runtime_execution_mode, EXECUTION_MODE_ENV_KEY,
+    load_prefill_messages, load_prefill_messages_file, load_selected_profile_execution_mode,
+    load_user_config_file, managed_scope_dir, redact_url_credentials_for_display,
+    resolve_prefill_messages_file, resolve_prefill_messages_path, resolve_runtime_execution_mode,
+    save_config_yaml, set_user_config_value, user_config_field_display, validate_config,
+    ConfigError, ConfigSetResult, EXECUTION_MODE_ENV_KEY,
 };
 pub use managed_gateway::{
     build_vendor_gateway_url, coerce_modal_mode, env_var_enabled, get_tool_gateway_scheme,

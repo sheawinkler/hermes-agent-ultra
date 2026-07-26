@@ -2,12 +2,12 @@
 //!
 //! Mirrors Python `plugins/memory/openviking/__init__.py` (HTTP subset).
 
+use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 use std::sync::Mutex;
-use chrono::Utc;
+use std::time::{Duration, Instant};
 
 use hermes_core::{
     MemoryAuditActor, MemoryExportReceipt, MemoryExportSink, MemoryForgetReceipt,
@@ -310,7 +310,10 @@ fn commit_openviking_session(st: &VikingState) -> bool {
     match st.client.post(&url).headers(headers).send() {
         Ok(response) if response.status().is_success() => true,
         Ok(response) => {
-            tracing::warn!("OpenViking session commit returned HTTP {}", response.status());
+            tracing::warn!(
+                "OpenViking session commit returned HTTP {}",
+                response.status()
+            );
             false
         }
         Err(error) => {
@@ -445,7 +448,11 @@ fn timestamp_from_openviking_metadata(value: &Value) -> Option<i64> {
             continue;
         };
         if let Some(value) = value.as_i64() {
-            return Some(if value > 10_000_000_000 { value / 1_000 } else { value });
+            return Some(if value > 10_000_000_000 {
+                value / 1_000
+            } else {
+                value
+            });
         }
         if let Some(value) = value.as_str() {
             if let Ok(value) = chrono::DateTime::parse_from_rfc3339(value) {
@@ -505,7 +512,9 @@ impl OpenVikingMemoryPlugin {
     }
 
     fn state_for(&self, filter: &MemorySubjectStorageKey) -> Option<VikingState> {
-        self.state.lock().expect("OpenViking state lock")
+        self.state
+            .lock()
+            .expect("OpenViking state lock")
             .as_ref()
             .filter(|state| state.subject_key == *filter)
             .cloned()
@@ -605,7 +614,9 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         })
         .run()
         {
-            Ok(result) if !result.trim().is_empty() => format!("## OpenViking Context\n{}", result.trim()),
+            Ok(result) if !result.trim().is_empty() => {
+                format!("## OpenViking Context\n{}", result.trim())
+            }
             _ => String::new(),
         }
     }
@@ -645,7 +656,10 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         };
         {
             let mut state = self.state.lock().expect("OpenViking state lock");
-            if let Some(current) = state.as_mut().filter(|current| current.subject_key == *filter) {
+            if let Some(current) = state
+                .as_mut()
+                .filter(|current| current.subject_key == *filter)
+            {
                 current.turn_count = current.turn_count.saturating_add(1);
                 st.turn_count = current.turn_count;
             } else {
@@ -666,7 +680,8 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         }
         if let Err(batch_error) = post_openviking_batch(&st, &batch) {
             tracing::warn!("OpenViking structured sync failed: {batch_error}");
-            if let Err(text_error) = post_openviking_text_turn(&st, user_content, assistant_content) {
+            if let Err(text_error) = post_openviking_text_turn(&st, user_content, assistant_content)
+            {
                 tracing::warn!("OpenViking text sync fallback failed: {text_error}");
             }
         }
@@ -682,7 +697,10 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             return;
         };
         if st.turn_count > 0 && commit_openviking_session(&st) {
-            if let Some(current) = self.state.lock().expect("OpenViking state lock")
+            if let Some(current) = self
+                .state
+                .lock()
+                .expect("OpenViking state lock")
                 .as_mut()
                 .filter(|current| current.subject_key == *filter)
             {
@@ -718,9 +736,18 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         };
         let url = format!("{}/api/v1/content/write", st.endpoint);
         let body = content_write_body(&st, memory_subdir_for_target(target), content);
-        match st.client.post(&url).headers(viking_headers(&st)).json(&body).send() {
+        match st
+            .client
+            .post(&url)
+            .headers(viking_headers(&st))
+            .json(&body)
+            .send()
+        {
             Ok(response) if response.status().is_success() => {}
-            Ok(response) => tracing::warn!("OpenViking memory write returned HTTP {}", response.status()),
+            Ok(response) => tracing::warn!(
+                "OpenViking memory write returned HTTP {}",
+                response.status()
+            ),
             Err(error) => tracing::warn!("OpenViking memory write failed: {error}"),
         }
     }
@@ -1045,7 +1072,11 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 MemoryGovernanceOperation::Forget,
             ));
         }
-        Ok(MemoryForgetReceipt::new(self.name(), filter.clone(), uris.len() as u64))
+        Ok(MemoryForgetReceipt::new(
+            self.name(),
+            filter.clone(),
+            uris.len() as u64,
+        ))
     }
 
     fn retention_sweep(
@@ -1086,7 +1117,11 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 deleted = deleted.saturating_add(1);
             }
         }
-        Ok(MemoryRetentionReceipt::new(self.name(), filter.clone(), deleted))
+        Ok(MemoryRetentionReceipt::new(
+            self.name(),
+            filter.clone(),
+            deleted,
+        ))
     }
 
     fn verify_subject_absent(
@@ -1099,17 +1134,11 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         })?;
         let listed = list_subject_uris(&st).map_err(|error| {
             tracing::warn!("OpenViking readback listing failed: {error}");
-            MemoryProviderGovernanceError::failed(
-                self.name(),
-                MemoryGovernanceOperation::Readback,
-            )
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Readback)
         })?;
         let searched = subject_search_residual_count(&st).map_err(|error| {
             tracing::warn!("OpenViking readback search failed: {error}");
-            MemoryProviderGovernanceError::failed(
-                self.name(),
-                MemoryGovernanceOperation::Readback,
-            )
+            MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Readback)
         })?;
         let residual = (listed.len() as u64).max(searched);
         Ok(if residual == 0 {

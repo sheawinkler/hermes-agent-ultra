@@ -15,15 +15,13 @@ use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
 
 use hermes_agent::agent_loop::ToolRegistry;
-use hermes_agent::{
-    with_workspace_cwd, AgentConfig, AgentLoop, RunInvocationContext, RunRuntime,
-};
-use hermes_environments::ExecutionContainmentContext;
+use hermes_agent::{with_workspace_cwd, AgentConfig, AgentLoop, RunInvocationContext, RunRuntime};
 use hermes_config::{load_prefill_messages, GatewayConfig};
 use hermes_core::{
     subprocess::CommandNoWindowExt, AgentResult, LlmProvider, Message, ResolvedExecutionMode,
     ToolSchema,
 };
+use hermes_environments::ExecutionContainmentContext;
 use hermes_tools::skill_utils::{
     load_verified_skill_by_selector, render_skill_provenance_tag, SkillTrustRuntime,
 };
@@ -81,7 +79,6 @@ struct ScriptRun {
     stderr: String,
     code: String,
 }
-
 
 fn trim_script_output(text: &str) -> String {
     let trimmed = text.trim();
@@ -325,8 +322,9 @@ fn normalize_cron_skill_selector(raw: &str) -> String {
 }
 
 fn build_cron_skill_prompt(identifiers: &[String]) -> Result<Option<String>, CronError> {
-    let trust = SkillTrustRuntime::fail_closed()
-        .map_err(|error| CronError::InvalidJob(format!("skill trust initialization failed: {error}")))?;
+    let trust = SkillTrustRuntime::fail_closed().map_err(|error| {
+        CronError::InvalidJob(format!("skill trust initialization failed: {error}"))
+    })?;
     build_cron_skill_prompt_with_trust(&hermes_config::skills_dir(), identifiers, &trust)
 }
 
@@ -462,11 +460,9 @@ impl CronRunner {
     /// The agent is run with a restricted tool set that excludes the
     /// `cronjob` tool to prevent recursive scheduling.
     pub async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
-        let context = RunInvocationContext::cron_manual(
-            &job.id,
-            chrono::Utc::now().timestamp_millis(),
-        )
-        .map_err(|error| CronError::InvalidJob(error.to_string()))?;
+        let context =
+            RunInvocationContext::cron_manual(&job.id, chrono::Utc::now().timestamp_millis())
+                .map_err(|error| CronError::InvalidJob(error.to_string()))?;
         self.run_job_with_context(job, context).await
     }
 
@@ -517,7 +513,6 @@ impl CronRunner {
             runnable_job.prompt = build_script_augmented_prompt(&job.prompt, &run);
             runnable_job.script = None;
         }
-
 
         // Build agent config from job settings. The process resolves execution
         // mode exactly once; jobs must not silently re-read a different mode.
@@ -892,9 +887,9 @@ fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
     use crate::job::CronJob;
     use hermes_core::{Skill, ToolError};
+    use std::ffi::OsString;
 
     fn manual_test_containment(
         execution_mode: ResolvedExecutionMode,
@@ -932,8 +927,8 @@ mod tests {
         SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
         SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
     };
-    use std::collections::BTreeMap;
     use parking_lot::Mutex;
+    use std::collections::BTreeMap;
 
     static TEST_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -1045,7 +1040,9 @@ mod tests {
                 revoked_at: "2026-07-20T00:00:00Z".to_string(),
             }],
         };
-        signer.sign_revocations(&mut revocations, "test-key").unwrap();
+        signer
+            .sign_revocations(&mut revocations, "test-key")
+            .unwrap();
         store_revocations(skills_root, &revocations).unwrap();
     }
 
@@ -1053,8 +1050,11 @@ mod tests {
     fn cron_runner_keeps_startup_mode_after_environment_and_config_changes() {
         let _lock = TEST_ENV_LOCK.lock();
         let home = tempfile::tempdir().expect("config tempdir");
-        fs::write(home.path().join("config.yaml"), "execution_mode: reviewed\n")
-            .expect("write startup config");
+        fs::write(
+            home.path().join("config.yaml"),
+            "execution_mode: reviewed\n",
+        )
+        .expect("write startup config");
         let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
         let _ignore_user_config = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
         let _environment = EnvGuard::set("HERMES_EXECUTION_MODE", "reviewed");
@@ -1350,8 +1350,16 @@ tools_config:
 
         let messages = runner.build_messages(&job).expect("messages");
         assert_eq!(messages.len(), 2);
-        assert!(messages[0].content.as_ref().unwrap().contains("Search verified sources"));
-        assert!(messages[0].content.as_ref().unwrap().contains("<skill_provenance"));
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("Search verified sources"));
+        assert!(messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("<skill_provenance"));
         assert_eq!(messages[1].content.as_deref(), Some("Say hello"));
     }
 
@@ -1650,13 +1658,10 @@ tools_config:
             "# Cron guide\n\n1. Check the scheduled task",
         );
         let trust = SkillTrustRuntime::fail_closed().unwrap();
-        let prompt = build_cron_skill_prompt_with_trust(
-            &skills_root,
-            &["cron-guide".to_string()],
-            &trust,
-        )
-        .unwrap()
-        .unwrap();
+        let prompt =
+            build_cron_skill_prompt_with_trust(&skills_root, &["cron-guide".to_string()], &trust)
+                .unwrap()
+                .unwrap();
         assert!(prompt.contains("Check the scheduled task"));
         assert!(prompt.contains("source=\"local_authored\""));
         assert!(prompt.contains("effects_allowed=\"false\""));
@@ -1668,23 +1673,17 @@ tools_config:
         let home = tempfile::tempdir().unwrap();
         let skills_root = home.path().join("skills");
         let (trust, signer) = install_signed_remote_skill(&skills_root);
-        let prompt = build_cron_skill_prompt_with_trust(
-            &skills_root,
-            &["signed-skill".to_string()],
-            &trust,
-        )
-        .unwrap()
-        .unwrap();
+        let prompt =
+            build_cron_skill_prompt_with_trust(&skills_root, &["signed-skill".to_string()], &trust)
+                .unwrap()
+                .unwrap();
         assert!(prompt.contains("Follow verified instructions"));
         assert!(prompt.contains("key_id=\"test-key\""));
 
         revoke_signed_remote_skill(&skills_root, &signer);
-        let error = build_cron_skill_prompt_with_trust(
-            &skills_root,
-            &["signed-skill".to_string()],
-            &trust,
-        )
-        .expect_err("revoked package must not reach a cron prompt");
+        let error =
+            build_cron_skill_prompt_with_trust(&skills_root, &["signed-skill".to_string()], &trust)
+                .expect_err("revoked package must not reach a cron prompt");
         assert!(error.to_string().contains("blocked cron skill"));
     }
 

@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use parking_lot::Mutex;
 use hermes_core::{
     tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
 };
@@ -16,7 +15,7 @@ use hermes_environments::{
     ContainmentCommandRequest, ContainmentExecutionError, ContainmentInvocation,
     ExecutionContainmentContext,
 };
-
+use parking_lot::Mutex;
 
 use crate::approval::{ApprovalDecision, ApprovalManager, CommandExecutionEnvironment};
 use crate::credential_guard::CredentialGuard;
@@ -241,17 +240,14 @@ impl TerminalHandler {
     }
 
     pub fn clear_task_cwd(&self, task_id: &str) {
-        self.task_cwds.lock()
-            .remove(task_id);
+        self.task_cwds.lock().remove(task_id);
     }
 
     fn task_cwd(&self, task_id: &str) -> Option<String> {
         if task_id.trim().is_empty() {
             return None;
         }
-        self.task_cwds.lock()
-            .get(task_id)
-            .cloned()
+        self.task_cwds.lock().get(task_id).cloned()
     }
 }
 
@@ -327,7 +323,10 @@ impl TerminalHandler {
         let workdir = explicit_workdir
             .or(task_workdir.as_deref())
             .or(env_workdir.as_deref());
-        let pty = params.get("pty").and_then(|value| value.as_bool()).unwrap_or(false);
+        let pty = params
+            .get("pty")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|value| value.as_str());
         let transformed_command = transform_sudo_command(command);
 
@@ -1027,8 +1026,7 @@ mod tests {
             _pty: bool,
             _stdin_data: Option<&str>,
         ) -> Result<CommandOutput, AgentError> {
-            self.calls.lock()
-                .push(workdir.map(ToString::to_string));
+            self.calls.lock().push(workdir.map(ToString::to_string));
             Ok(CommandOutput {
                 exit_code: 0,
                 stdout: "ok".to_string(),
@@ -1416,8 +1414,8 @@ mod tests {
         let backend = Arc::new(RecordingBackend::default());
         let calls = backend.calls.clone();
         let handler = TerminalHandler::new(backend);
-        let err =
-            block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"}))).unwrap_err();
+        let err = block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"})))
+            .unwrap_err();
         assert!(err.to_string().contains("explicit user approval"));
         assert!(calls.lock().is_empty());
     }

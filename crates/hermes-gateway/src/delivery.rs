@@ -988,12 +988,9 @@ mod tests {
             text: &str,
             _parse_mode: Option<ParseMode>,
         ) -> Result<(), GatewayError> {
-            self.messages.lock().push((
-                chat_id.to_string(),
-                text.to_string(),
-                None,
-                false,
-            ));
+            self.messages
+                .lock()
+                .push((chat_id.to_string(), text.to_string(), None, false));
             Ok(())
         }
 

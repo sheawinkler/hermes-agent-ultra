@@ -22,10 +22,8 @@ use uuid::Uuid;
 
 #[cfg(feature = "agent-loop")]
 use hermes_agent::{
+    run_ledger::{EffectIntent, NonResumableEffectState, OutboxState, RunOutcome, TerminalReason},
     RunRuntime,
-    run_ledger::{
-        EffectIntent, NonResumableEffectState, OutboxState, RunOutcome, TerminalReason,
-    },
 };
 
 use crate::release_candidate::{
@@ -50,10 +48,8 @@ pub const MINIMUM_SOAK_DURATION_MS: u64 = 24 * 60 * 60 * 1000;
 pub const MAXIMUM_ROLLBACK_DRILL_DURATION_MS: u64 = 5 * 60 * 1000;
 
 const SOAK_SIGNING_DOMAIN: &[u8] = b"hermes.release.soak-receipt.ed25519/v1\0";
-const ROLLBACK_DRILL_SIGNING_DOMAIN: &[u8] =
-    b"hermes.release.rollback-drill-receipt.ed25519/v1\0";
-const ROLLBACK_MANIFEST_SIGNING_DOMAIN: &[u8] =
-    b"hermes.release.rollback-manifest.ed25519/v1\0";
+const ROLLBACK_DRILL_SIGNING_DOMAIN: &[u8] = b"hermes.release.rollback-drill-receipt.ed25519/v1\0";
+const ROLLBACK_MANIFEST_SIGNING_DOMAIN: &[u8] = b"hermes.release.rollback-manifest.ed25519/v1\0";
 const MAX_ENVELOPE_BYTES: usize = 1024 * 1024;
 const MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ARTIFACTS: usize = 4096;
@@ -222,8 +218,10 @@ impl MonotonicWallTimeWindow {
     }
 
     fn validate(&self) -> ReleaseOperationsResult<()> {
-        let started_at =
-            MonotonicWallTimestamp::new(self.started_at.wall_time_ms, self.started_at.monotonic_ms)?;
+        let started_at = MonotonicWallTimestamp::new(
+            self.started_at.wall_time_ms,
+            self.started_at.monotonic_ms,
+        )?;
         let ended_at =
             MonotonicWallTimestamp::new(self.ended_at.wall_time_ms, self.ended_at.monotonic_ms)?;
         let checked = Self::new(started_at, ended_at)?;
@@ -259,8 +257,7 @@ fn heartbeat_gap_within(
         .wall_time_ms()
         .checked_sub(earlier.wall_time_ms())
         .ok_or(ReleaseOperationsError::InvalidDuration)?;
-    let wall_gap = u64::try_from(wall_gap)
-        .map_err(|_| ReleaseOperationsError::InvalidDuration)?;
+    let wall_gap = u64::try_from(wall_gap).map_err(|_| ReleaseOperationsError::InvalidDuration)?;
     Ok(monotonic_gap <= maximum_gap_ms && wall_gap <= maximum_gap_ms)
 }
 
@@ -290,9 +287,9 @@ impl RollbackDrillId {
         let value = value.into();
         if value.is_empty()
             || value.len() > 256
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':')
+            })
         {
             return Err(ReleaseOperationsError::InvalidEvidence("rollback drill ID"));
         }
@@ -333,9 +330,9 @@ impl RollbackArtifactPath {
         }
         let path = Path::new(&value);
         if path.is_absolute()
-            || path.components().any(|component| {
-                !matches!(component, Component::Normal(_))
-            })
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
         {
             return Err(ReleaseOperationsError::UnsafeArtifactPath(value));
         }
@@ -451,10 +448,14 @@ impl SoakReceiptInput {
         let mut exact_run_proof_digests = exact_run_proof_digests.into_iter().collect::<Vec<_>>();
         exact_run_proof_digests.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         if exact_run_proof_digests.is_empty() {
-            return Err(ReleaseOperationsError::MissingEvidence("exact run-proof digests"));
+            return Err(ReleaseOperationsError::MissingEvidence(
+                "exact run-proof digests",
+            ));
         }
         if exact_run_proof_digests.len() > MAX_RUN_PROOFS {
-            return Err(ReleaseOperationsError::InvalidEvidence("exact run-proof digest count"));
+            return Err(ReleaseOperationsError::InvalidEvidence(
+                "exact run-proof digest count",
+            ));
         }
         if exact_run_proof_digests
             .windows(2)
@@ -510,10 +511,14 @@ impl SoakReceipt {
     fn validate_structure(&self) -> ReleaseOperationsResult<()> {
         self.time_window.validate()?;
         if self.exact_run_proof_digests.is_empty() {
-            return Err(ReleaseOperationsError::MissingEvidence("exact run-proof digests"));
+            return Err(ReleaseOperationsError::MissingEvidence(
+                "exact run-proof digests",
+            ));
         }
         if self.exact_run_proof_digests.len() > MAX_RUN_PROOFS {
-            return Err(ReleaseOperationsError::InvalidEvidence("exact run-proof digest count"));
+            return Err(ReleaseOperationsError::InvalidEvidence(
+                "exact run-proof digest count",
+            ));
         }
         if self
             .exact_run_proof_digests
@@ -940,7 +945,11 @@ impl SoakSession {
                 OperationalSoakObservation::CanaryProbe(health) => (
                     "canary_probe",
                     None,
-                    Some(if health == CanaryHealth::Healthy { 1_i64 } else { 0_i64 }),
+                    Some(if health == CanaryHealth::Healthy {
+                        1_i64
+                    } else {
+                        0_i64
+                    }),
                     None,
                     None,
                 ),
@@ -1055,7 +1064,9 @@ impl SoakSession {
             let required_sample_count = time_window
                 .elapsed_ms()
                 .checked_add(maximum_gap_ms - 1)
-                .ok_or(ReleaseOperationsError::InvalidEvidence("soak sample coverage"))?
+                .ok_or(ReleaseOperationsError::InvalidEvidence(
+                    "soak sample coverage",
+                ))?
                 / maximum_gap_ms;
             if sample_count < required_sample_count {
                 return Err(ReleaseOperationsError::MissingEvidence(
@@ -1078,9 +1089,10 @@ impl SoakSession {
         let receipt = SoakReceipt::from(input.clone());
         receipt.validate_promotion_conditions()?;
         let envelope = sign_soak_receipt(input, &self.signing_key, self.key_id.clone())?;
-        let signature_verified =
-            verify_signed_soak_receipt(&envelope, &self.scope, trust_policy)?;
-        signature_verified.receipt().validate_promotion_conditions()?;
+        let signature_verified = verify_signed_soak_receipt(&envelope, &self.scope, trust_policy)?;
+        signature_verified
+            .receipt()
+            .validate_promotion_conditions()?;
         let canonical_envelope = envelope.canonical_bytes()?;
         let ledger = self
             .ledger
@@ -1148,8 +1160,10 @@ impl SoakSession {
                     let digest = proof_digest.ok_or(ReleaseOperationsError::MissingEvidence(
                         "durable exact run-proof digest",
                     ))?;
-                    exact_run_proof_digests
-                        .push(parse_release_digest(digest, "durable exact run-proof digest")?);
+                    exact_run_proof_digests.push(parse_release_digest(
+                        digest,
+                        "durable exact run-proof digest",
+                    )?);
                 }
                 "reconciliation" => {
                     let event_loss = sqlite_to_u64(
@@ -1168,17 +1182,22 @@ impl SoakSession {
                     event_loss_count = event_loss_count
                         .checked_add(event_loss)
                         .ok_or(ReleaseOperationsError::InvalidEvidence("event-loss total"))?;
-                    unreconciled_effect_count = unreconciled_effect_count
-                        .checked_add(unreconciled)
-                        .ok_or(ReleaseOperationsError::InvalidEvidence(
-                            "unreconciled-effect total",
-                        ))?;
+                    unreconciled_effect_count =
+                        unreconciled_effect_count.checked_add(unreconciled).ok_or(
+                            ReleaseOperationsError::InvalidEvidence("unreconciled-effect total"),
+                        )?;
                 }
-                _ => return Err(ReleaseOperationsError::InvalidEvidence("soak observation kind")),
+                _ => {
+                    return Err(ReleaseOperationsError::InvalidEvidence(
+                        "soak observation kind",
+                    ))
+                }
             }
         }
         if !saw_probe {
-            return Err(ReleaseOperationsError::MissingEvidence("durable canary probe"));
+            return Err(ReleaseOperationsError::MissingEvidence(
+                "durable canary probe",
+            ));
         }
         if !saw_reconciliation {
             return Err(ReleaseOperationsError::MissingEvidence(
@@ -1373,9 +1392,9 @@ impl AuthoritativeSoakProbe for RunRuntimeSoakProbe {
             if run.header.started_at_ms <= soak_started_at.wall_time_ms() {
                 continue;
             }
-            post_start_run_count = post_start_run_count
-                .checked_add(1)
-                .ok_or(ReleaseOperationsError::InvalidEvidence("post-start run count"))?;
+            post_start_run_count = post_start_run_count.checked_add(1).ok_or(
+                ReleaseOperationsError::InvalidEvidence("post-start run count"),
+            )?;
             if run.event_count == 0
                 || run.status.final_outcome != Some(RunOutcome::Success)
                 || run.status.exit_terminal_reason != Some(TerminalReason::Completed)
@@ -1400,9 +1419,9 @@ impl AuthoritativeSoakProbe for RunRuntimeSoakProbe {
                     } else {
                         1
                     };
-                    event_loss_count = event_loss_count.checked_add(missing).ok_or(
-                        ReleaseOperationsError::InvalidEvidence("event-loss total"),
-                    )?;
+                    event_loss_count = event_loss_count
+                        .checked_add(missing)
+                        .ok_or(ReleaseOperationsError::InvalidEvidence("event-loss total"))?;
                     canary_health = CanaryHealth::Unhealthy;
                 }
                 expected_sequence = event.sequence.checked_add(1).ok_or(
@@ -1420,12 +1439,11 @@ impl AuthoritativeSoakProbe for RunRuntimeSoakProbe {
                         record,
                         Some(record) if record.state == NonResumableEffectState::Completed
                     ) {
-                        unreconciled_effect_count =
-                            unreconciled_effect_count.checked_add(1).ok_or(
-                                ReleaseOperationsError::InvalidEvidence(
-                                    "unreconciled-effect total",
-                                ),
-                            )?;
+                        unreconciled_effect_count = unreconciled_effect_count
+                            .checked_add(1)
+                            .ok_or(ReleaseOperationsError::InvalidEvidence(
+                                "unreconciled-effect total",
+                            ))?;
                         canary_health = CanaryHealth::Unhealthy;
                     }
                 }
@@ -1447,9 +1465,9 @@ impl AuthoritativeSoakProbe for RunRuntimeSoakProbe {
                     })
                     .unwrap_or(true)
             {
-                event_loss_count = event_loss_count.checked_add(1).ok_or(
-                    ReleaseOperationsError::InvalidEvidence("event-loss total"),
-                )?;
+                event_loss_count = event_loss_count
+                    .checked_add(1)
+                    .ok_or(ReleaseOperationsError::InvalidEvidence("event-loss total"))?;
                 canary_health = CanaryHealth::Unhealthy;
             }
             for outbox in self
@@ -1459,10 +1477,9 @@ impl AuthoritativeSoakProbe for RunRuntimeSoakProbe {
                 .map_err(|_| ReleaseOperationsError::InvalidEvidence("runtime outbox ledger"))?
             {
                 if outbox.required && outbox.state != OutboxState::Acknowledged {
-                    unreconciled_effect_count =
-                        unreconciled_effect_count.checked_add(1).ok_or(
-                            ReleaseOperationsError::InvalidEvidence("unreconciled-effect total"),
-                        )?;
+                    unreconciled_effect_count = unreconciled_effect_count.checked_add(1).ok_or(
+                        ReleaseOperationsError::InvalidEvidence("unreconciled-effect total"),
+                    )?;
                     canary_health = CanaryHealth::Unhealthy;
                 }
             }
@@ -1588,20 +1605,21 @@ impl SoakAuthorityService {
         }
         let persisted = (|| -> ReleaseOperationsResult<MonotonicWallTimestamp> {
             if !state.proof_recorded {
-                self.session.append_observation(
-                    OperationalSoakObservation::ExactRunProof(snapshot.proof_digest),
-                )?;
+                self.session
+                    .append_observation(OperationalSoakObservation::ExactRunProof(
+                        snapshot.proof_digest,
+                    ))?;
                 state.proof_recorded = true;
             }
-            self.session.append_observation(
-                OperationalSoakObservation::CanaryProbe(snapshot.canary_health),
-            )?;
-            self.session.append_observation(
-                OperationalSoakObservation::Reconciliation {
+            self.session
+                .append_observation(OperationalSoakObservation::CanaryProbe(
+                    snapshot.canary_health,
+                ))?;
+            self.session
+                .append_observation(OperationalSoakObservation::Reconciliation {
                     event_loss_count: snapshot.event_loss_count,
                     unreconciled_effect_count: snapshot.unreconciled_effect_count,
-                },
-            )
+                })
         })();
         match persisted {
             Ok(sampled_at) => {
@@ -1642,16 +1660,21 @@ impl SoakAuthorityService {
     ) -> ReleaseOperationsResult<VerifiedSoakReceipt> {
         self.record_sample()?;
         let (last_sample_at, sample_count) = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| ReleaseOperationsError::InvalidEvidence("soak authority state lock"))?;
-            let first_sample_at = state
-                .first_sample_at
-                .ok_or(ReleaseOperationsError::MissingEvidence("first runtime sample"))?;
-            let last_sample_at = state
-                .last_sample_at
-                .ok_or(ReleaseOperationsError::MissingEvidence("fresh end runtime sample"))?;
+            let state = self.state.lock().map_err(|_| {
+                ReleaseOperationsError::InvalidEvidence("soak authority state lock")
+            })?;
+            let first_sample_at =
+                state
+                    .first_sample_at
+                    .ok_or(ReleaseOperationsError::MissingEvidence(
+                        "first runtime sample",
+                    ))?;
+            let last_sample_at =
+                state
+                    .last_sample_at
+                    .ok_or(ReleaseOperationsError::MissingEvidence(
+                        "fresh end runtime sample",
+                    ))?;
             if state.sample_count < 2
                 || first_sample_at.monotonic_ms() <= self.started_at.monotonic_ms()
                 || first_sample_at.wall_time_ms() <= self.started_at.wall_time_ms()
@@ -1674,9 +1697,9 @@ impl SoakAuthorityService {
 }
 
 fn open_soak_ledger(path: &Path) -> ReleaseOperationsResult<Connection> {
-    let parent = path.parent().ok_or_else(|| {
-        ReleaseOperationsError::UnsafeFilesystemPath(path.display().to_string())
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| ReleaseOperationsError::UnsafeFilesystemPath(path.display().to_string()))?;
     ensure_safe_directory(parent)?;
     ensure_safe_file_if_exists(path)?;
     let connection = Connection::open(path)?;
@@ -1749,10 +1772,14 @@ impl RollbackManifestInput {
             }
         }
         if by_path.is_empty() {
-            return Err(ReleaseOperationsError::MissingEvidence("rollback artifacts"));
+            return Err(ReleaseOperationsError::MissingEvidence(
+                "rollback artifacts",
+            ));
         }
         if by_path.len() > MAX_ARTIFACTS {
-            return Err(ReleaseOperationsError::InvalidEvidence("rollback artifact count"));
+            return Err(ReleaseOperationsError::InvalidEvidence(
+                "rollback artifact count",
+            ));
         }
         if by_path.get(&runtime_entrypoint) != Some(runtime_build.artifact_sha256()) {
             return Err(ReleaseOperationsError::InconsistentBinding(
@@ -1800,10 +1827,14 @@ impl RollbackManifest {
 
     fn validate_structure(&self) -> ReleaseOperationsResult<()> {
         if self.artifacts.is_empty() {
-            return Err(ReleaseOperationsError::MissingEvidence("rollback artifacts"));
+            return Err(ReleaseOperationsError::MissingEvidence(
+                "rollback artifacts",
+            ));
         }
         if self.artifacts.len() > MAX_ARTIFACTS {
-            return Err(ReleaseOperationsError::InvalidEvidence("rollback artifact count"));
+            return Err(ReleaseOperationsError::InvalidEvidence(
+                "rollback artifact count",
+            ));
         }
         for path in self.artifacts.keys() {
             RollbackArtifactPath::new(path.0.clone())?;
@@ -1813,7 +1844,9 @@ impl RollbackManifest {
                 "rollback artifact-set digest",
             ));
         }
-        if self.artifacts.get(&self.runtime_entrypoint) != Some(self.runtime_build.artifact_sha256()) {
+        if self.artifacts.get(&self.runtime_entrypoint)
+            != Some(self.runtime_build.artifact_sha256())
+        {
             return Err(ReleaseOperationsError::InconsistentBinding(
                 "runtime entrypoint artifact digest",
             ));
@@ -2348,15 +2381,21 @@ impl VerifiedRollbackDrillReceipt {
     }
 
     pub fn candidate_manifest_digest(&self) -> &ReleaseDigest {
-        self.signature_verified.receipt().candidate_manifest_digest()
+        self.signature_verified
+            .receipt()
+            .candidate_manifest_digest()
     }
 
     pub fn incumbent_manifest_digest(&self) -> &ReleaseDigest {
-        self.signature_verified.receipt().incumbent_manifest_digest()
+        self.signature_verified
+            .receipt()
+            .incumbent_manifest_digest()
     }
 
     pub fn restored_artifact_set_digest(&self) -> &ReleaseDigest {
-        self.signature_verified.receipt().restored_artifact_set_digest()
+        self.signature_verified
+            .receipt()
+            .restored_artifact_set_digest()
     }
 
     pub fn scope(&self) -> &ReleaseReceiptScope {
@@ -2455,7 +2494,9 @@ impl ContentAddressedArtifactStore {
         }
         let bytes = read_regular_file(&path)?;
         if digest_bytes(&bytes)? != *digest {
-            return Err(ReleaseOperationsError::ArtifactDigestMismatch(digest.clone()));
+            return Err(ReleaseOperationsError::ArtifactDigestMismatch(
+                digest.clone(),
+            ));
         }
         Ok(bytes)
     }
@@ -2555,9 +2596,11 @@ impl RollbackManager {
         ensure_safe_file_if_exists(&operation_lock_path)?;
         let in_process_lock = process_release_root_lock(&release_root)?;
 
-        let parent = ledger_path.parent().ok_or(ReleaseOperationsError::UnsafeFilesystemPath(
-            ledger_path.display().to_string(),
-        ))?;
+        let parent = ledger_path
+            .parent()
+            .ok_or(ReleaseOperationsError::UnsafeFilesystemPath(
+                ledger_path.display().to_string(),
+            ))?;
         ensure_safe_directory(parent)?;
         ensure_safe_file_if_exists(&ledger_path)?;
         let ledger = Connection::open(&ledger_path)?;
@@ -2684,17 +2727,14 @@ impl RollbackManager {
                 return Err(error);
             }
         };
-        let signature_verified = match verify_signed_rollback_drill_receipt(
-            &envelope,
-            expected_scope,
-            trust_policy,
-        ) {
-            Ok(verified) => verified,
-            Err(error) => {
-                self.restore_candidate_pointer(candidate_manifest, incumbent_manifest)?;
-                return Err(error);
-            }
-        };
+        let signature_verified =
+            match verify_signed_rollback_drill_receipt(&envelope, expected_scope, trust_policy) {
+                Ok(verified) => verified,
+                Err(error) => {
+                    self.restore_candidate_pointer(candidate_manifest, incumbent_manifest)?;
+                    return Err(error);
+                }
+            };
         if let Err(error) = validate_drill_binding(
             signature_verified.receipt(),
             expected_scope,
@@ -2722,11 +2762,7 @@ impl RollbackManager {
                 return Err(error);
             }
         };
-        if let Err(error) = self.store_completed(
-            request.drill_id(),
-            &request_digest,
-            &envelope,
-        ) {
+        if let Err(error) = self.store_completed(request.drill_id(), &request_digest, &envelope) {
             self.restore_candidate_pointer(candidate_manifest, incumbent_manifest)?;
             return Err(error);
         }
@@ -2794,7 +2830,6 @@ impl RollbackManager {
         Ok(Some(envelope))
     }
 
-
     fn store_completed(
         &self,
         drill_id: &RollbackDrillId,
@@ -2840,8 +2875,13 @@ impl RollbackManager {
         Ok(())
     }
 
-    fn stage_verified_manifest(&self, manifest: &VerifiedRollbackManifest) -> ReleaseOperationsResult<()> {
-        let final_path = self.releases_root.join(manifest.manifest_digest().to_string());
+    fn stage_verified_manifest(
+        &self,
+        manifest: &VerifiedRollbackManifest,
+    ) -> ReleaseOperationsResult<()> {
+        let final_path = self
+            .releases_root
+            .join(manifest.manifest_digest().to_string());
         match fs::symlink_metadata(&final_path) {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -2858,7 +2898,8 @@ impl RollbackManager {
         let staging_path = self
             .releases_root
             .join(format!(".staging-{}", Uuid::new_v4()));
-        fs::create_dir(&staging_path).map_err(|error| io_error("creating rollback staging directory", error))?;
+        fs::create_dir(&staging_path)
+            .map_err(|error| io_error("creating rollback staging directory", error))?;
         let staged = StagedDirectory::new(staging_path.clone());
         for (path, digest) in manifest.artifacts() {
             let contents = self.artifact_store.read_verified(digest)?;
@@ -2939,8 +2980,8 @@ fn read_release_pointer_at(release_root: &Path) -> ReleaseOperationsResult<Relea
         return Err(ReleaseOperationsError::InvalidReleasePointer);
     }
     let bytes = read_regular_file(&pointer_path)?;
-    let wire: ReleasePointerWire =
-        serde_json::from_slice(&bytes).map_err(|_| ReleaseOperationsError::InvalidReleasePointer)?;
+    let wire: ReleasePointerWire = serde_json::from_slice(&bytes)
+        .map_err(|_| ReleaseOperationsError::InvalidReleasePointer)?;
     if canonical_json(&wire)? != bytes {
         return Err(ReleaseOperationsError::NonCanonicalEnvelope);
     }
@@ -2994,7 +3035,8 @@ impl EnvelopeHeader {
     }
 
     fn validate(&self, expected_schema: &str) -> ReleaseOperationsResult<()> {
-        if self.schema != expected_schema || self.schema_version != RELEASE_OPERATION_SCHEMA_VERSION {
+        if self.schema != expected_schema || self.schema_version != RELEASE_OPERATION_SCHEMA_VERSION
+        {
             return Err(ReleaseOperationsError::UnsupportedSchema {
                 schema: self.schema.clone(),
                 version: self.schema_version,
@@ -3141,10 +3183,7 @@ impl TryFrom<SoakReceiptWire> for SoakReceipt {
     fn try_from(wire: SoakReceiptWire) -> Result<Self, Self::Error> {
         let mut exact_run_proof_digests = Vec::new();
         for digest in wire.exact_run_proof_digests {
-            exact_run_proof_digests.push(parse_release_digest(
-                digest,
-                "exact run-proof digest",
-            )?);
+            exact_run_proof_digests.push(parse_release_digest(digest, "exact run-proof digest")?);
         }
         Ok(SoakReceiptInput::new(
             parse_release_digest(wire.candidate_receipt_digest, "candidate receipt digest")?,
@@ -3529,14 +3568,15 @@ fn verify_signature<T: Serialize>(
     trust_policy: &dyn ReleaseOperationsTrustPolicy,
 ) -> ReleaseOperationsResult<()> {
     let verifying_key = match trust_policy.resolve_verifying_key(scope, &header.key_id) {
-        ReleaseTrustDecision::Trusted { verifying_key } => {
-            VerifyingKey::from_bytes(&verifying_key)
-                .map_err(|_| ReleaseOperationsError::MalformedTrustedKey)?
-        }
+        ReleaseTrustDecision::Trusted { verifying_key } => VerifyingKey::from_bytes(&verifying_key)
+            .map_err(|_| ReleaseOperationsError::MalformedTrustedKey)?,
         ReleaseTrustDecision::Denied => return Err(ReleaseOperationsError::UntrustedSigner),
     };
     verifying_key
-        .verify_strict(&signing_preimage(domain, header, payload)?, &decode_signature(signature)?)
+        .verify_strict(
+            &signing_preimage(domain, header, payload)?,
+            &decode_signature(signature)?,
+        )
         .map_err(|_| ReleaseOperationsError::InvalidSignature)
 }
 
@@ -3677,7 +3717,8 @@ fn validate_drill_binding(
 }
 
 fn ensure_safe_directory(path: &Path) -> ReleaseOperationsResult<()> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| io_error("reading directory metadata", error))?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| io_error("reading directory metadata", error))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(ReleaseOperationsError::UnsafeFilesystemPath(
             path.display().to_string(),
@@ -3701,7 +3742,8 @@ fn ensure_safe_child_directory(parent: &Path, child: &Path) -> ReleaseOperations
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(child).map_err(|error| io_error("creating release subdirectory", error))?;
+            fs::create_dir(child)
+                .map_err(|error| io_error("creating release subdirectory", error))?;
             sync_directory(parent)?;
         }
         Err(error) => return Err(io_error("reading release subdirectory metadata", error)),
@@ -3724,7 +3766,10 @@ fn ensure_safe_file_if_exists(path: &Path) -> ReleaseOperationsResult<()> {
     Ok(())
 }
 
-fn ensure_safe_staging_parents(root: &Path, destination_parent: &Path) -> ReleaseOperationsResult<()> {
+fn ensure_safe_staging_parents(
+    root: &Path,
+    destination_parent: &Path,
+) -> ReleaseOperationsResult<()> {
     let relative = destination_parent.strip_prefix(root).map_err(|_| {
         ReleaseOperationsError::UnsafeFilesystemPath(destination_parent.display().to_string())
     })?;
@@ -3745,7 +3790,8 @@ fn ensure_safe_staging_parents(root: &Path, destination_parent: &Path) -> Releas
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(|error| io_error("creating staged artifact directory", error))?;
+                fs::create_dir(&current)
+                    .map_err(|error| io_error("creating staged artifact directory", error))?;
             }
             Err(error) => return Err(io_error("reading staged artifact metadata", error)),
         }
@@ -3766,13 +3812,15 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> ReleaseOperationsResult<()> {
 }
 
 fn read_regular_file(path: &Path) -> ReleaseOperationsResult<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| io_error("reading file metadata", error))?;
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| io_error("reading file metadata", error))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(ReleaseOperationsError::UnsafeFilesystemPath(
             path.display().to_string(),
         ));
     }
-    let length = usize::try_from(metadata.len()).map_err(|_| ReleaseOperationsError::ArtifactTooLarge)?;
+    let length =
+        usize::try_from(metadata.len()).map_err(|_| ReleaseOperationsError::ArtifactTooLarge)?;
     if length > MAX_ARTIFACT_BYTES {
         return Err(ReleaseOperationsError::ArtifactTooLarge);
     }
@@ -3799,7 +3847,9 @@ fn collect_release_files(
     directory: &Path,
     actual: &mut BTreeMap<RollbackArtifactPath, ReleaseDigest>,
 ) -> ReleaseOperationsResult<()> {
-    for entry in fs::read_dir(directory).map_err(|error| io_error("reading staged release directory", error))? {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| io_error("reading staged release directory", error))?
+    {
         let entry = entry.map_err(|error| io_error("reading staged release entry", error))?;
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path)
@@ -3836,7 +3886,8 @@ fn collect_release_files(
 }
 
 fn sync_directory(path: &Path) -> ReleaseOperationsResult<()> {
-    let directory = File::open(path).map_err(|error| io_error("opening release directory for sync", error))?;
+    let directory =
+        File::open(path).map_err(|error| io_error("opening release directory for sync", error))?;
     directory
         .sync_all()
         .map_err(|error| io_error("syncing release directory", error))
@@ -3917,7 +3968,11 @@ mod tests {
         event_loss_count: u64,
         unreconciled_effect_count: u64,
         health: CanaryHealth,
-    ) -> (SoakReceiptInput, ReleaseReceiptScope, ReleasePromotionPolicy) {
+    ) -> (
+        SoakReceiptInput,
+        ReleaseReceiptScope,
+        ReleasePromotionPolicy,
+    ) {
         let scope = scope();
         let policy = policy();
         let started = MonotonicWallTimestamp::new(1_000, 10).expect("start");
@@ -3953,15 +4008,13 @@ mod tests {
         .expect("sign");
         let verified =
             verify_signed_soak_receipt(&envelope, &scope, &trusted_policy).expect("verify");
-        assert_eq!(verified.receipt().time_window().elapsed_ms(), MINIMUM_SOAK_DURATION_MS);
+        assert_eq!(
+            verified.receipt().time_window().elapsed_ms(),
+            MINIMUM_SOAK_DURATION_MS
+        );
 
         for (duration, losses, effects, health) in [
-            (
-                MINIMUM_SOAK_DURATION_MS - 1,
-                0,
-                0,
-                CanaryHealth::Healthy,
-            ),
+            (MINIMUM_SOAK_DURATION_MS - 1, 0, 0, CanaryHealth::Healthy),
             (MINIMUM_SOAK_DURATION_MS, 1, 0, CanaryHealth::Healthy),
             (MINIMUM_SOAK_DURATION_MS, 0, 1, CanaryHealth::Healthy),
             (MINIMUM_SOAK_DURATION_MS, 0, 0, CanaryHealth::Unhealthy),
@@ -4013,7 +4066,13 @@ mod tests {
 
     #[test]
     fn rollback_paths_and_artifacts_reject_traversal_symlink_and_absence() {
-        for path in ["", "../escape", "/absolute", "nested/../../escape", "nested\\escape"] {
+        for path in [
+            "",
+            "../escape",
+            "/absolute",
+            "nested/../../escape",
+            "nested\\escape",
+        ] {
             assert!(RollbackArtifactPath::new(path).is_err(), "{path}");
         }
 
@@ -4094,4 +4153,3 @@ mod tests {
         drop(reopened);
     }
 }
-

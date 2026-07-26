@@ -194,21 +194,11 @@ impl MemorySubject {
         session_id: Option<&str>,
         is_dm: bool,
     ) -> Result<Self, MemorySubjectError> {
-        let tenant_id = MemoryTenantId::new(required_authenticated(
-            "tenant id",
-            tenant_id,
-        )?)?;
-        let principal_id = MemoryPrincipalId::new(required_authenticated(
-            "principal id",
-            principal_id,
-        )?)?;
-        let session_id = MemorySessionId::new(required_authenticated(
-            "session id",
-            session_id,
-        )?)?;
-        let team_id = team_id
-            .map(MemoryTeamId::new)
-            .transpose()?;
+        let tenant_id = MemoryTenantId::new(required_authenticated("tenant id", tenant_id)?)?;
+        let principal_id =
+            MemoryPrincipalId::new(required_authenticated("principal id", principal_id)?)?;
+        let session_id = MemorySessionId::new(required_authenticated("session id", session_id)?)?;
+        let team_id = team_id.map(MemoryTeamId::new).transpose()?;
         // Direct messages remain private even when the authenticated ingress
         // supplies an ambient team namespace. Team identity is never itself a
         // request to share memory.
@@ -267,7 +257,10 @@ impl MemorySubject {
 
     /// Derive the stable, opaque versioned storage/filter key for this subject.
     pub fn storage_key(&self, key: &MemorySubjectDerivationKey) -> MemorySubjectStorageKey {
-        MemorySubjectStorageKey::from_digest(STORAGE_KEY_PREFIX, key.derive(b"storage", &self.canonical_bytes()))
+        MemorySubjectStorageKey::from_digest(
+            STORAGE_KEY_PREFIX,
+            key.derive(b"storage", &self.canonical_bytes()),
+        )
     }
 
     fn canonical_bytes(&self) -> Vec<u8> {
@@ -310,10 +303,7 @@ impl MemorySubjectDerivationKey {
     pub fn actor_for_subject(&self, subject: &MemorySubject) -> MemoryAuditActor {
         let subject_identity = subject.canonical_bytes();
         let mut bytes = Vec::with_capacity(
-            b"hermes-memory-actor".len()
-                + 1
-                + std::mem::size_of::<u32>()
-                + subject_identity.len(),
+            b"hermes-memory-actor".len() + 1 + std::mem::size_of::<u32>() + subject_identity.len(),
         );
         bytes.extend_from_slice(b"hermes-memory-actor");
         bytes.push(MEMORY_SUBJECT_KEY_VERSION);
@@ -403,7 +393,10 @@ impl<'de> Deserialize<'de> for MemorySubjectStorageKey {
 
 impl fmt::Debug for MemorySubjectStorageKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_tuple("MemorySubjectStorageKey").field(&self.0).finish()
+        formatter
+            .debug_tuple("MemorySubjectStorageKey")
+            .field(&self.0)
+            .finish()
     }
 }
 
@@ -438,7 +431,10 @@ impl<'de> Deserialize<'de> for MemoryAuditActor {
 
 impl fmt::Debug for MemoryAuditActor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_tuple("MemoryAuditActor").field(&self.0).finish()
+        formatter
+            .debug_tuple("MemoryAuditActor")
+            .field(&self.0)
+            .finish()
     }
 }
 
@@ -547,7 +543,6 @@ pub enum MemoryExportSinkError {
     #[error("memory export artifact is unavailable")]
     ArtifactUnavailable,
 }
-
 
 /// Canonical SHA-256 digest of opaque snapshot, cursor, record-ID, or manifest
 /// evidence. The source value is never retained in receipts or audit records.
@@ -1084,7 +1079,6 @@ mod tests {
             })
         ));
     }
-
 
     #[test]
     fn private_group_team_context_and_principal_remain_distinct_partitions() {

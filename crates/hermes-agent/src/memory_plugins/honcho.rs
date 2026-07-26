@@ -307,7 +307,8 @@ impl HonchoConfig {
 
         let now = epoch_seconds();
         let cache_key = oauth_cache_key(&self.config_path, &self.host);
-        if let Some((expires_at, token)) = honcho_oauth_expiry_cache().lock().get(&cache_key).cloned()
+        if let Some((expires_at, token)) =
+            honcho_oauth_expiry_cache().lock().get(&cache_key).cloned()
         {
             if now < expires_at - OAUTH_REFRESH_SKEW_SECONDS {
                 self.api_key = token;
@@ -570,9 +571,9 @@ fn honcho_oauth_refresh_lock() -> &'static Mutex<()> {
 
 fn seed_oauth_cache(path: &Path, host: &str, credential: &HonchoOAuthCredential) {
     honcho_oauth_expiry_cache().lock().insert(
-            oauth_cache_key(path, host),
-            (credential.expires_at, credential.access_token.clone()),
-        );
+        oauth_cache_key(path, host),
+        (credential.expires_at, credential.access_token.clone()),
+    );
 }
 
 fn read_oauth_credential(path: &Path, host: &str) -> Option<HonchoOAuthCredential> {
@@ -849,7 +850,9 @@ impl HonchoMemoryPlugin {
         let status = response.status();
         let text = response.text().unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("Honcho request {method} {url} returned {status}: {text}"));
+            return Err(format!(
+                "Honcho request {method} {url} returned {status}: {text}"
+            ));
         }
         if text.trim().is_empty() {
             Ok(json!({}))
@@ -997,10 +1000,7 @@ fn honcho_record_id(record: &Value) -> Option<&str> {
         .filter(|id| !id.trim().is_empty())
 }
 
-fn honcho_retention_candidates(
-    records: &[Value],
-    policy: &MemoryRetentionPolicy,
-) -> Vec<String> {
+fn honcho_retention_candidates(records: &[Value], policy: &MemoryRetentionPolicy) -> Vec<String> {
     let mut selected = std::collections::HashSet::new();
     if let Some(max_records) = policy.max_records {
         for record in records.iter().skip(max_records as usize) {
@@ -1095,15 +1095,19 @@ fn honcho_export_marker(response: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn honcho_export_has_more(response: &Value) -> Option<bool> {
-    [Some(response), response.get("meta"), response.get("pagination")]
-        .into_iter()
-        .flatten()
-        .find_map(|scope| {
-            scope
-                .get("has_more")
-                .or_else(|| scope.get("hasMore"))
-                .and_then(Value::as_bool)
-        })
+    [
+        Some(response),
+        response.get("meta"),
+        response.get("pagination"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|scope| {
+        scope
+            .get("has_more")
+            .or_else(|| scope.get("hasMore"))
+            .and_then(Value::as_bool)
+    })
 }
 
 fn stable_honcho_export_page(
@@ -1241,12 +1245,15 @@ fn stream_honcho_export(
                 .map_err(|_| HonchoExportError::Failed("export page evidence is invalid"))?,
             )
             .map_err(|_| HonchoExportError::Failed("export sink rejected provider page"))?;
-            exported_records = exported_records
-                .checked_add(record_count)
-                .ok_or(HonchoExportError::Failed("stable export record count overflow"))?;
-            page_count = page_count
-                .checked_add(1)
-                .ok_or(HonchoExportError::Failed("stable export page count overflow"))?;
+            exported_records =
+                exported_records
+                    .checked_add(record_count)
+                    .ok_or(HonchoExportError::Failed(
+                        "stable export record count overflow",
+                    ))?;
+            page_count = page_count.checked_add(1).ok_or(HonchoExportError::Failed(
+                "stable export page count overflow",
+            ))?;
 
             let Some(next_cursor) = next_cursor else {
                 break;
@@ -1286,7 +1293,9 @@ fn honcho_delete_record(
     }
     let path = format!(
         "{}/{}",
-        config.endpoint("conclude", "/v1/conclusions").trim_end_matches('/'),
+        config
+            .endpoint("conclude", "/v1/conclusions")
+            .trim_end_matches('/'),
         id
     );
     let body = honcho_scoped_body(subject, filter, json!({"id": id}))?;
@@ -1383,7 +1392,9 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         filter: &MemorySubjectStorageKey,
         _query: &str,
     ) -> String {
-        if self.config_snapshot(subject, filter).is_err() || self.recall_mode.lock().as_str() == "tools" {
+        if self.config_snapshot(subject, filter).is_err()
+            || self.recall_mode.lock().as_str() == "tools"
+        {
             return String::new();
         }
         let result = std::mem::take(&mut *self.prefetch_result.lock());
@@ -1413,8 +1424,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         let max_tokens = config.context_tokens.unwrap_or(800).clamp(64, 2000);
         let out = Arc::clone(&self.prefetch_result);
         std::thread::spawn(move || {
-            if let Ok(value) =
-                honcho_context_query(&config, &subject, &filter, &query, max_tokens)
+            if let Ok(value) = honcho_context_query(&config, &subject, &filter, &query, max_tokens)
             {
                 if let Some(text) = HonchoMemoryPlugin::extract_text_result(&value) {
                     if !text.trim().is_empty() {
@@ -1460,7 +1470,8 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             Err(_) => return,
         };
         std::thread::spawn(move || {
-            let _ = HonchoMemoryPlugin::send_json(&config, Method::POST, &path, Some(&payload), None);
+            let _ =
+                HonchoMemoryPlugin::send_json(&config, Method::POST, &path, Some(&payload), None);
         });
     }
 
@@ -1500,16 +1511,15 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     peer,
                 );
                 if let Some(card) = args.get("card").and_then(Value::as_array) {
-                    honcho_scoped_body(subject, filter, json!({"card": card}))
-                        .and_then(|body| {
-                            HonchoMemoryPlugin::send_json(
-                                &config,
-                                Method::POST,
-                                &path,
-                                Some(&body),
-                                None,
-                            )
-                        })
+                    honcho_scoped_body(subject, filter, json!({"card": card})).and_then(|body| {
+                        HonchoMemoryPlugin::send_json(
+                            &config,
+                            Method::POST,
+                            &path,
+                            Some(&body),
+                            None,
+                        )
+                    })
                 } else {
                     HonchoMemoryPlugin::send_json(
                         &config,
@@ -1521,7 +1531,11 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                 }
             }
             "honcho_search" => {
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if query.is_empty() {
                     Err("query is required".to_string())
                 } else {
@@ -1547,7 +1561,11 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                 }
             }
             "honcho_context" => {
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if query.is_empty() {
                     Err("query is required".to_string())
                 } else {
@@ -1814,6 +1832,5 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         ))
     }
 }
-
 
 include!("honcho/profile_tests.rs");

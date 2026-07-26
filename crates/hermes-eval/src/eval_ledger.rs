@@ -123,10 +123,7 @@ fn checked_label(
     Ok(value)
 }
 
-fn checked_nonnegative_number(
-    field: &'static str,
-    value: f64,
-) -> EvaluationReceiptResult<f64> {
+fn checked_nonnegative_number(field: &'static str, value: f64) -> EvaluationReceiptResult<f64> {
     if !value.is_finite() || value.is_sign_negative() {
         return Err(EvaluationReceiptError::Malformed { field });
     }
@@ -215,7 +212,11 @@ pub struct MetricEvidence {
 }
 
 impl MetricEvidence {
-    fn pass_ratio(name: impl Into<String>, passed: u64, total: u64) -> EvaluationReceiptResult<Self> {
+    fn pass_ratio(
+        name: impl Into<String>,
+        passed: u64,
+        total: u64,
+    ) -> EvaluationReceiptResult<Self> {
         if total == 0 {
             return Err(EvaluationReceiptError::Missing {
                 field: "evaluated task results",
@@ -256,11 +257,10 @@ impl EvaluationEvidence {
         metric_name: impl Into<String>,
     ) -> EvaluationReceiptResult<Self> {
         let run_id = EvaluationRunId::parse(record.run_id.clone())?;
-        let total = u64::try_from(record.tasks.len()).map_err(|_| {
-            EvaluationReceiptError::Malformed {
+        let total =
+            u64::try_from(record.tasks.len()).map_err(|_| EvaluationReceiptError::Malformed {
                 field: "evaluated task results",
-            }
-        })?;
+            })?;
         if total == 0 {
             return Err(EvaluationReceiptError::Missing {
                 field: "evaluated task results",
@@ -283,28 +283,30 @@ impl EvaluationEvidence {
             };
             let task_cost = checked_nonnegative_number("task cost", task_cost)?;
             cost_usd = checked_nonnegative_number("total cost", cost_usd + task_cost)?;
-            latency = latency.checked_add(task.duration).ok_or(
-                EvaluationReceiptError::Malformed {
-                    field: "total latency",
-                },
-            )?;
+            latency =
+                latency
+                    .checked_add(task.duration)
+                    .ok_or(EvaluationReceiptError::Malformed {
+                        field: "total latency",
+                    })?;
             task_latency_ms.push(u64::try_from(task.duration.as_millis()).map_err(|_| {
                 EvaluationReceiptError::Malformed {
                     field: "task latency",
                 }
             })?);
             if matches!(task.status, TaskStatus::Passed) {
-                passed = passed.checked_add(1).ok_or(EvaluationReceiptError::Malformed {
-                    field: "passed task count",
-                })?;
+                passed = passed
+                    .checked_add(1)
+                    .ok_or(EvaluationReceiptError::Malformed {
+                        field: "passed task count",
+                    })?;
             }
         }
 
-        let latency_ms = u64::try_from(latency.as_millis()).map_err(|_| {
-            EvaluationReceiptError::Malformed {
+        let latency_ms =
+            u64::try_from(latency.as_millis()).map_err(|_| EvaluationReceiptError::Malformed {
                 field: "total latency",
-            }
-        })?;
+            })?;
         task_latency_ms.sort_unstable();
         let p95_rank = total
             .checked_mul(95)
@@ -313,16 +315,16 @@ impl EvaluationEvidence {
                 field: "p95 latency rank",
             })?
             / 100;
-        let p95_index = usize::try_from(p95_rank - 1).map_err(|_| {
-            EvaluationReceiptError::Malformed {
+        let p95_index =
+            usize::try_from(p95_rank - 1).map_err(|_| EvaluationReceiptError::Malformed {
                 field: "p95 latency rank",
-            }
-        })?;
-        let p95_latency_ms = *task_latency_ms.get(p95_index).ok_or(
-            EvaluationReceiptError::Malformed {
-                field: "p95 latency",
-            },
-        )?;
+            })?;
+        let p95_latency_ms =
+            *task_latency_ms
+                .get(p95_index)
+                .ok_or(EvaluationReceiptError::Malformed {
+                    field: "p95 latency",
+                })?;
         Ok(Self {
             run_id,
             task_count: total,
@@ -634,7 +636,6 @@ impl ReplayOperationCounts {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct VerifiedRunExportEvidence {
     run_id: EvaluationRunId,
@@ -716,7 +717,9 @@ fn evidence_count_from_replay(value: ReplayEvidenceCount) -> EvidenceCount {
 }
 
 #[cfg(feature = "agent-loop")]
-fn operation_counts_from_replay_counters(counters: ReplayEvidenceCounters) -> ReplayOperationCounts {
+fn operation_counts_from_replay_counters(
+    counters: ReplayEvidenceCounters,
+) -> ReplayOperationCounts {
     ReplayOperationCounts {
         model_call_count: evidence_count_from_replay(counters.model_call_count),
         tool_call_count: evidence_count_from_replay(counters.tool_call_count),
@@ -946,12 +949,11 @@ impl EvaluationReceipt {
             VerifiedRunExportEvidence::exact_verified(evidence)?,
             inputs,
         )?;
-        let reconstruction_digest = receipt
-            .exact_reconstruction_digest()
-            .cloned()
-            .ok_or(EvaluationReceiptError::Missing {
+        let reconstruction_digest = receipt.exact_reconstruction_digest().cloned().ok_or(
+            EvaluationReceiptError::Missing {
                 field: "exact reconstruction digest",
-            })?;
+            },
+        )?;
         let signature_verification = match receipt.run_export_authentication() {
             RunExportAuthenticationStatus::SignatureVerified(verification) => verification.clone(),
             RunExportAuthenticationStatus::Unauthenticated => {
@@ -983,13 +985,17 @@ impl EvaluationReceipt {
     /// integrity. An unsigned, integrity-verified receipt is valid diagnostic
     /// evidence but is not promotion eligible.
     pub fn verify(&self) -> EvaluationReceiptResult<()> {
-        if self.schema != EVALUATION_RECEIPT_SCHEMA || self.version != EVALUATION_RECEIPT_SCHEMA_VERSION {
+        if self.schema != EVALUATION_RECEIPT_SCHEMA
+            || self.version != EVALUATION_RECEIPT_SCHEMA_VERSION
+        {
             return Err(EvaluationReceiptError::Inconsistent {
                 field: "receipt schema/version",
             });
         }
-        if !matches!(self.run_export_integrity, RunExportIntegrityStatus::Verified)
-            || !self.required_evidence_complete
+        if !matches!(
+            self.run_export_integrity,
+            RunExportIntegrityStatus::Verified
+        ) || !self.required_evidence_complete
             || !matches!(self.terminal_validity, TerminalValidity::Verified)
         {
             return Err(EvaluationReceiptError::Inconsistent {
@@ -1482,9 +1488,7 @@ mod tests {
 
     use super::*;
     use crate::adapter::BenchmarkMetadata;
-    use crate::result::{
-        AggregateMetrics, CostUsd, PricingProvenance, TaskResult, Telemetry,
-    };
+    use crate::result::{AggregateMetrics, CostUsd, PricingProvenance, TaskResult, Telemetry};
 
     const RUN_ID: &str = "123e4567-e89b-12d3-a456-426614174000";
     const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1501,7 +1505,12 @@ mod tests {
         }
     }
 
-    fn task(status: TaskStatus, cost_usd: f64, duration_ms: u64, outcome: VerificationOutcome) -> TaskResult {
+    fn task(
+        status: TaskStatus,
+        cost_usd: f64,
+        duration_ms: u64,
+        outcome: VerificationOutcome,
+    ) -> TaskResult {
         TaskResult {
             task_id: format!("task-{duration_ms}"),
             category: None,
@@ -1614,7 +1623,10 @@ mod tests {
         assert_eq!(receipt.version(), EVALUATION_RECEIPT_SCHEMA_VERSION);
         assert_eq!(receipt.run_id(), RUN_ID);
         assert_eq!(receipt.run_export_digest().as_str(), DIGEST_C);
-        assert_eq!(receipt.run_export_integrity(), RunExportIntegrityStatus::Verified);
+        assert_eq!(
+            receipt.run_export_integrity(),
+            RunExportIntegrityStatus::Verified
+        );
         assert_eq!(
             receipt.run_export_authentication(),
             &RunExportAuthenticationStatus::Unauthenticated
@@ -1829,7 +1841,9 @@ mod tests {
     #[test]
     fn unsigned_self_rehashed_export_cannot_mint_promotion_authority() {
         let unsigned = receipt();
-        unsigned.verify().expect("self-rehashed receipt remains integral");
+        unsigned
+            .verify()
+            .expect("self-rehashed receipt remains integral");
         assert_eq!(
             unsigned.run_export_authentication(),
             &RunExportAuthenticationStatus::Unauthenticated
@@ -1840,7 +1854,9 @@ mod tests {
         let duplicate = unsigned.clone();
         let mut ledger = EvaluationLedger::new();
         assert!(ledger.record_receipt(unsigned).expect("first insertion"));
-        assert!(!ledger.record_receipt(duplicate).expect("idempotent insertion"));
+        assert!(!ledger
+            .record_receipt(duplicate)
+            .expect("idempotent insertion"));
         assert!(ledger.promotion_authority(RUN_ID).is_none());
 
         let conflicting = EvaluationReceipt::from_verified_evidence(

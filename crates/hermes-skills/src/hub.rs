@@ -32,7 +32,6 @@ struct SearchResponse {
     skills: Vec<SkillMeta>,
 }
 
-
 /// Request body for the batch version check endpoint.
 #[derive(Debug, Serialize)]
 struct CheckUpdatesRequest {
@@ -552,7 +551,6 @@ impl SkillsHubClient {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -567,7 +565,6 @@ mod tests {
         let token = client.generate_token().unwrap();
         assert!(!token.is_empty());
     }
-
 
     #[test]
     fn clawhub_listing_maps_display_name_summary_and_tags() {

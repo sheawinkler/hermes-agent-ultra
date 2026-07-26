@@ -42,11 +42,10 @@ pub use hermes_core::types::Message;
 // Re-export gateway orchestrator and authenticated memory-governance contracts.
 pub use gateway::{
     Gateway, GatewayMemoryExportArtifact, GatewayMemoryExportDownloadMetadata,
-    GatewayMemoryExportHandler, GatewayMemoryExportOpenHandler,
-    GatewayMemoryExportRemediation, GatewayMemoryExportResponse,
-    GatewayMemoryForgetHandler, GatewayMemoryForgetProviderState,
-    GatewayMemoryForgetProviderStatus, GatewayMemoryForgetRemediation,
-    GatewayMemoryForgetResponse, GatewayRuntimeContext,
+    GatewayMemoryExportHandler, GatewayMemoryExportOpenHandler, GatewayMemoryExportRemediation,
+    GatewayMemoryExportResponse, GatewayMemoryForgetHandler, GatewayMemoryForgetProviderState,
+    GatewayMemoryForgetProviderStatus, GatewayMemoryForgetRemediation, GatewayMemoryForgetResponse,
+    GatewayRuntimeContext,
 };
 
 // Re-export gateway cache/session-control contracts

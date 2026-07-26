@@ -17,7 +17,6 @@ use crate::run_ledger::{
 
 pub(crate) const BRANCH_REPLAY_START_SCHEMA: &str = "hermes.branch-replay-start/v1";
 
-
 /// Caller-supplied child identity and execution admission. The coordinator
 /// validates lineage and replaces its public payload with a source-bound
 /// envelope before the ledger creates the child.
@@ -257,7 +256,7 @@ mod tests {
     use crate::run_ledger::{
         ActionId, AppendIdentity, BranchId, DigestAbsence, EventId, ExactReplayState,
         LedgerConnectionFactory, LedgerIdentityKeyId, ModelId, ObjectiveId, PrivateFingerprint,
-        ProviderId, ProvenanceDigest, ReplayArtifactFidelity, RunExit, RunId, RunLedger,
+        ProvenanceDigest, ProviderId, ReplayArtifactFidelity, RunExit, RunId, RunLedger,
         RunOwnerId, RunProvenance, SessionId, Sha256Digest, TaskId, TenantId, TerminalReason,
     };
 
@@ -354,20 +353,16 @@ mod tests {
     }
 
     fn exact_artifact_ref() -> crate::run_ledger::SealedArtifactRef {
-        crate::run_ledger::SealedArtifactRef::try_from(
-            crate::sealed_artifact::SealedArtifactRef {
-                envelope_digest: hex::encode([43; 32]),
-                key_id: "branch-replay-artifact-key-v1".to_string(),
-                schema_version: crate::sealed_artifact::SEALED_ARTIFACT_SCHEMA_VERSION,
-                encryption_algorithm: crate::sealed_artifact::ARTIFACT_ENCRYPTION_ALGORITHM
-                    .to_string(),
-                canonicalization_algorithm: crate::sealed_artifact::ARTIFACT_CANONICALIZATION
-                    .to_string(),
-                canonicalization_version:
-                    crate::sealed_artifact::ARTIFACT_CANONICALIZATION_VERSION,
-                redactor_version: "branch-replay-redactor-v1".to_string(),
-            },
-        )
+        crate::run_ledger::SealedArtifactRef::try_from(crate::sealed_artifact::SealedArtifactRef {
+            envelope_digest: hex::encode([43; 32]),
+            key_id: "branch-replay-artifact-key-v1".to_string(),
+            schema_version: crate::sealed_artifact::SEALED_ARTIFACT_SCHEMA_VERSION,
+            encryption_algorithm: crate::sealed_artifact::ARTIFACT_ENCRYPTION_ALGORITHM.to_string(),
+            canonicalization_algorithm: crate::sealed_artifact::ARTIFACT_CANONICALIZATION
+                .to_string(),
+            canonicalization_version: crate::sealed_artifact::ARTIFACT_CANONICALIZATION_VERSION,
+            redactor_version: "branch-replay-redactor-v1".to_string(),
+        })
         .expect("artifact reference")
     }
 
@@ -401,8 +396,7 @@ mod tests {
                 &source.owner_lease,
                 RunExit::new(
                     TerminalReason::Completed,
-                    CanonicalJson::from_value(&json!({"exit":"complete"}))
-                        .expect("exit payload"),
+                    CanonicalJson::from_value(&json!({"exit":"complete"})).expect("exit payload"),
                 ),
             )
             .expect("finalize source");
@@ -455,14 +449,22 @@ mod tests {
             )
             .expect("admit child");
 
-        let events = ledger.events_for_run(child.header.run_id).expect("child events");
+        let events = ledger
+            .events_for_run(child.header.run_id)
+            .expect("child events");
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, crate::run_ledger::SessionRunEventKind::RunStart);
+        assert_eq!(
+            events[0].kind,
+            crate::run_ledger::SessionRunEventKind::RunStart
+        );
         assert!(ledger
             .outbox_for_run(child.header.run_id)
             .expect("child outbox")
             .is_empty());
-        let payload = events[0].public_payload.as_value().expect("child payload json");
+        let payload = events[0]
+            .public_payload
+            .as_value()
+            .expect("child payload json");
         assert_eq!(
             payload["payload"]["branch_replay"]["source_run_id"],
             source_run_id.to_string()

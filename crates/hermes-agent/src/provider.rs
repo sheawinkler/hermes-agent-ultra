@@ -70,10 +70,7 @@ fn build_provider_http_client(request_timeout: Option<Duration>) -> Client {
     })
 }
 
-pub(crate) fn map_reqwest_transport_error(
-    context: &str,
-    error: reqwest::Error,
-) -> AgentError {
+pub(crate) fn map_reqwest_transport_error(context: &str, error: reqwest::Error) -> AgentError {
     let detail = format!("{context}: {error}");
     if error.is_timeout() {
         AgentError::Timeout(detail)

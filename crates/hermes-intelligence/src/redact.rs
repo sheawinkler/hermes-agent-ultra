@@ -162,7 +162,6 @@ pub fn is_sensitive_field_name(key: &str) -> bool {
         || normalized.ends_with("_password")
 }
 
-
 static PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(^|[^A-Za-z0-9_-])(",
@@ -827,7 +826,6 @@ mod tests {
         assert!(!is_sensitive_field_name("token_count"));
         assert!(!is_sensitive_field_name("source_code"));
     }
-
 
     #[test]
     fn test_sensitive_file_detection() {

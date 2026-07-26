@@ -7,6 +7,11 @@ use hermes_core::execution_mode::{ExecutionMode, ExecutionModeSource, ResolvedEx
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
+use crate::deterministic_replay::{
+    reconstruct_verified_run, verify_branch_replay_plan, DeterministicReplayError,
+    ExactArtifactReadError, ExactArtifactReader, ReplayArtifactReference, ReplayBranchBoundary,
+    VerifiedReplayArtifact, VerifiedRunReplayPlan,
+};
 use crate::run_ledger::{
     ActionId, AppendIdentity, AppendKey, AppendLease, AppendReceipt, AppendRequest,
     AppendReservation, ArtifactDegradationReason, BranchId, CanonicalJson,
@@ -21,18 +26,12 @@ use crate::run_ledger::{
 };
 use crate::run_runtime::CertifiedEffectIntent;
 use crate::sealed_artifact;
-use crate::deterministic_replay::{
-    reconstruct_verified_run, verify_branch_replay_plan, DeterministicReplayError,
-    ExactArtifactReadError, ExactArtifactReader, ReplayArtifactReference, ReplayBranchBoundary,
-    VerifiedReplayArtifact, VerifiedRunReplayPlan,
-};
 
 use super::{
     canonical_value_bytes, classify_run_export, export_path, export_run,
-    export_run_interrupting_before_rename, sha256_hex, verify_run_export,
-    verify_run_export_bytes, verify_run_export_replay_plan, verify_run_export_replay_plan_bytes,
-    RunExportClassification, RunExportError, RUN_EXPORT_DIGEST_ALGORITHM,
-    RUN_EXPORT_SCHEMA_VERSION,
+    export_run_interrupting_before_rename, sha256_hex, verify_run_export, verify_run_export_bytes,
+    verify_run_export_replay_plan, verify_run_export_replay_plan_bytes, RunExportClassification,
+    RunExportError, RUN_EXPORT_DIGEST_ALGORITHM, RUN_EXPORT_SCHEMA_VERSION,
 };
 
 #[derive(Debug)]
@@ -403,8 +402,12 @@ fn v3_export_binds_exact_replay_status_and_keeps_v2_v1_readable() {
             RunExit::new(TerminalReason::Completed, object(json!({"exit":"exact"}))),
         )
         .expect("finalize exact replay fixture");
-    let receipt = export_run(&ledger, directory.path().join("exact-replay-export"), run_id)
-        .expect("export exact replay fixture");
+    let receipt = export_run(
+        &ledger,
+        directory.path().join("exact-replay-export"),
+        run_id,
+    )
+    .expect("export exact replay fixture");
     let bytes = std::fs::read(receipt.path).expect("read exact replay export");
     let document = parsed_export(&bytes);
     assert_eq!(
@@ -828,7 +831,10 @@ fn replay_plan_reconstructs_verified_bytes_after_export_path_is_rewritten() {
         verify_run_export_replay_plan_bytes(&verified_bytes).expect("verify the same bytes");
     assert_eq!(plan.canonical_bytes(), verified_bytes.as_slice());
     assert_eq!(plan.summary(), bytes_plan.summary());
-    assert_eq!(plan.events().len(), usize::try_from(plan.summary().event_count).unwrap());
+    assert_eq!(
+        plan.events().len(),
+        usize::try_from(plan.summary().event_count).unwrap()
+    );
 
     struct PanicIfArtifactReaderIsUsed;
 
@@ -856,7 +862,10 @@ fn replay_plan_reconstructs_verified_bytes_after_export_path_is_rewritten() {
     );
     assert_eq!(report.artifact_count(), 0);
     assert_eq!(report.terminal_reason(), TerminalReason::Completed);
-    assert_eq!(report.final_outcome(), crate::run_ledger::RunOutcome::Success);
+    assert_eq!(
+        report.final_outcome(),
+        crate::run_ledger::RunOutcome::Success
+    );
 }
 
 #[test]
@@ -895,8 +904,12 @@ fn replay_plan_fails_closed_when_private_artifact_is_missing() {
             RunExit::new(TerminalReason::Completed, object(json!({"exit":"exact"}))),
         )
         .expect("finalize exact replay fixture");
-    let receipt = export_run(&ledger, directory.path().join("exact-replay-export"), run_id)
-        .expect("export exact replay fixture");
+    let receipt = export_run(
+        &ledger,
+        directory.path().join("exact-replay-export"),
+        run_id,
+    )
+    .expect("export exact replay fixture");
     let plan = verify_run_export_replay_plan(&receipt.path).expect("verify exact replay plan");
     assert_eq!(plan.artifact_references().len(), 1);
 

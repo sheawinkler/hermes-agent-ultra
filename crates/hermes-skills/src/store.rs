@@ -184,7 +184,10 @@ impl FileSkillStore {
     }
 
     fn trust_store(&self) -> Result<SkillTrustStore, SkillError> {
-        Ok(SkillTrustStore::new(self.skills_dir.clone(), self.verifier()?))
+        Ok(SkillTrustStore::new(
+            self.skills_dir.clone(),
+            self.verifier()?,
+        ))
     }
 
     fn validate_segment(value: &str, field: &str) -> Result<String, SkillError> {
@@ -199,7 +202,9 @@ impl FileSkillStore {
         let segment = match (components.next(), components.next()) {
             (Some(Component::Normal(segment)), None) => segment
                 .to_str()
-                .ok_or_else(|| SkillError::GuardViolation(format!("Invalid skill {field}: non-UTF-8")))?
+                .ok_or_else(|| {
+                    SkillError::GuardViolation(format!("Invalid skill {field}: non-UTF-8"))
+                })?
                 .to_string(),
             _ => {
                 return Err(SkillError::GuardViolation(format!(
@@ -209,9 +214,11 @@ impl FileSkillStore {
         };
         if segment.starts_with('.')
             || segment.starts_with('-')
-            || !segment
-                .chars()
-                .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || matches!(character, '-' | '_' | '.'))
+            || !segment.chars().all(|character| {
+                character.is_ascii_lowercase()
+                    || character.is_ascii_digit()
+                    || matches!(character, '-' | '_' | '.')
+            })
         {
             return Err(SkillError::GuardViolation(format!(
                 "Invalid skill {field}: use lowercase letters, digits, '-', '_' or '.' without hidden/option prefixes"
@@ -288,7 +295,6 @@ impl FileSkillStore {
         Ok(current)
     }
 
-
     fn render_skill_file(frontmatter: &SkillFrontmatter, content: &str) -> String {
         let yaml = serde_yaml::to_string(frontmatter).unwrap_or_default();
         let yaml = yaml.trim_start_matches("---\n").trim_end();
@@ -305,7 +311,8 @@ impl FileSkillStore {
         let end = rest
             .find("\n---")
             .ok_or_else(|| SkillError::Parse("Missing closing --- in frontmatter".to_string()))?;
-        let frontmatter = serde_yaml::from_str(&rest[..end]).map_err(|error| SkillError::Parse(error.to_string()))?;
+        let frontmatter = serde_yaml::from_str(&rest[..end])
+            .map_err(|error| SkillError::Parse(error.to_string()))?;
         let content = rest[end + 4..].trim_start_matches('\n').to_string();
         Ok((frontmatter, content))
     }
@@ -315,7 +322,8 @@ impl FileSkillStore {
             SkillLockLoad::V2(lock) => Ok(lock),
             SkillLockLoad::Legacy { .. } => Err(SkillError::Quarantined {
                 reason: SkillQuarantineReason::LegacyLock,
-                detail: "legacy lock must be explicitly reverified before local mutation".to_string(),
+                detail: "legacy lock must be explicitly reverified before local mutation"
+                    .to_string(),
             }),
         }
     }
@@ -410,11 +418,7 @@ impl FileSkillStore {
             .join(name)
     }
 
-    fn pending_paths(
-        &self,
-        root: &Path,
-        name: &str,
-    ) -> (PathBuf, PathBuf, PathBuf) {
+    fn pending_paths(&self, root: &Path, name: &str) -> (PathBuf, PathBuf, PathBuf) {
         let pending = root.join(Self::pending_relative(name));
         (
             pending.clone(),
@@ -439,14 +443,15 @@ impl FileSkillStore {
         Self::set_owner_only_directory(&pending)?;
         let (_, _, metadata_path) = self.pending_paths(&root, name);
         Self::reject_nonprivate_file(&metadata_path)?;
-        let candidate = serde_json::from_slice::<PendingLocalSkillCandidate>(&fs::read(&metadata_path)?)
-            .map_err(|error| {
-                Self::quarantined(
-                    name.to_string(),
-                    SkillQuarantineReason::MalformedLock,
-                    format!("invalid pending candidate metadata: {error}"),
-                )
-            })?;
+        let candidate =
+            serde_json::from_slice::<PendingLocalSkillCandidate>(&fs::read(&metadata_path)?)
+                .map_err(|error| {
+                    Self::quarantined(
+                        name.to_string(),
+                        SkillQuarantineReason::MalformedLock,
+                        format!("invalid pending candidate metadata: {error}"),
+                    )
+                })?;
         if candidate.schema_version != PENDING_LOCAL_SCHEMA_VERSION
             || candidate.manifest.identity.name != name
             || candidate.manifest.source != SkillPackageSource::LocalAuthored
@@ -469,14 +474,16 @@ impl FileSkillStore {
         Ok(Some((candidate, payload)))
     }
 
-
     fn checked_pending_skill(
         &self,
         candidate: &PendingLocalSkillCandidate,
         directory: &Path,
     ) -> Result<Skill, SkillError> {
         if candidate.manifest.identity.manifest_digest
-            != candidate.manifest.computed_manifest_digest().map_err(trust_error)?
+            != candidate
+                .manifest
+                .computed_manifest_digest()
+                .map_err(trust_error)?
         {
             return Err(Self::quarantined(
                 candidate.manifest.identity.name.clone(),
@@ -500,7 +507,10 @@ impl FileSkillStore {
                 "pending candidate scan evidence changed before owner attestation".to_string(),
             ));
         }
-        if matches!(scan.verdict, SkillScanVerdictV2::Dangerous | SkillScanVerdictV2::Invalid) {
+        if matches!(
+            scan.verdict,
+            SkillScanVerdictV2::Dangerous | SkillScanVerdictV2::Invalid
+        ) {
             return Err(Self::quarantined(
                 candidate.manifest.identity.name.clone(),
                 if scan.verdict == SkillScanVerdictV2::Dangerous {
@@ -639,7 +649,8 @@ impl FileSkillStore {
                 let destination = self.ensure_contained_directory(root, &relative)?;
                 Self::set_owner_only_directory(&destination)?;
                 let copy_result = Self::copy_regular_bundle(source, &destination).and_then(|()| {
-                    if canonical_bundle_digest(&destination).map_err(trust_error)? != content_digest {
+                    if canonical_bundle_digest(&destination).map_err(trust_error)? != content_digest
+                    {
                         return Err(Self::quarantined(
                             name.to_string(),
                             SkillQuarantineReason::ContentDigestMismatch,
@@ -748,7 +759,8 @@ impl FileSkillStore {
                 return Err(Self::quarantined(
                     frontmatter.name,
                     SkillQuarantineReason::InvalidSignature,
-                    "remote or embedded packages may not be replaced by a local candidate".to_string(),
+                    "remote or embedded packages may not be replaced by a local candidate"
+                        .to_string(),
                 ));
             }
             let _ = self.entry_root(existing)?;
@@ -770,15 +782,20 @@ impl FileSkillStore {
             let existing = self.existing_contained_directory(&root, &payload_relative)?;
             fs::remove_dir_all(existing)?;
         }
-        let payload =
-            self.ensure_contained_directory(&root, &Self::pending_relative(&name).join(PENDING_PAYLOAD_DIR))?;
+        let payload = self.ensure_contained_directory(
+            &root,
+            &Self::pending_relative(&name).join(PENDING_PAYLOAD_DIR),
+        )?;
         let hub = root.join(SKILL_HUB_DIR);
         Self::set_owner_only_directory(&hub)?;
         Self::set_owner_only_directory(&hub.join(PENDING_LOCAL_DIR))?;
         Self::set_owner_only_directory(&pending)?;
         Self::set_owner_only_directory(&payload)?;
         for (relative_path, bytes) in normalized_files {
-            if let Some(parent) = relative_path.parent().filter(|path| !path.as_os_str().is_empty()) {
+            if let Some(parent) = relative_path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+            {
                 let parent = self.ensure_contained_directory(
                     &root,
                     &Self::pending_relative(&name)
@@ -821,8 +838,9 @@ impl FileSkillStore {
             manifest,
         };
         let (_, _, metadata_path) = self.pending_paths(&root, &name);
-        let metadata = serde_json::to_vec_pretty(&candidate)
-            .map_err(|error| SkillError::Parse(format!("failed to encode pending candidate: {error}")))?;
+        let metadata = serde_json::to_vec_pretty(&candidate).map_err(|error| {
+            SkillError::Parse(format!("failed to encode pending candidate: {error}"))
+        })?;
         Self::atomic_write(&metadata_path, &metadata)
     }
 
@@ -874,11 +892,12 @@ impl FileSkillStore {
         Self::set_owner_only_directory(&stage)?;
         Self::set_owner_only_directory(&payload)?;
         for (relative_path, bytes) in normalized_files {
-            if let Some(parent) = relative_path.parent().filter(|path| !path.as_os_str().is_empty()) {
-                let parent = self.ensure_contained_directory(
-                    root,
-                    &payload_relative.join(parent),
-                )?;
+            if let Some(parent) = relative_path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+            {
+                let parent =
+                    self.ensure_contained_directory(root, &payload_relative.join(parent))?;
                 Self::set_owner_only_directory(&parent)?;
             }
             Self::atomic_write(&payload.join(relative_path), bytes)?;
@@ -991,8 +1010,13 @@ impl FileSkillStore {
         let result = (|| -> Result<SkillAdmission, SkillError> {
             let verifier = self.verifier()?;
             let revocations = load_revocations(&self.skills_dir).map_err(trust_error)?;
-            let _staged_admission =
-                Self::require_remote_admission(&manifest, &verifier, &revocations, &staged_payload, force)?;
+            let _staged_admission = Self::require_remote_admission(
+                &manifest,
+                &verifier,
+                &revocations,
+                &staged_payload,
+                force,
+            )?;
             let (install_path, promoted_payload) = self.prepare_immutable_payload(
                 &root,
                 "remote",
@@ -1000,8 +1024,13 @@ impl FileSkillStore {
                 &manifest.identity.content_digest,
                 &staged_payload,
             )?;
-            let promoted_admission =
-                Self::require_remote_admission(&manifest, &verifier, &revocations, &promoted_payload, force)?;
+            let promoted_admission = Self::require_remote_admission(
+                &manifest,
+                &verifier,
+                &revocations,
+                &promoted_payload,
+                force,
+            )?;
             let entry = SkillLockEntryV2 {
                 install_path,
                 manifest: manifest.clone(),
@@ -1031,7 +1060,6 @@ impl FileSkillStore {
         result
     }
 
-
     fn atomic_write(path: &Path, content: &[u8]) -> Result<(), SkillError> {
         let parent = path
             .parent()
@@ -1039,12 +1067,17 @@ impl FileSkillStore {
         Self::set_owner_only_directory(parent)?;
         let temporary = parent.join(format!(
             ".{}.tmp-{}-{}",
-            path.file_name().and_then(|name| name.to_str()).unwrap_or("SKILL.md"),
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("SKILL.md"),
             std::process::id(),
             Uuid::new_v4()
         ));
         let result = (|| -> Result<(), SkillError> {
-            let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
             Self::set_owner_only_file(&temporary)?;
             file.write_all(content)?;
             file.sync_all()?;
@@ -1104,8 +1137,8 @@ impl FileSkillStore {
     }
 
     fn entry_root(&self, entry: &SkillLockEntryV2) -> Result<PathBuf, SkillError> {
-        let normalized = normalize_relative_package_path(Path::new(&entry.install_path))
-            .map_err(trust_error)?;
+        let normalized =
+            normalize_relative_package_path(Path::new(&entry.install_path)).map_err(trust_error)?;
         let root = self.root()?;
         let directory = root.join(normalized);
         let metadata = fs::symlink_metadata(&directory)?;
@@ -1143,7 +1176,10 @@ impl FileSkillStore {
                 "staged package scan evidence changed before owner attestation".to_string(),
             ));
         }
-        if matches!(scan.verdict, SkillScanVerdictV2::Dangerous | SkillScanVerdictV2::Invalid) {
+        if matches!(
+            scan.verdict,
+            SkillScanVerdictV2::Dangerous | SkillScanVerdictV2::Invalid
+        ) {
             return Err(Self::quarantined(
                 entry.manifest.identity.name.clone(),
                 if scan.verdict == SkillScanVerdictV2::Dangerous {
@@ -1163,12 +1199,13 @@ impl FileSkillStore {
                 "staged SKILL.md is not a regular file".to_string(),
             ));
         }
-        let raw = fs::read_to_string(skill_file)
-            .map_err(|_| Self::quarantined(
+        let raw = fs::read_to_string(skill_file).map_err(|_| {
+            Self::quarantined(
                 entry.manifest.identity.name.clone(),
                 SkillQuarantineReason::FilesystemViolation,
                 "staged SKILL.md is not UTF-8".to_string(),
-            ))?;
+            )
+        })?;
         let (frontmatter, content) = Self::parse_skill_file(&raw)?;
         if frontmatter.name != entry.manifest.identity.name {
             return Err(Self::quarantined(
@@ -1223,11 +1260,17 @@ impl FileSkillStore {
             .verify_bundle(&staged_root, &manifest, &revocations, false)
             .map_err(trust_error)?;
         if !staged_admission.is_allowed() {
-            let quarantine = staged_admission.quarantine.unwrap_or(crate::SkillQuarantine {
-                reason: SkillQuarantineReason::InvalidLocalAttestation,
-                detail: "local owner attestation was not admitted".to_string(),
-            });
-            return Err(Self::quarantined(name, quarantine.reason, quarantine.detail));
+            let quarantine = staged_admission
+                .quarantine
+                .unwrap_or(crate::SkillQuarantine {
+                    reason: SkillQuarantineReason::InvalidLocalAttestation,
+                    detail: "local owner attestation was not admitted".to_string(),
+                });
+            return Err(Self::quarantined(
+                name,
+                quarantine.reason,
+                quarantine.detail,
+            ));
         }
 
         let root = self.root()?;
@@ -1242,10 +1285,12 @@ impl FileSkillStore {
             .verify_bundle(&promoted_root, &manifest, &revocations, false)
             .map_err(trust_error)?;
         if !promoted_admission.is_allowed() {
-            let quarantine = promoted_admission.quarantine.unwrap_or(crate::SkillQuarantine {
-                reason: SkillQuarantineReason::InvalidLocalAttestation,
-                detail: "promoted local owner attestation was not admitted".to_string(),
-            });
+            let quarantine = promoted_admission
+                .quarantine
+                .unwrap_or(crate::SkillQuarantine {
+                    reason: SkillQuarantineReason::InvalidLocalAttestation,
+                    detail: "promoted local owner attestation was not admitted".to_string(),
+                });
             return Err(Self::quarantined(
                 manifest.identity.name.clone(),
                 quarantine.reason,
@@ -1263,7 +1308,8 @@ impl FileSkillStore {
                 return Err(Self::quarantined(
                     manifest.identity.name.clone(),
                     SkillQuarantineReason::InvalidSignature,
-                    "remote or embedded packages may not be replaced by a local candidate".to_string(),
+                    "remote or embedded packages may not be replaced by a local candidate"
+                        .to_string(),
                 ));
             }
             lock.packages[index] = SkillLockEntryV2 {
@@ -1295,7 +1341,10 @@ impl FileSkillStore {
     }
 
     fn quarantined(name: String, reason: SkillQuarantineReason, detail: String) -> SkillError {
-        SkillError::Quarantined { reason, detail: format!("{name}: {detail}") }
+        SkillError::Quarantined {
+            reason,
+            detail: format!("{name}: {detail}"),
+        }
     }
 }
 
@@ -1368,25 +1417,30 @@ impl SkillStore for FileSkillStore {
                     Ok(None)
                 }
             }
-            SkillTrustLoad::Quarantined { name, quarantine } => {
-                Err(Self::quarantined(name, quarantine.reason, quarantine.detail))
-            }
+            SkillTrustLoad::Quarantined { name, quarantine } => Err(Self::quarantined(
+                name,
+                quarantine.reason,
+                quarantine.detail,
+            )),
             SkillTrustLoad::Admitted(_) => match trust_store
                 .read_contained(&name, Path::new("SKILL.md"), false)
                 .map_err(trust_error)?
             {
                 SkillTrustRead::Read { package, bytes } => {
-                    let raw = String::from_utf8(bytes).map_err(|_| Self::quarantined(
-                        name.clone(),
-                        SkillQuarantineReason::FilesystemViolation,
-                        "SKILL.md is not UTF-8".to_string(),
-                    ))?;
+                    let raw = String::from_utf8(bytes).map_err(|_| {
+                        Self::quarantined(
+                            name.clone(),
+                            SkillQuarantineReason::FilesystemViolation,
+                            "SKILL.md is not UTF-8".to_string(),
+                        )
+                    })?;
                     let (frontmatter, content) = Self::parse_skill_file(&raw)?;
                     if frontmatter.name != name || package.entry.manifest.identity.name != name {
                         return Err(Self::quarantined(
                             name,
                             SkillQuarantineReason::ContentDigestMismatch,
-                            "SKILL.md identity differs from its locked package identity".to_string(),
+                            "SKILL.md identity differs from its locked package identity"
+                                .to_string(),
                         ));
                     }
                     Ok(Some(Skill {
@@ -1397,9 +1451,11 @@ impl SkillStore for FileSkillStore {
                     }))
                 }
                 SkillTrustRead::NotFound => Ok(None),
-                SkillTrustRead::Quarantined { name, quarantine } => {
-                    Err(Self::quarantined(name, quarantine.reason, quarantine.detail))
-                }
+                SkillTrustRead::Quarantined { name, quarantine } => Err(Self::quarantined(
+                    name,
+                    quarantine.reason,
+                    quarantine.detail,
+                )),
             },
         }
     }
@@ -1443,15 +1499,21 @@ impl SkillStore for FileSkillStore {
                 continue;
             };
             match trust_store
-                .read_contained(&package.entry.manifest.identity.name, Path::new("SKILL.md"), false)
+                .read_contained(
+                    &package.entry.manifest.identity.name,
+                    Path::new("SKILL.md"),
+                    false,
+                )
                 .map_err(trust_error)?
             {
                 SkillTrustRead::Read { package, bytes } => {
-                    let raw = String::from_utf8(bytes).map_err(|_| Self::quarantined(
-                        package.entry.manifest.identity.name.clone(),
-                        SkillQuarantineReason::FilesystemViolation,
-                        "SKILL.md is not UTF-8".to_string(),
-                    ))?;
+                    let raw = String::from_utf8(bytes).map_err(|_| {
+                        Self::quarantined(
+                            package.entry.manifest.identity.name.clone(),
+                            SkillQuarantineReason::FilesystemViolation,
+                            "SKILL.md is not UTF-8".to_string(),
+                        )
+                    })?;
                     let (frontmatter, _) = Self::parse_skill_file(&raw)?;
                     if frontmatter.name != package.entry.manifest.identity.name {
                         warn!(skill = %package.entry.manifest.identity.name, "excluding identity-mismatched skill from list");
@@ -1519,9 +1581,9 @@ fn authority_trust_error(error: SkillTrustError) -> SkillError {
             SkillQuarantineReason::InvalidTrustRoot
         }
         SkillTrustError::LegacyLock => SkillQuarantineReason::LegacyLock,
-        SkillTrustError::Io(_) | SkillTrustError::Serialization(_) | SkillTrustError::Malformed(_) => {
-            SkillQuarantineReason::InvalidTrustRoot
-        }
+        SkillTrustError::Io(_)
+        | SkillTrustError::Serialization(_)
+        | SkillTrustError::Malformed(_) => SkillQuarantineReason::InvalidTrustRoot,
     };
     SkillError::Quarantined {
         reason,
@@ -1548,9 +1610,8 @@ mod tests {
         seed: [u8; 32],
     ) -> (FileSkillStore, crate::LocalOwnerSigningKey) {
         let signer = crate::LocalOwnerSigningKey::from_seed(seed);
-        let store = FileSkillStore::new(directory.to_path_buf()).with_trusted_local_owner_keys(vec![
-            signer.trusted_key("owner", "owner-key", true),
-        ]);
+        let store = FileSkillStore::new(directory.to_path_buf())
+            .with_trusted_local_owner_keys(vec![signer.trusted_key("owner", "owner-key", true)]);
         (store, signer)
     }
 
@@ -1594,9 +1655,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let signer = crate::LocalOwnerSigningKey::from_seed([3; 32]);
         let store = FileSkillStore::new(directory.path().to_path_buf())
-            .with_trusted_local_owner_keys(vec![
-                signer.trusted_key("owner", "owner-key", true),
-            ]);
+            .with_trusted_local_owner_keys(vec![signer.trusted_key("owner", "owner-key", true)]);
         let original = Skill {
             name: "greet".to_string(),
             content: "# Greet\n- Say hello".to_string(),
@@ -1614,8 +1673,14 @@ mod tests {
             pending.proof,
             SkillPackageProof::PendingOwnerAttestation(_)
         ));
-        assert!(matches!(store.load("greet").await, Err(SkillError::Quarantined { .. })));
-        assert_eq!(store.load_for_mutation("greet").await.unwrap(), Some(original.clone()));
+        assert!(matches!(
+            store.load("greet").await,
+            Err(SkillError::Quarantined { .. })
+        ));
+        assert_eq!(
+            store.load_for_mutation("greet").await.unwrap(),
+            Some(original.clone())
+        );
 
         let attestation = signer
             .sign_local_manifest(
@@ -1635,10 +1700,11 @@ mod tests {
         let directory = tempdir().unwrap();
         let signer = crate::LocalOwnerSigningKey::from_seed([4; 32]);
         let store = FileSkillStore::new(directory.path().to_path_buf())
-            .with_trusted_local_owner_keys(vec![
-                signer.trusted_key("owner", "owner-key", true),
-            ]);
-        store.save(&skill("greet", "# Greet\n- Say hello")).await.unwrap();
+            .with_trusted_local_owner_keys(vec![signer.trusted_key("owner", "owner-key", true)]);
+        store
+            .save(&skill("greet", "# Greet\n- Say hello"))
+            .await
+            .unwrap();
         let mut pending = store
             .pending_local_manifest("greet")
             .unwrap()
@@ -1662,7 +1728,10 @@ mod tests {
             "---\nname: greet\n---\n# altered",
         )
         .unwrap();
-        assert!(matches!(store.load("greet").await, Err(SkillError::Quarantined { .. })));
+        assert!(matches!(
+            store.load("greet").await,
+            Err(SkillError::Quarantined { .. })
+        ));
     }
 
     #[tokio::test]
@@ -1675,7 +1744,10 @@ mod tests {
             "---\nname: dropin\n---\n# Dropin",
         )
         .unwrap();
-        assert!(matches!(store.load("dropin").await, Err(SkillError::Quarantined { .. })));
+        assert!(matches!(
+            store.load("dropin").await,
+            Err(SkillError::Quarantined { .. })
+        ));
     }
 
     #[tokio::test]
@@ -1716,9 +1788,7 @@ mod tests {
             )
             .unwrap();
         fs::write(
-            directory
-                .path()
-                .join(".hub/pending/greet/payload/SKILL.md"),
+            directory.path().join(".hub/pending/greet/payload/SKILL.md"),
             "---\nname: greet\n---\n# Tampered",
         )
         .unwrap();
@@ -1739,10 +1809,7 @@ mod tests {
             .strip_prefix("sha256:")
             .unwrap()
             .to_string();
-        let collision = directory
-            .path()
-            .join(".packages/local/greet")
-            .join(digest);
+        let collision = directory.path().join(".packages/local/greet").join(digest);
         fs::create_dir_all(&collision).unwrap();
         fs::write(collision.join("SKILL.md"), "conflicting payload").unwrap();
         let mut collision_candidate = pending;
@@ -1830,11 +1897,7 @@ mod tests {
         .unwrap();
         let mut keyring = crate::SignedRemoteSkillKeyring::new(
             1,
-            vec![publisher.trusted_publisher_key(
-                "publisher.example",
-                "publisher-key",
-                true,
-            )],
+            vec![publisher.trusted_publisher_key("publisher.example", "publisher-key", true)],
         )
         .unwrap();
         root_signer
@@ -1876,7 +1939,9 @@ mod tests {
             crate::SkillPermissions::default(),
             Vec::new(),
         );
-        publisher.sign_manifest(&mut manifest, "publisher-key").unwrap();
+        publisher
+            .sign_manifest(&mut manifest, "publisher-key")
+            .unwrap();
         let admission = store
             .install_signed_remote_package(
                 manifest.clone(),

@@ -7,11 +7,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use hermes_environments::ExecutionContainmentContext;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use hermes_environments::ExecutionContainmentContext;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ToolPolicyMode {
@@ -152,11 +151,7 @@ impl ToolPolicyDecision {
         }
     }
 
-    fn denied(
-        reason: impl Into<String>,
-        code: impl Into<String>,
-        mode: ToolPolicyMode,
-    ) -> Self {
+    fn denied(reason: impl Into<String>, code: impl Into<String>, mode: ToolPolicyMode) -> Self {
         Self {
             allow: false,
             reason: Some(reason.into()),
@@ -276,8 +271,9 @@ impl ToolPolicyEngine {
             .map(|value| value.trim().to_ascii_lowercase())
             .filter(|value| !value.is_empty())
             .collect();
-        let deny_param_patterns = compile_patterns_checked(&cfg.deny_param_patterns.unwrap_or_default())
-            .map_err(|error| format!("policy file deny_param_patterns: {error}"))?;
+        let deny_param_patterns =
+            compile_patterns_checked(&cfg.deny_param_patterns.unwrap_or_default())
+                .map_err(|error| format!("policy file deny_param_patterns: {error}"))?;
         let max_param_bytes = match cfg.max_param_bytes {
             Some(value) if value > 0 => value,
             Some(_) => {
@@ -379,8 +375,9 @@ impl ToolPolicyEngine {
         match compile_patterns_checked(&raw) {
             Ok(patterns) => self.deny_param_patterns = patterns,
             Err(error) => {
-                self.configuration_error =
-                    Some(format!("invalid programmatic deny parameter pattern: {error}"));
+                self.configuration_error = Some(format!(
+                    "invalid programmatic deny parameter pattern: {error}"
+                ));
             }
         }
         self
@@ -508,9 +505,7 @@ fn environment_value(name: &str) -> Result<Option<String>, String> {
     match std::env::var(name) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            Err(format!("{name} must contain valid UTF-8"))
-        }
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!("{name} must contain valid UTF-8")),
     }
 }
 
@@ -617,8 +612,7 @@ fn parse_csv_list(raw: &str) -> Vec<String> {
 fn compile_patterns_checked(raw: &[String]) -> Result<Vec<Regex>, String> {
     raw.iter()
         .map(|entry| {
-            Regex::new(entry)
-                .map_err(|error| format!("invalid regex '{}': {error}", entry.trim()))
+            Regex::new(entry).map_err(|error| format!("invalid regex '{}': {error}", entry.trim()))
         })
         .collect()
 }
@@ -1353,7 +1347,8 @@ mod tests {
     fn command_payload_policy_covers_execute_code_and_every_alias() {
         let policy = ToolPolicyEngine::new(ToolPolicyMode::Enforce);
         for tool in COMMAND_TOOLS {
-            let decision = policy.evaluate(tool, &serde_json::json!({"command":"ssh prod.example"}));
+            let decision =
+                policy.evaluate(tool, &serde_json::json!({"command":"ssh prod.example"}));
             assert!(
                 !decision.allow,
                 "command alias {tool:?} must be classified for sandbox policy"
@@ -1370,7 +1365,10 @@ mod tests {
     fn audit_and_simulate_evaluation_match_enforcement_core_decision() {
         let matrix = [
             ("terminal", serde_json::json!({"command":"echo safe"})),
-            ("terminal", serde_json::json!({"command":"ssh prod.example"})),
+            (
+                "terminal",
+                serde_json::json!({"command":"ssh prod.example"}),
+            ),
             ("write_file", serde_json::json!({"path":"a"})),
             ("execute_code", serde_json::json!({"code":"echo secret"})),
         ];

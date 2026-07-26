@@ -352,9 +352,7 @@ fn aggregate_metrics(tasks: &[TaskResult]) -> AggregateMetrics {
     }
 }
 
-fn sum_u64_telemetry<'a>(
-    values: impl Iterator<Item = &'a Telemetry<u64>>,
-) -> Telemetry<u64> {
+fn sum_u64_telemetry<'a>(values: impl Iterator<Item = &'a Telemetry<u64>>) -> Telemetry<u64> {
     let mut total = 0_u64;
     let mut any = false;
     for value in values {
@@ -374,9 +372,7 @@ fn sum_u64_telemetry<'a>(
     }
 }
 
-fn sum_u32_telemetry<'a>(
-    values: impl Iterator<Item = &'a Telemetry<u32>>,
-) -> Telemetry<u64> {
+fn sum_u32_telemetry<'a>(values: impl Iterator<Item = &'a Telemetry<u32>>) -> Telemetry<u64> {
     let mut total = 0_u64;
     let mut any = false;
     for value in values {
@@ -669,12 +665,18 @@ mod tests {
             record.metrics.total_tokens_output,
             Telemetry::Unavailable
         ));
-        assert!(matches!(record.metrics.total_cost_usd, Telemetry::Unavailable));
+        assert!(matches!(
+            record.metrics.total_cost_usd,
+            Telemetry::Unavailable
+        ));
         assert!(matches!(
             record.metrics.total_agent_turns,
             Telemetry::Unavailable
         ));
-        assert!(matches!(record.metrics.total_retries, Telemetry::Unavailable));
+        assert!(matches!(
+            record.metrics.total_retries,
+            Telemetry::Unavailable
+        ));
     }
 
     #[test]

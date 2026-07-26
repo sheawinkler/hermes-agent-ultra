@@ -238,9 +238,7 @@ pub fn verify_run_export_replay_plan(
 /// Build a strict replay plan from the same canonical parse accepted by export
 /// verification. Legacy v1 compatibility evidence remains summary-readable but
 /// is deliberately not replay-plan evidence.
-pub fn verify_run_export_replay_plan_bytes(
-    bytes: &[u8],
-) -> RunExportResult<VerifiedRunReplayPlan> {
+pub fn verify_run_export_replay_plan_bytes(bytes: &[u8]) -> RunExportResult<VerifiedRunReplayPlan> {
     let parsed = verify_run_export_parse_bytes(bytes)?;
     if parsed.schema_version != RUN_EXPORT_SCHEMA_VERSION {
         return Err(RunExportError::IncompleteReplayEvidence(
@@ -393,7 +391,6 @@ pub(crate) fn canonical_export_bytes_from_snapshot(
     canonical_bytes(&envelope)
 }
 
-
 fn unsigned_from_snapshot(snapshot: &LedgerRunSnapshot) -> RunExportResult<UnsignedEnvelope> {
     let header = WireHeader::from_header(&snapshot.header)?;
     let status = WireStatus::from_status(&snapshot.status);
@@ -507,11 +504,7 @@ fn verify_v1_parse(value: Value) -> RunExportResult<VerifiedExportParse> {
     }
 
     let header_run_id = parse_run_id(&envelope.header.run_id, "header run_id")?;
-    validate_status(
-        &envelope.status,
-        header_run_id,
-        envelope.schema_version,
-    )?;
+    validate_status(&envelope.status, header_run_id, envelope.schema_version)?;
     validate_compatibility_aliases(&envelope.compatibility_aliases, &envelope.header)?;
     validate_range_and_watermark(&envelope, header_run_id)?;
 
@@ -722,11 +715,7 @@ fn validate_run_exit_binding(status: &WireStatus, event: &SessionRunEvent) -> Ru
     Ok(())
 }
 
-fn validate_status(
-    status: &WireStatus,
-    run_id: RunId,
-    schema_version: u32,
-) -> RunExportResult<()> {
+fn validate_status(status: &WireStatus, run_id: RunId, schema_version: u32) -> RunExportResult<()> {
     if parse_run_id(&status.run_id, "status run_id")? != run_id {
         return Err(RunExportError::InvalidExport(
             "status run_id does not match header".to_string(),
@@ -1116,11 +1105,14 @@ fn validate_exact_replay_proof(
             ));
         }
         (_, Some(latched_at_ms), Some(latched_by_event_id)) => {
-            let latch_event = event_by_id.get(latched_by_event_id).copied().ok_or_else(|| {
-                RunExportError::InvalidExport(
-                    "exact replay latch refers to an absent event".to_string(),
-                )
-            })?;
+            let latch_event = event_by_id
+                .get(latched_by_event_id)
+                .copied()
+                .ok_or_else(|| {
+                    RunExportError::InvalidExport(
+                        "exact replay latch refers to an absent event".to_string(),
+                    )
+                })?;
             if latch_event.created_at_ms != latched_at_ms {
                 return Err(RunExportError::InvalidExport(
                     "exact replay latch timestamp does not match its event".to_string(),
@@ -1243,9 +1235,9 @@ fn parse_artifact_state_audit(event: &SessionRunEvent) -> RunExportResult<Artifa
         required_string_field(object, "affected_event_id", "artifact-state audit")?,
         "artifact-state audit affected event id",
     )?;
-    let artifact_value = object
-        .get("artifact")
-        .ok_or_else(|| RunExportError::InvalidExport("artifact-state audit lacks artifact".to_string()))?;
+    let artifact_value = object.get("artifact").ok_or_else(|| {
+        RunExportError::InvalidExport("artifact-state audit lacks artifact".to_string())
+    })?;
     ensure_object_keys(
         artifact_value,
         [
@@ -1396,20 +1388,22 @@ fn artifact_reference_transition_allowed_for_export(
         ),
         ArtifactReferenceState::UnavailableMissing
         | ArtifactReferenceState::UnavailableCorrupt
-        | ArtifactReferenceState::UnavailableKeyRevoked => {
-            to == ArtifactReferenceState::Retiring
-        }
+        | ArtifactReferenceState::UnavailableKeyRevoked => to == ArtifactReferenceState::Retiring,
         ArtifactReferenceState::Retiring => to == ArtifactReferenceState::Retired,
         ArtifactReferenceState::Retired => false,
     }
 }
 
-fn exact_replay_transition_allowed_for_export(from: ExactReplayState, to: ExactReplayState) -> bool {
+fn exact_replay_transition_allowed_for_export(
+    from: ExactReplayState,
+    to: ExactReplayState,
+) -> bool {
     match from {
         ExactReplayState::Unverified => to != ExactReplayState::Unverified,
-        ExactReplayState::Available => {
-            !matches!(to, ExactReplayState::Available | ExactReplayState::Unverified)
-        }
+        ExactReplayState::Available => !matches!(
+            to,
+            ExactReplayState::Available | ExactReplayState::Unverified
+        ),
         ExactReplayState::Retiring => to == ExactReplayState::Retired,
         ExactReplayState::UnavailableMissing
         | ExactReplayState::UnavailableCorrupt
@@ -1462,11 +1456,13 @@ fn validate_replay_obligations(
                 "v3 replay obligation must be required".to_string(),
             ));
         }
-        let source = events_by_id.get(&obligation.source_event_id).ok_or_else(|| {
-            RunExportError::InvalidExport(
-                "replay obligation source event is absent from export".to_string(),
-            )
-        })?;
+        let source = events_by_id
+            .get(&obligation.source_event_id)
+            .ok_or_else(|| {
+                RunExportError::InvalidExport(
+                    "replay obligation source event is absent from export".to_string(),
+                )
+            })?;
         if source.sequence != obligation.source_event_sequence {
             return Err(RunExportError::InvalidExport(
                 "replay obligation source sequence does not match event".to_string(),
@@ -1534,7 +1530,8 @@ fn validate_replay_obligations(
                 }
                 if obligation.artifact.is_none() || obligation.reason.is_some() {
                     return Err(RunExportError::IncompleteReplayEvidence(
-                        "exact replay obligation lacks closed private artifact evidence".to_string(),
+                        "exact replay obligation lacks closed private artifact evidence"
+                            .to_string(),
                     ));
                 }
             }
@@ -1662,11 +1659,14 @@ fn replay_projection_gaps(
     let mut gaps = Vec::new();
 
     for effect in nonresumable_effects {
-        let source = events_by_id.get(&effect.record.event_id).copied().ok_or_else(|| {
-            RunExportError::InvalidExport(
-                "non-resumable replay projection source event is absent".to_string(),
-            )
-        })?;
+        let source = events_by_id
+            .get(&effect.record.event_id)
+            .copied()
+            .ok_or_else(|| {
+                RunExportError::InvalidExport(
+                    "non-resumable replay projection source event is absent".to_string(),
+                )
+            })?;
         let instance = source.event_id.to_string();
         append_projection_gap_if_unmapped(
             &mut gaps,
@@ -1723,11 +1723,14 @@ fn replay_projection_gaps(
     }
 
     for entry in outbox {
-        let source = events_by_id.get(&entry.record.event_id).copied().ok_or_else(|| {
-            RunExportError::InvalidExport(
-                "outbox replay projection source event is absent".to_string(),
-            )
-        })?;
+        let source = events_by_id
+            .get(&entry.record.event_id)
+            .copied()
+            .ok_or_else(|| {
+                RunExportError::InvalidExport(
+                    "outbox replay projection source event is absent".to_string(),
+                )
+            })?;
         let instance = entry.record.outbox_id.to_string();
         append_projection_gap_if_unmapped(
             &mut gaps,
@@ -1939,7 +1942,13 @@ fn validate_delivery_result_payload(
     event: &SessionRunEvent,
     outbox_by_id: &BTreeMap<OutboxRowId, &ParsedOutbox>,
     event_sequence_by_id: &BTreeMap<EventId, u64>,
-) -> RunExportResult<(OutboxRowId, OutboxState, u32, bool, ReplayObligationFidelity)> {
+) -> RunExportResult<(
+    OutboxRowId,
+    OutboxState,
+    u32,
+    bool,
+    ReplayObligationFidelity,
+)> {
     let value = serde_json::from_str::<Value>(event.public_payload.as_str())
         .map_err(|error| RunExportError::InvalidExport(error.to_string()))?;
     ensure_object_keys(
@@ -2729,9 +2738,13 @@ fn validate_wire_document_layout(value: &Value) -> RunExportResult<()> {
                 "run status",
             )?;
             validate_optional_object(
-                object_field(status.as_object().ok_or_else(|| {
-                    RunExportError::InvalidExport("run status must be an object".to_string())
-                })?, "exact_replay", "run status")?,
+                object_field(
+                    status.as_object().ok_or_else(|| {
+                        RunExportError::InvalidExport("run status must be an object".to_string())
+                    })?,
+                    "exact_replay",
+                    "run status",
+                )?,
                 [
                     "state",
                     "reason",
@@ -3295,7 +3308,10 @@ impl WireExactReplayStatus {
     fn from_status(status: &ExactReplayStatus) -> Self {
         Self {
             state: status.state.as_str().to_string(),
-            reason: status.reason.map(ArtifactStateReason::as_str).map(str::to_string),
+            reason: status
+                .reason
+                .map(ArtifactStateReason::as_str)
+                .map(str::to_string),
             exact_replay: status.exact_replay,
             transition_sequence: status.transition_sequence,
             latched_at_ms: status.latched_at_ms,
@@ -3706,7 +3722,10 @@ impl WireReplayObligation {
             fidelity: snapshot.fidelity.as_str().to_string(),
             outcome: snapshot.outcome.as_str().to_string(),
             resolved_event_id: snapshot.resolved_event_id.map(|value| value.to_string()),
-            artifact: snapshot.artifact.as_ref().map(WireSealedArtifactRef::from_ref),
+            artifact: snapshot
+                .artifact
+                .as_ref()
+                .map(WireSealedArtifactRef::from_ref),
             reason: snapshot.reason.map(|value| value.as_str().to_string()),
         }
     }
@@ -3719,9 +3738,7 @@ impl WireReplayObligation {
             )?,
             source_event_sequence: self.source_event_sequence,
             operation: ReplayOperationKind::from_db(&self.operation)?,
-            operation_instance_id: validate_operation_instance_id(
-                &self.operation_instance_id,
-            )?,
+            operation_instance_id: validate_operation_instance_id(&self.operation_instance_id)?,
             phase: ReplayOperationPhase::from_db(&self.phase)?,
             required: self.required,
             fidelity: ReplayObligationFidelity::from_db(&self.fidelity)?,

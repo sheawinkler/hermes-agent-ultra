@@ -201,10 +201,8 @@ fn test_subprocess_env_passthrough_rejects_credential_control_values() {
         SUBPROCESS_ENV_PASSTHROUGH_VAR,
         "OPENAI_API_KEY,ANTHROPIC_TOKEN:BAD-NAME VALID_NAME",
     );
-    let parsed = subprocess_env_passthrough_set(&[
-        "GOOGLE_API_KEY".to_string(),
-        "VALID_NAME".to_string(),
-    ]);
+    let parsed =
+        subprocess_env_passthrough_set(&["GOOGLE_API_KEY".to_string(), "VALID_NAME".to_string()]);
     assert!(parsed.contains("VALID_NAME"));
     assert!(!parsed.contains("OPENAI_API_KEY"));
     assert!(!parsed.contains("ANTHROPIC_TOKEN"));
@@ -284,8 +282,9 @@ fn test_profile_home_mode_requires_profile_home_instead_of_real_home() {
         Vec::new(),
     );
 
-    let error = block_on(backend.execute_command("printf should-not-run", None, None, false, false))
-        .expect_err("profile mode must not fall back to real HOME");
+    let error =
+        block_on(backend.execute_command("printf should-not-run", None, None, false, false))
+            .expect_err("profile mode must not fall back to real HOME");
     assert!(error
         .to_string()
         .contains("requires HERMES_HOME or HERMES_AGENT_ULTRA_HOME"));

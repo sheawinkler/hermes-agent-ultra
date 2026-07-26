@@ -38,7 +38,6 @@ pub mod singularity;
 pub mod training;
 
 // Re-export core trait and local types
-pub use file_sync::FileSync;
 pub use containment::{
     ContainmentCommandRequest, ContainmentCommandResult, ContainmentCompletionReceipt,
     ContainmentExecutionError, ContainmentExecutionReceipt, ContainmentInvocation,
@@ -46,6 +45,7 @@ pub use containment::{
     VerifiedIsolatedBackendCapability, VerifiedIsolatedBackendEvidence,
     VerifiedIsolatedBackendKind, VerifiedIsolatedBackendScope, CLOSED_EXECUTION_POLICY_VERSION,
 };
+pub use file_sync::FileSync;
 pub use hermes_core::TerminalBackend;
 pub use local::LocalBackend;
 pub use manager::{BackendManager, ExecutionBackendBinding, ExecutionBackendBindingError};

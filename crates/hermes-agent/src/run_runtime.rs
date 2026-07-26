@@ -1607,12 +1607,8 @@ impl ActiveRun {
         let tool_name = "delegate_task";
         let request_payload =
             closed_delegation_request_payload(tool_call_id, invocation_key, &request_evidence);
-        let request_evidence = bound_exact_runtime_evidence(
-            tool_call_id,
-            "delegation",
-            "request",
-            request_payload,
-        );
+        let request_evidence =
+            bound_exact_runtime_evidence(tool_call_id, "delegation", "request", request_payload);
         let intent_payload = CanonicalJson::from_value(&json!({
             "invocation_slot": invocation_key,
             "schema": "hermes.delegation-intent/v1",
@@ -1665,13 +1661,8 @@ impl ActiveRun {
                 "tool_name": tool_name,
             }),
         );
-        let result_safe = safe_runtime_artifact(
-            tool_call_id,
-            "delegation",
-            "result",
-            "returned",
-            &evidence,
-        )?;
+        let result_safe =
+            safe_runtime_artifact(tool_call_id, "delegation", "result", "returned", &evidence)?;
         let attempt = RunLedger::observed_nonresumable_attempt(lease, "returned")?;
         let result_payload = self
             .state
@@ -1997,15 +1988,14 @@ impl ObservedToolResult {
                 "tool_name": tool_name,
                 "value": value,
             }),
-            (
-                "handler_error" | "effect_non_resumable_unknown",
-                Self::HandlerError(error),
-            ) => json!({
-                "call_id": call_id,
-                "error": error.to_string(),
-                "outcome": outcome,
-                "tool_name": tool_name,
-            }),
+            ("handler_error" | "effect_non_resumable_unknown", Self::HandlerError(error)) => {
+                json!({
+                    "call_id": call_id,
+                    "error": error.to_string(),
+                    "outcome": outcome,
+                    "tool_name": tool_name,
+                })
+            }
             ("effect_non_resumable_unknown", Self::Panicked) => json!({
                 "call_id": call_id,
                 "error": "tool handler panicked after invocation began",
@@ -2207,7 +2197,6 @@ fn closed_delegation_request_payload(
         return raw.clone();
     }
     let Some(task) = fields.get("task").and_then(Value::as_str) else {
-
         return raw.clone();
     };
     if fields

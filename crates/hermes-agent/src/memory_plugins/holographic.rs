@@ -7,17 +7,17 @@
 //! for vector algebra. This Rust port uses keyword/FTS-based retrieval as a
 //! simplified but fully functional alternative.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Weak};
-use parking_lot::Mutex;
-use std::time::Duration;
 use hermes_core::{
     MemoryAuditActor, MemoryExportCompletion, MemoryExportEvidenceDigest, MemoryExportPage,
     MemoryExportReceipt, MemoryExportSink, MemoryExportSnapshot, MemoryForgetReceipt,
     MemoryGovernanceOperation, MemoryProviderGovernanceError, MemoryReadbackReceipt,
     MemoryRetentionPolicy, MemoryRetentionReceipt, MemorySubject, MemorySubjectStorageKey,
 };
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Weak};
+use std::time::Duration;
 
 use rusqlite::{params, params_from_iter, Connection, Row, TransactionBehavior};
 use serde_json::{json, Value};
@@ -329,11 +329,7 @@ fn sqlite_table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     .map_err(|error| error.to_string())
 }
 
-fn sqlite_table_has_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-) -> Result<bool, String> {
+fn sqlite_table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
     if !sqlite_table_exists(conn, table)? {
         return Ok(false);
     }
@@ -690,13 +686,7 @@ impl HolographicMemoryPlugin {
             INSERT INTO facts (subject_key, content, category, tags, trust_score)
             VALUES (?1, ?2, ?3, ?4, ?5)
             ",
-            params![
-                filter.as_str(),
-                content,
-                category,
-                tags,
-                self.default_trust
-            ],
+            params![filter.as_str(), content, category, tags, self.default_trust],
         ) {
             Ok(_) => {
                 let fact_id = transaction.last_insert_rowid();
@@ -796,7 +786,10 @@ impl HolographicMemoryPlugin {
                     return results;
                 }
             };
-            for id in results.iter().filter_map(|result| result["fact_id"].as_i64()) {
+            for id in results
+                .iter()
+                .filter_map(|result| result["fact_id"].as_i64())
+            {
                 if let Err(error) = transaction.execute(
                     "
                     UPDATE facts
@@ -1381,14 +1374,20 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
             let end = (start + 100).min(records.len());
             let cursor = (start != 0).then(|| {
                 MemoryExportEvidenceDigest::sha256_bytes(
-                    format!("holographic-export:{}:{start}", snapshot.snapshot_digest.as_str())
-                        .as_bytes(),
+                    format!(
+                        "holographic-export:{}:{start}",
+                        snapshot.snapshot_digest.as_str()
+                    )
+                    .as_bytes(),
                 )
             });
             let next_cursor = (end < records.len()).then(|| {
                 MemoryExportEvidenceDigest::sha256_bytes(
-                    format!("holographic-export:{}:{end}", snapshot.snapshot_digest.as_str())
-                        .as_bytes(),
+                    format!(
+                        "holographic-export:{}:{end}",
+                        snapshot.snapshot_digest.as_str()
+                    )
+                    .as_bytes(),
                 )
             });
             let record_ids = records[start..end]
@@ -1428,7 +1427,10 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
             page_count = page_count.saturating_add(1);
         }
         if sink
-            .finish_provider(MemoryExportCompletion::exhausted(exported_records, page_count))
+            .finish_provider(MemoryExportCompletion::exhausted(
+                exported_records,
+                page_count,
+            ))
             .is_err()
         {
             sink.abort();
@@ -1626,7 +1628,9 @@ impl HolographicMemoryPlugin {
                 |row| row.get::<_, f64>(0),
             ) {
                 Ok(trust) => trust,
-                Err(_) => return json!({"error": format!("fact_id {fact_id} not found")}).to_string(),
+                Err(_) => {
+                    return json!({"error": format!("fact_id {fact_id} not found")}).to_string()
+                }
             };
             assignments.push(format!("trust_score = ?{}", values.len() + 1));
             values.push(Box::new(clamp_trust(old_trust + delta)));
@@ -1689,10 +1693,7 @@ impl HolographicMemoryPlugin {
         };
         let conn = connection.lock();
         let category = args.get("category").and_then(Value::as_str);
-        let min_trust = args
-            .get("min_trust")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
+        let min_trust = args.get("min_trust").and_then(Value::as_f64).unwrap_or(0.0);
         let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as i64;
         let sql = if category.is_some() {
             "
@@ -1863,8 +1864,7 @@ mod tests {
     }
 
     fn actor(subject: &MemorySubject) -> MemoryAuditActor {
-        hermes_core::MemorySubjectDerivationKey::from_bytes([31_u8; 32])
-            .actor_for_subject(subject)
+        hermes_core::MemorySubjectDerivationKey::from_bytes([31_u8; 32]).actor_for_subject(subject)
     }
 
     fn initialize(
@@ -1886,10 +1886,22 @@ mod tests {
         initialize(&plugin, &alice, &alice_key, home.path());
 
         plugin
-            .add_fact(&alice, &alice_key, "Alice uses the blue theme", "preference", "theme")
+            .add_fact(
+                &alice,
+                &alice_key,
+                "Alice uses the blue theme",
+                "preference",
+                "theme",
+            )
             .expect("alice fact");
         plugin
-            .add_fact(&bob, &bob_key, "Bob uses the red theme", "preference", "theme")
+            .add_fact(
+                &bob,
+                &bob_key,
+                "Bob uses the red theme",
+                "preference",
+                "theme",
+            )
             .expect("bob fact");
 
         let alice_results = plugin.search_facts(&alice_key, "theme", None, 0.0, 10);
@@ -2019,14 +2031,22 @@ mod tests {
         let plugin = HolographicMemoryPlugin::new();
         initialize(&plugin, &subject, &key, home.path());
         plugin
-            .add_fact(&subject, &key, "Ada maintains the deployment ledger", "project", "Ada")
+            .add_fact(
+                &subject,
+                &key,
+                "Ada maintains the deployment ledger",
+                "project",
+                "Ada",
+            )
             .expect("fact");
         let actor = actor(&subject);
 
-        let receipt = MemoryProviderPlugin::forget_subject(&plugin, &subject, &key, &actor)
-            .expect("forget");
+        let receipt =
+            MemoryProviderPlugin::forget_subject(&plugin, &subject, &key, &actor).expect("forget");
         assert!(receipt.deleted_records >= 1);
-        assert!(plugin.search_facts(&key, "deployment", None, 0.0, 10).is_empty());
+        assert!(plugin
+            .search_facts(&key, "deployment", None, 0.0, 10)
+            .is_empty());
         assert!(
             MemoryProviderPlugin::verify_subject_absent(&plugin, &subject, &key)
                 .expect("readback")
@@ -2187,11 +2207,11 @@ mod tests {
         .expect("snapshot export");
         assert_eq!(receipt.exported_records, 101);
         assert!(sink.mutated);
-        assert!(
-            sink.pages.iter().flat_map(|page| page.records.iter()).all(|record| {
-                record["content"] != "written after export snapshot"
-            })
-        );
+        assert!(sink
+            .pages
+            .iter()
+            .flat_map(|page| page.records.iter())
+            .all(|record| { record["content"] != "written after export snapshot" }));
         assert_eq!(plugin.fact_count(&filter), 102);
     }
 }

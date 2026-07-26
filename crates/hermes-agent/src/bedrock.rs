@@ -13,11 +13,11 @@ use reqwest::Client;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::provider::{map_reqwest_body_error, map_reqwest_transport_error};
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
     StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
 };
-use crate::provider::{map_reqwest_body_error, map_reqwest_transport_error};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -186,19 +186,14 @@ impl LlmProvider for BedrockProvider {
         )? {
             request = request.header(key, value);
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|error| {
-                map_reqwest_transport_error("Bedrock Converse request failed", error)
-            })?;
+        let response = request.send().await.map_err(|error| {
+            map_reqwest_transport_error("Bedrock Converse request failed", error)
+        })?;
         let status = response.status();
         let payload = response
             .text()
             .await
-            .map_err(|error| {
-                map_reqwest_body_error("Bedrock response read failed", error)
-            })?;
+            .map_err(|error| map_reqwest_body_error("Bedrock response read failed", error))?;
         if !status.is_success() {
             return Err(map_bedrock_error(status.as_u16(), &payload));
         }
