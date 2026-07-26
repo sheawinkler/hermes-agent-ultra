@@ -550,6 +550,121 @@ impl SqliteSessionSearchBackend {
             .collect())
     }
 
+    /// Return simple ASCII-Latin terms that are eligible for the zero-result
+    /// substring fallback. FTS5's unicode61 tokenizer can fuse such terms
+    /// onto neighbouring CJK text; keeping this narrow preserves normal FTS
+    /// ranking and avoids interpreting FTS operators as literal substrings.
+    fn pure_latin_fallback_terms(raw: &str) -> Option<Vec<String>> {
+        let terms = raw
+            .split_whitespace()
+            .map(str::trim)
+            .filter(|term| !term.is_empty())
+            .collect::<Vec<_>>();
+        if terms.is_empty()
+            || terms.iter().any(|term| {
+                term.len() < 3 || !term.chars().all(|character| character.is_ascii_alphabetic())
+            })
+        {
+            return None;
+        }
+        Some(terms.into_iter().map(ToOwned::to_owned).collect())
+    }
+
+    /// Recover pure-Latin substring matches that unicode61 cannot tokenize
+    /// across adjacent CJK text. This runs only after an FTS zero-result miss.
+    fn search_sessions_by_latin_substring(
+        conn: &Connection,
+        query: &str,
+        role_filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<SessionRowContext>, ToolError> {
+        let Some(terms) = Self::pure_latin_fallback_terms(query) else {
+            return Ok(Vec::new());
+        };
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let hidden_placeholders = HIDDEN_SESSION_SOURCES
+            .iter()
+            .map(|_| "?".to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let role_values = role_filter
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|role| !role.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut sql = String::from(
+            "SELECT s.id, s.created_at, s.parent_session_id, s.model_config,
+                    s.platform, p.end_reason, p.ended_at, s.updated_at
+             FROM messages m
+             LEFT JOIN sessions s ON s.id = m.session_id
+             LEFT JOIN sessions p ON p.id = s.parent_session_id
+             WHERE m.content IS NOT NULL
+               AND m.content != ''
+               AND m.active = 1",
+        );
+        for _ in &terms {
+            sql.push_str(" AND instr(lower(m.content), lower(?)) > 0");
+        }
+        sql.push_str(&format!(
+            " AND COALESCE(s.platform, '') NOT IN ({hidden_placeholders})"
+        ));
+        if !role_values.is_empty() {
+            let placeholders = (0..role_values.len())
+                .map(|_| "?".to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql.push_str(&format!(" AND m.role IN ({placeholders})"));
+        }
+        sql.push_str(" GROUP BY s.id ORDER BY MAX(m.id) DESC LIMIT ?");
+
+        let mut values = terms
+            .into_iter()
+            .map(rusqlite::types::Value::Text)
+            .collect::<Vec<_>>();
+        values.extend(
+            HIDDEN_SESSION_SOURCES
+                .iter()
+                .map(|source| rusqlite::types::Value::Text((*source).to_string())),
+        );
+        values.extend(role_values.into_iter().map(rusqlite::types::Value::Text));
+        values.push(rusqlite::types::Value::Integer(
+            limit.saturating_mul(4).max(limit) as i64,
+        ));
+
+        let mut stmt = conn.prepare(&sql).map_err(|error| {
+            ToolError::ExecutionFailed(format!(
+                "Failed to prepare CJK-adjacent Latin fallback query: {error}"
+            ))
+        })?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+                Ok(SessionRowContext {
+                    id: row.get::<_, String>(0)?,
+                    created_at: row.get::<_, Option<String>>(1)?,
+                    parent_session_id: row.get::<_, Option<String>>(2)?,
+                    model_config: row.get::<_, Option<String>>(3)?,
+                    source: row.get::<_, Option<String>>(4)?,
+                    parent_end_reason: row.get::<_, Option<String>>(5)?,
+                    parent_ended_at: row.get::<_, Option<String>>(6)?,
+                    updated_at: row.get::<_, Option<String>>(7)?,
+                })
+            })
+            .map_err(|error| {
+                ToolError::ExecutionFailed(format!(
+                    "CJK-adjacent Latin fallback query failed: {error}"
+                ))
+            })?;
+        Ok(rows.flatten().collect())
+    }
+
     fn session_metadata(
         conn: &Connection,
         session_id: &str,
@@ -1138,6 +1253,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                 let fts_query = Self::sanitize_fts5_query(query);
                 if tasks.len() < limit && fts_available {
                     if let Some(fts_query) = fts_query {
+                        let mut fts_had_match = false;
                         let hidden_placeholders = HIDDEN_SESSION_SOURCES
                             .iter()
                             .map(|_| "?".to_string())
@@ -1219,6 +1335,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                             })?;
 
                         for row in rows.flatten() {
+                            fts_had_match = true;
                             if tasks.len() >= limit {
                                 break;
                             }
@@ -1258,6 +1375,38 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                                 Self::load_summary_task(&conn, &resolved_session_id, query, false)?
                             {
                                 tasks.push(task);
+                            }
+                        }
+                        if !fts_had_match {
+                            for row_context in Self::search_sessions_by_latin_substring(
+                                &conn,
+                                query,
+                                role_filter,
+                                limit,
+                            )? {
+                                if tasks.len() >= limit {
+                                    break;
+                                }
+                                let resolved_session_id =
+                                    Self::visible_session_id_for_row(&conn, &row_context);
+                                let logical_key =
+                                    Self::logical_session_key_for_row(&conn, &row_context);
+                                if let Some(current_root) = &current_lineage_root {
+                                    if &logical_key == current_root {
+                                        continue;
+                                    }
+                                }
+                                if !seen.insert(logical_key) {
+                                    continue;
+                                }
+                                if let Some(task) = Self::load_summary_task(
+                                    &conn,
+                                    &resolved_session_id,
+                                    query,
+                                    false,
+                                )? {
+                                    tasks.push(task);
+                                }
                             }
                         }
                     }
