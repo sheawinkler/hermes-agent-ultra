@@ -23,12 +23,13 @@ unsafe extern "system" {
 /// post-spawn `taskkill` approach would leave open.
 #[cfg(windows)]
 struct OwnedProcessJob {
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
 impl OwnedProcessJob {
     fn assign(child: &tokio::process::Child) -> Result<Self, std::io::Error> {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -70,29 +71,22 @@ impl OwnedProcessJob {
             }
             return Err(error);
         }
+        // SAFETY: `CreateJobObjectW` returned this live, uniquely owned handle,
+        // and all error paths above close it before returning.
+        let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
         Ok(Self { handle })
     }
 
     fn terminate(&self) {
+        use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
 
         unsafe {
-            TerminateJobObject(self.handle, 1);
+            TerminateJobObject(self.handle.as_raw_handle(), 1);
         }
     }
 }
 
-#[cfg(windows)]
-impl Drop for OwnedProcessJob {
-    fn drop(&mut self) {
-        use windows_sys::Win32::Foundation::CloseHandle;
-
-        self.terminate();
-        unsafe {
-            CloseHandle(self.handle);
-        }
-    }
-}
 
 #[cfg(windows)]
 fn configure_windows_bounded_process_tree(cmd: &mut TokioCommand) {
