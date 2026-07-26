@@ -454,6 +454,99 @@ fn classify_error(err: &str) -> ErrorClass {
     }
 }
 
+/// Whether a context error is specifically an oversized output cap rather
+/// than an oversized input prompt. Output-cap failures can be retried safely
+/// with a smaller `max_tokens`; compaction cannot fix them.
+fn is_output_cap_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    let mentions_output_parameter = lower.contains("max_tokens")
+        || lower.contains("max_output_tokens")
+        || lower.contains("max_completion_tokens");
+    if !mentions_output_parameter {
+        return false;
+    }
+
+    let output_cap_signal = lower.contains("range of max_tokens should be")
+        || lower.contains("available_tokens")
+        || lower.contains("available tokens")
+        || (lower.contains("in the output") && lower.contains("maximum context length"))
+        || (lower.contains("requested") && lower.contains("output tokens"))
+        || lower.contains("less than or equal")
+        || lower.contains("max_tokens should be");
+    if !output_cap_signal {
+        return false;
+    }
+
+    ![
+        "prompt is too long",
+        "prompt too long",
+        "input is too long",
+        "input token",
+        "prompt length",
+        "prompt contains",
+        "reduce the length",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// Extract a provider-reported output budget from an output-cap error.
+///
+/// This intentionally handles the several observed provider shapes rather
+/// than treating every context error as an input-overflow/compaction problem.
+fn output_cap_available_tokens(err: &str) -> Option<u64> {
+    if !is_output_cap_error(err) {
+        return None;
+    }
+    let lower = err.to_ascii_lowercase();
+
+    let range = regex::Regex::new(
+        r"range of max_tokens should be\s*\[\s*\d+\s*,\s*(\d+)\s*\]",
+    )
+    .expect("static output-cap range regex must compile");
+    if let Some(tokens) = range
+        .captures(&lower)
+        .and_then(|captures| captures.get(1))
+        .and_then(|capture| capture.as_str().parse::<u64>().ok())
+        .filter(|tokens| *tokens >= 1)
+    {
+        return Some(tokens);
+    }
+
+    for pattern in [
+        r"available_tokens[:\s]+(\d+)",
+        r"available\s+tokens[:\s]+(\d+)",
+        r"=\s*(\d+)\s*$",
+    ] {
+        let re = regex::Regex::new(pattern).expect("static output-cap regex must compile");
+        if let Some(tokens) = re
+            .captures(&lower)
+            .and_then(|captures| captures.get(1))
+            .and_then(|capture| capture.as_str().parse::<u64>().ok())
+            .filter(|tokens| *tokens >= 1)
+        {
+            return Some(tokens);
+        }
+    }
+
+    let context = regex::Regex::new(r"maximum context length is\s+(\d+)")
+        .expect("static context-limit regex must compile");
+    let parts = regex::Regex::new(
+        r"\((\d+)\s+of text input,\s*(\d+)\s+of tool input,\s*(\d+)\s+in the output\)",
+    )
+    .expect("static context-part regex must compile");
+    let context_tokens = context
+        .captures(&lower)
+        .and_then(|captures| captures.get(1))
+        .and_then(|capture| capture.as_str().parse::<u64>().ok())?;
+    let parts = parts.captures(&lower)?;
+    let text_tokens = parts.get(1)?.as_str().parse::<u64>().ok()?;
+    let tool_tokens = parts.get(2)?.as_str().parse::<u64>().ok()?;
+    context_tokens
+        .checked_sub(text_tokens.saturating_add(tool_tokens))
+        .filter(|tokens| *tokens >= 1)
+}
+
 fn provider_or_base_url_uses_cloudcode_quota(provider: &str, base_url: Option<&str>) -> bool {
     let provider = provider.trim().to_ascii_lowercase();
     matches!(
@@ -653,7 +746,6 @@ fn governor_tool_concurrency_base() -> usize {
         .filter(|v| *v > 0)
         .unwrap_or(8)
 }
-
 fn governor_window_size() -> usize {
     std::env::var("HERMES_PERF_GOV_WINDOW")
         .ok()

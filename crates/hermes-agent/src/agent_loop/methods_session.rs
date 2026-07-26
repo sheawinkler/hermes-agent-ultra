@@ -35,6 +35,25 @@ impl AgentLoop {
         }
     }
 
+    /// Drop the transient assistant/nudge pair used to recover a provider
+    /// response that declared `finish_reason=tool_calls` without a call.
+    ///
+    /// The assistant narration exists only to preserve alternating roles for
+    /// the synthetic user nudge. It must never become durable user context.
+    fn strip_dropped_tool_call_scaffolding(messages: &mut Vec<Message>) {
+        let mut index = 0;
+        while index + 1 < messages.len() {
+            let is_scaffolding_pair = messages[index].role == MessageRole::Assistant
+                && messages[index + 1].role == MessageRole::User
+                && messages[index + 1].content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE);
+            if is_scaffolding_pair {
+                messages.drain(index..index + 2);
+            } else {
+                index += 1;
+            }
+        }
+    }
+
     /// Build [`AgentResult`] messages for return / persistence (applies `persist_user_message` override).
     fn messages_for_persisted_result(
         &self,
@@ -43,6 +62,7 @@ impl AgentLoop {
         prefill_range: Option<Range<usize>>,
     ) -> Vec<Message> {
         let mut msgs = ctx.get_messages().to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut msgs);
         if let (Some(idx), Some(override_text)) = (
             persist_user_idx,
             self.config.persist_user_message.as_deref(),

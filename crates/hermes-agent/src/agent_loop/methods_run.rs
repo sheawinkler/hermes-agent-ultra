@@ -165,6 +165,7 @@ impl AgentLoop {
         let mut invalid_tool_retries: u32 = 0;
         let mut invalid_json_retries: u32 = 0;
         let mut last_content_with_tools: Option<String> = None;
+        let mut dropped_tool_call_retries: u32 = 0;
         let mut context_pressure_warned_at: f64 = 0.0;
         let mut context_pressure_last_warn_at: Option<Instant> = None;
         let mut context_pressure_last_warn_percent: f64 = 0.0;
@@ -245,9 +246,7 @@ impl AgentLoop {
 
             // Memory sync at flush interval
             if total_turns % self.config.memory_flush_interval == 0 && total_turns > 0 {
-                let msgs = ctx.get_messages();
-                let (u, a) = extract_last_user_assistant(msgs);
-                self.memory_sync(&u, &a, msgs);
+                self.memory_sync(ctx.get_messages());
             }
 
             // --- Pre-LLM hook ---
@@ -554,6 +553,32 @@ impl AgentLoop {
             let tool_calls = if !parsed_tool_calls.is_empty() {
                 parsed_tool_calls
             } else {
+                let dropped_tool_call_mismatch =
+                    response.finish_reason.as_deref() == Some("tool_calls")
+                        && assistant_msg.tool_calls.as_ref().map_or(true, Vec::is_empty);
+                if dropped_tool_call_mismatch
+                    && dropped_tool_call_retries < DROPPED_TOOL_CALL_MAX_RETRIES
+                {
+                    dropped_tool_call_retries = dropped_tool_call_retries.saturating_add(1);
+                    tracing::warn!(
+                        retry = dropped_tool_call_retries,
+                        max_retries = DROPPED_TOOL_CALL_MAX_RETRIES,
+                        model = %response.model,
+                        "Provider declared tool_calls but returned an empty tool-call array; re-prompting"
+                    );
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Model signaled a tool call but sent none — re-prompting ({}/{})",
+                            dropped_tool_call_retries, DROPPED_TOOL_CALL_MAX_RETRIES
+                        ),
+                    );
+                    ctx.add_message(Message::user(DROPPED_TOOL_CALL_NUDGE));
+                    continue;
+                }
+                if !dropped_tool_call_mismatch {
+                    dropped_tool_call_retries = 0;
+                }
                 if !tool_schemas.is_empty()
                     && codex_ack_continuations < 2
                     && looks_like_codex_intermediate_ack(
@@ -742,11 +767,10 @@ impl AgentLoop {
                         continue;
                     }
                 }
+                Self::strip_dropped_tool_call_scaffolding(ctx.get_messages_mut());
                 tracing::debug!("No tool calls in response, finishing naturally");
                 // Final memory sync
-                let msgs = ctx.get_messages();
-                let (u, a) = extract_last_user_assistant(msgs);
-                self.memory_sync(&u, &a, msgs);
+                self.memory_sync(ctx.get_messages());
                 self.spawn_background_review(
                     total_turns,
                     &ctx,
@@ -771,6 +795,8 @@ impl AgentLoop {
             };
 
             codex_ack_continuations = 0;
+            dropped_tool_call_retries = 0;
+            Self::strip_dropped_tool_call_scaffolding(ctx.get_messages_mut());
 
             // Deduplicate tool calls
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);

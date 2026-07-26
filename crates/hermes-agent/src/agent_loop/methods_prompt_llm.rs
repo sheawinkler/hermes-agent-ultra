@@ -658,6 +658,26 @@ impl AgentLoop {
         max_tokens_override: Option<u32>,
         active_run: Option<&Arc<ActiveRun>>,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
+        self.call_llm_with_retry_inner_with_output_cap_retry(
+            ctx,
+            tool_schemas,
+            route,
+            max_tokens_override,
+            active_run,
+            true,
+        )
+        .await
+    }
+
+    async fn call_llm_with_retry_inner_with_output_cap_retry(
+        &self,
+        ctx: &ContextManager,
+        tool_schemas: &[ToolSchema],
+        route: Option<&TurnRuntimeRoute>,
+        max_tokens_override: Option<u32>,
+        active_run: Option<&Arc<ActiveRun>>,
+        allow_output_cap_retry: bool,
+    ) -> Result<hermes_core::LlmResponse, AgentError> {
         let model = route
             .map(|r| r.model.as_str())
             .unwrap_or(self.config.model.as_str());
@@ -993,6 +1013,68 @@ impl AgentLoop {
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::ContextOverflow => {
+                            if allow_output_cap_retry && is_output_cap_error(&err_str) {
+                                let api_message_values: Vec<Value> = api_messages
+                                    .iter()
+                                    .map(|message| {
+                                        serde_json::to_value(message)
+                                            .expect("Message serialization must be infallible")
+                                    })
+                                    .collect();
+                                let tool_values: Vec<Value> = tool_schemas
+                                    .iter()
+                                    .map(|tool| {
+                                        serde_json::to_value(tool)
+                                            .expect("ToolSchema serialization must be infallible")
+                                    })
+                                    .collect();
+                                let request_estimate = estimate_request_tokens_rough(
+                                    &api_message_values,
+                                    "",
+                                    (!tool_values.is_empty()).then_some(tool_values.as_slice()),
+                                );
+                                let local_available =
+                                    get_model_context_length(model).checked_sub(request_estimate);
+                                let provider_available = output_cap_available_tokens(&err_str);
+                                let available = match (provider_available, local_available) {
+                                    (Some(provider), Some(local)) if local > 0 => {
+                                        Some(provider.min(local))
+                                    }
+                                    (Some(provider), _) => Some(provider),
+                                    (None, Some(local)) if local > 0 => Some(local),
+                                    _ => None,
+                                };
+                                if let Some(available) = available {
+                                    let safe_output = available
+                                        .saturating_sub(64)
+                                        .max(1)
+                                        .min(u32::MAX as u64)
+                                        as u32;
+                                    let should_retry = effective_max_tokens
+                                        .map(|requested| safe_output < requested)
+                                        .unwrap_or(true);
+                                    if should_retry {
+                                        self.emit_status(
+                                            "lifecycle",
+                                            &format!(
+                                                "Output cap exceeded; retrying with max_tokens={} (provider_available={:?}, estimated_request_tokens={})",
+                                                safe_output, provider_available, request_estimate
+                                            ),
+                                        );
+                                        return Box::pin(
+                                            self.call_llm_with_retry_inner_with_output_cap_retry(
+                                                ctx,
+                                                tool_schemas,
+                                                route,
+                                                Some(safe_output),
+                                                active_run,
+                                                false,
+                                            ),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::RateLimit | ErrorClass::Retryable => {

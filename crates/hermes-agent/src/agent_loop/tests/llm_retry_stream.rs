@@ -1312,3 +1312,338 @@
         assert!(!joined.contains("secret"));
         assert!(!joined.contains("memory-context"));
     }
+
+    #[tokio::test]
+    async fn output_cap_error_retries_with_provider_bounded_max_tokens() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct OutputCapProvider {
+            calls: AtomicUsize,
+            seen_max_tokens: Arc<std::sync::Mutex<Vec<Option<u32>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for OutputCapProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.seen_max_tokens
+                    .lock()
+                    .expect("max-token recording lock")
+                    .push(max_tokens);
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(AgentError::LlmApi(
+                        "HTTP 400: max_tokens: 1000 > maximum context length: 200000 - input_tokens: 0 = available_tokens: 128"
+                            .to_string(),
+                    ));
+                }
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("recovered"),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let seen_max_tokens = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = AgentConfig::default();
+        config.model = "dummy-model".to_string();
+        config.max_tokens = Some(1000);
+        config.retry.max_retries = 0;
+        let provider = Arc::new(OutputCapProvider {
+            calls: AtomicUsize::new(0),
+            seen_max_tokens: seen_max_tokens.clone(),
+        });
+        let agent = AgentLoop::new(config, Arc::new(ToolRegistry::new()), provider);
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::user("hello"));
+
+        let response = agent
+            .call_llm_with_retry_inner(&ctx, &[], None, None, None)
+            .await
+            .expect("output-cap retry should recover");
+
+        assert_eq!(response.message.content.as_deref(), Some("recovered"));
+        assert_eq!(
+            seen_max_tokens.lock().expect("max-token recording lock").as_slice(),
+            &[Some(1000), Some(64)],
+            "the retry must use the provider budget minus the safety margin"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_tool_call_response_reprompts_and_does_not_persist_scaffolding() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct DroppedToolCallProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for DroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (content, finish_reason) = if call == 0 {
+                    ("Let me inspect the requested files.", "tool_calls")
+                } else {
+                    ("The requested inspection is complete.", "stop")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant(content),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some(finish_reason.to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let provider = Arc::new(DroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let config = AgentConfig {
+            max_turns: 8,
+            ..AgentConfig::default()
+        };
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+
+        let result = agent
+            .run(vec![Message::user("inspect the files")], None)
+            .await
+            .expect("a dropped tool-call response should be re-prompted");
+
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            2,
+            "the mismatch must produce one recovery call"
+        );
+        assert_eq!(
+            result.messages.last().and_then(|message| message.content.as_deref()),
+            Some("The requested inspection is complete.")
+        );
+        assert!(
+            !result.messages.iter().any(|message| {
+                message.content.as_deref() == Some("Let me inspect the requested files.")
+                    || message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)
+            }),
+            "the narration/nudge recovery pair is transient scaffolding"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_dropped_tool_calls_are_bounded() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct AlwaysDroppedToolCallProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for AlwaysDroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("I will call a tool."),
+                    usage: None,
+                    model: "dummy-model".to_string(),
+                    finish_reason: Some("tool_calls".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let provider = Arc::new(AlwaysDroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let config = AgentConfig {
+            max_turns: 8,
+            ..AgentConfig::default()
+        };
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+
+        let result = agent
+            .run(vec![Message::user("do the work")], None)
+            .await
+            .expect("the bounded recovery path should terminate");
+
+        assert!(result.finished_naturally);
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            (DROPPED_TOOL_CALL_MAX_RETRIES + 1) as usize,
+            "the loop must stop re-prompting after its consecutive-stall budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_dropped_tool_call_reprompts_and_removes_scaffolding() {
+        use futures::stream::BoxStream;
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct StreamedDroppedToolCallProvider {
+            calls: AtomicUsize,
+            requests: std::sync::Mutex<Vec<Vec<Message>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for StreamedDroppedToolCallProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Err(AgentError::LlmApi(
+                    "streaming provider should not use non-stream completion".to_string(),
+                ))
+            }
+
+            fn chat_completion_stream(
+                &self,
+                messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                self.requests
+                    .lock()
+                    .expect("stream request recording lock")
+                    .push(messages.to_vec());
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (content, finish_reason) = if call == 0 {
+                    ("Let me inspect the requested files.", "tool_calls")
+                } else {
+                    ("The streamed inspection is complete.", "stop")
+                };
+                futures::stream::iter(vec![
+                    Ok(StreamChunk {
+                        delta: Some(hermes_core::StreamDelta {
+                            content: Some(content.to_string()),
+                            tool_calls: None,
+                            extra: None,
+                        }),
+                        finish_reason: None,
+                        usage: None,
+                    }),
+                    Ok(StreamChunk {
+                        delta: None,
+                        finish_reason: Some(finish_reason.to_string()),
+                        usage: None,
+                    }),
+                ])
+                .boxed()
+            }
+        }
+
+        let provider = Arc::new(StreamedDroppedToolCallProvider {
+            calls: AtomicUsize::new(0),
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let (agent, _run_state) = attach_test_run_runtime(AgentLoop::new(
+            AgentConfig {
+                max_turns: 8,
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        ));
+        let (sink, _receiver) = AgentObserverSink::channel(8);
+
+        let result = agent
+            .run_stream(vec![Message::user("inspect the files")], None, sink)
+            .await
+            .expect("a streamed dropped tool call should be re-prompted");
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        let requests = provider
+            .requests
+            .lock()
+            .expect("stream request recording lock");
+        assert!(
+            requests[1]
+                .iter()
+                .any(|message| message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)),
+            "the retry request must retain its one-turn recovery instruction"
+        );
+        assert_eq!(
+            result.messages.last().and_then(|message| message.content.as_deref()),
+            Some("The streamed inspection is complete.")
+        );
+        assert!(!result.messages.iter().any(|message| {
+            message.content.as_deref() == Some("Let me inspect the requested files.")
+                || message.content.as_deref() == Some(DROPPED_TOOL_CALL_NUDGE)
+        }));
+    }

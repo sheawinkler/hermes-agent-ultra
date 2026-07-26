@@ -127,15 +127,18 @@ impl AgentLoop {
         String::new()
     }
 
-    fn memory_sync(&self, user: &str, assistant: &str, messages: &[Message]) {
+    fn memory_sync(&self, messages: &[Message]) {
         if self.config.skip_memory {
             return;
         }
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let (user, assistant) = extract_last_user_assistant(&persisted_messages);
         if let Some(mm) = &self.memory_manager {
             if let Ok(mm) = mm.lock() {
-                mm.sync_all_with_messages(user, assistant, messages);
+                mm.sync_all_with_messages(&user, &assistant, &persisted_messages);
                 if !user.trim().is_empty() {
-                    mm.queue_prefetch_all(user);
+                    mm.queue_prefetch_all(&user);
                 }
             }
         }
@@ -298,7 +301,9 @@ impl AgentLoop {
         let Ok(mm) = mm.lock() else {
             return None;
         };
-        let as_values: Vec<Value> = messages
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let as_values: Vec<Value> = persisted_messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
@@ -320,7 +325,9 @@ impl AgentLoop {
         let Ok(mm) = mm.lock() else {
             return;
         };
-        let as_values: Vec<Value> = messages
+        let mut persisted_messages = messages.to_vec();
+        Self::strip_dropped_tool_call_scaffolding(&mut persisted_messages);
+        let as_values: Vec<Value> = persisted_messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();

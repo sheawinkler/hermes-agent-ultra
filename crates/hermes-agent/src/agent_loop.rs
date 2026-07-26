@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use futures::{FutureExt, StreamExt};
 use hermes_auth::OAuth2Endpoints;
-use hermes_intelligence::get_model_context_length;
+use hermes_intelligence::{estimate_request_tokens_rough, get_model_context_length};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -76,6 +76,14 @@ use crate::smart_model_routing::{
 pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
 use crate::steer::{is_formatted_steer_marker, STEER_CHANNEL_NOTE};
 use crate::tool_call_args::{repair_tool_call_arguments, ToolArgumentRepair};
+
+/// Bound consecutive provider responses that claim a tool call but carry none.
+///
+/// The nudge must remain ephemeral; [`AgentLoop::messages_for_persisted_result`]
+/// removes the preceding assistant/nudge pair before return or persistence.
+const DROPPED_TOOL_CALL_MAX_RETRIES: u32 = 3;
+const DROPPED_TOOL_CALL_NUDGE: &str =
+    "Your previous turn indicated a tool call but none was included. Do not narrate a plan or restate intent — issue the actual tool call now to continue the task.";
 
 // Keep these includes in original item order. This split preserves the public
 // `agent_loop` module namespace while separating config, runtime state, loop
