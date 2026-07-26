@@ -45,6 +45,12 @@ fn build_webhook_config(platform_cfg: &PlatformConfig, secret: String) -> Webhoo
             .and_then(|v| v.as_u64())
             .and_then(|v| usize::try_from(v).ok())
             .unwrap_or(1_048_576),
+        script_timeout_seconds: platform_cfg
+            .extra
+            .get("script_timeout_seconds")
+            .and_then(|v| v.as_u64())
+            .filter(|v| *v > 0)
+            .unwrap_or(30),
         routes,
     }
 }
