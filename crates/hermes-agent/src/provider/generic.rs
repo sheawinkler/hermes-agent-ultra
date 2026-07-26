@@ -661,7 +661,63 @@ fn sanitize_moonshot_tool_parameters(params: &Value) -> Value {
         None => serde_json::json!({"type": "object", "properties": {}}),
     };
     sanitize_moonshot_schema_node(&mut root, true);
+    ensure_moonshot_required_arrays(&mut root);
     root
+}
+
+fn ensure_moonshot_required_arrays(node: &mut Value) {
+    let Some(obj) = node.as_object_mut() else {
+        return;
+    };
+
+    for key in ["properties", "patternProperties", "$defs", "definitions"] {
+        if let Some(schemas) = obj.get_mut(key).and_then(Value::as_object_mut) {
+            for schema in schemas.values_mut() {
+                ensure_moonshot_required_arrays(schema);
+            }
+        }
+    }
+
+    for key in [
+        "items",
+        "contains",
+        "not",
+        "additionalProperties",
+        "propertyNames",
+    ] {
+        if let Some(schema) = obj.get_mut(key) {
+            ensure_moonshot_required_arrays(schema);
+        }
+    }
+
+    for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
+        if let Some(schemas) = obj.get_mut(key).and_then(Value::as_array_mut) {
+            for schema in schemas {
+                ensure_moonshot_required_arrays(schema);
+            }
+        }
+    }
+
+    if obj.get("type").and_then(Value::as_str) == Some("object") {
+        ensure_moonshot_required_array(obj);
+    }
+}
+
+fn ensure_moonshot_required_array(obj: &mut serde_json::Map<String, Value>) {
+    let required = obj.remove("required");
+    let Some(Value::Array(mut required)) = required else {
+        obj.insert("required".to_string(), Value::Array(Vec::new()));
+        return;
+    };
+
+    if let Some(properties) = obj.get("properties").and_then(Value::as_object) {
+        required.retain(|name| {
+            name.as_str()
+                .is_some_and(|name| properties.contains_key(name))
+        });
+    }
+
+    obj.insert("required".to_string(), Value::Array(required));
 }
 
 fn sanitize_moonshot_schema_node(node: &mut Value, top_level: bool) {
@@ -736,6 +792,8 @@ fn sanitize_moonshot_schema_node(node: &mut Value, top_level: bool) {
                 Value::Object(serde_json::Map::new()),
             );
         }
+        obj.entry("required".to_string())
+            .or_insert_with(|| Value::Array(Vec::new()));
         return;
     }
 

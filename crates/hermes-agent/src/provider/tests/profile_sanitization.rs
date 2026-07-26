@@ -84,6 +84,65 @@ fn test_moonshot_model_tool_formatter_applies_sanitizer() {
 }
 
 #[test]
+fn test_moonshot_tool_formatter_emits_empty_required_array() {
+    let tools = vec![ToolSchema::new(
+        "browser_snapshot",
+        "Snapshot",
+        hermes_core::JsonSchema::new("object"),
+    )];
+
+    let formatted = format_tools_for_openai_api_with_model(
+        &tools,
+        "moonshotai/kimi-k3",
+        "https://openrouter.ai/api/v1",
+    );
+
+    assert_eq!(
+        formatted[0]["function"]["parameters"]["required"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn test_moonshot_schema_sanitizer_requires_valid_arrays_recursively() {
+    let params = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "filter": {
+                "type": "object",
+                "properties": {"tag": {"type": "string"}},
+                "required": ["tag", "missing"]
+            }
+        },
+        "required": ["query", "missing"],
+        "$defs": {
+            "payload": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": "id"
+            }
+        },
+        "allOf": [
+            {
+                "type": "object",
+                "properties": {"page": {"type": "integer"}}
+            }
+        ]
+    });
+
+    let out = sanitize_moonshot_tool_parameters(&params);
+
+    assert_eq!(out["required"], serde_json::json!(["query"]));
+    assert_eq!(
+        out["properties"]["filter"]["required"],
+        serde_json::json!(["tag"])
+    );
+    assert_eq!(out["$defs"]["payload"]["required"], serde_json::json!([]));
+    assert_eq!(out["allOf"][0]["required"], serde_json::json!([]));
+}
+
+#[test]
 fn test_merge_extra_body_fields_strips_local_request_controls() {
     let extra = serde_json::json!({
         "strict_api": true,
