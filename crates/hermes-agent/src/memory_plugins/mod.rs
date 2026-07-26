@@ -21,6 +21,20 @@ use std::sync::{Arc, Mutex};
 use crate::memory_manager::{MemoryManager, MemoryManagerError, MemoryProviderPlugin};
 use hermes_core::MemorySubject;
 
+fn default_preferred_provider_order() -> Vec<String> {
+    vec![
+        "honcho".to_string(),
+        "contextlattice".to_string(),
+        "supermemory".to_string(),
+        "mem0".to_string(),
+        "hindsight".to_string(),
+        "retaindb".to_string(),
+        "openviking".to_string(),
+        "byterover".to_string(),
+        "holographic".to_string(),
+    ]
+}
+
 fn preferred_provider_order() -> Vec<String> {
     std::env::var("HERMES_MEMORY_PROVIDER_ORDER")
         .ok()
@@ -31,19 +45,7 @@ fn preferred_provider_order() -> Vec<String> {
                 .collect::<Vec<_>>()
         })
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| {
-            vec![
-                "contextlattice".to_string(),
-                "honcho".to_string(),
-                "supermemory".to_string(),
-                "mem0".to_string(),
-                "hindsight".to_string(),
-                "retaindb".to_string(),
-                "openviking".to_string(),
-                "byterover".to_string(),
-                "holographic".to_string(),
-            ]
-        })
+        .unwrap_or_else(default_preferred_provider_order)
 }
 
 fn sort_by_preferred_order(
@@ -203,6 +205,16 @@ fn build_initialized_memory_manager_with_providers(
     register_builtin_then_providers(&mut manager, hermes_home, external_providers)?;
     manager.initialize_all()?;
     Ok(Arc::new(Mutex::new(manager)))
+}
+
+#[cfg(test)]
+mod provider_order_tests {
+    use super::default_preferred_provider_order;
+
+    #[test]
+    fn default_provider_order_prioritizes_honcho() {
+        assert_eq!(default_preferred_provider_order().first().map(String::as_str), Some("honcho"));
+    }
 }
 
 #[cfg(test)]

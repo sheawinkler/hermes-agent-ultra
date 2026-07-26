@@ -7,7 +7,9 @@
 //! for vector algebra. This Rust port uses keyword/FTS-based retrieval as a
 //! simplified but fully functional alternative.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Weak};
 use parking_lot::Mutex;
 use std::time::Duration;
 use hermes_core::{
@@ -226,6 +228,81 @@ const FTS_STOPWORDS: &[&str] = &[
 
 fn clamp_trust(v: f64) -> f64 {
     v.max(0.0).min(1.0)
+}
+
+type SharedHolographicConnection = Arc<Mutex<Connection>>;
+type HolographicConnectionRegistry = HashMap<PathBuf, Weak<Mutex<Connection>>>;
+
+fn shared_holographic_connections() -> &'static Mutex<HolographicConnectionRegistry> {
+    static CONNECTIONS: LazyLock<Mutex<HolographicConnectionRegistry>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    &CONNECTIONS
+}
+
+fn canonical_holographic_database_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+    let Some(file_name) = path.file_name() else {
+        return path.to_path_buf();
+    };
+    path.parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .map(|parent| parent.join(file_name))
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+fn acquire_holographic_connection(
+    db_path: &Path,
+) -> Result<
+    (
+        SharedHolographicConnection,
+        HolographicMigrationReport,
+        bool,
+        PathBuf,
+    ),
+    String,
+> {
+    let canonical_path = canonical_holographic_database_path(db_path);
+    let mut registry = shared_holographic_connections().lock();
+    registry.retain(|_, connection| connection.strong_count() != 0);
+
+    if let Some(connection) = registry.get(&canonical_path).and_then(Weak::upgrade) {
+        let fts_enabled = {
+            let conn = connection.lock();
+            sqlite_table_exists(&conn, "facts_fts")?
+        };
+        return Ok((
+            connection,
+            HolographicMigrationReport {
+                schema_version: HOLOGRAPHIC_SCHEMA_VERSION,
+                ..HolographicMigrationReport::default()
+            },
+            fts_enabled,
+            canonical_path,
+        ));
+    }
+
+    let mut conn = Connection::open(&canonical_path)
+        .map_err(|error| format!("open holographic memory database: {error}"))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|error| format!("enable holographic WAL: {error}"))?;
+    let (migration_report, fts_enabled) = migrate_holographic_schema(&mut conn)?;
+    let connection = Arc::new(Mutex::new(conn));
+    registry.insert(canonical_path.clone(), Arc::downgrade(&connection));
+    Ok((connection, migration_report, fts_enabled, canonical_path))
+}
+
+fn release_holographic_connection(path: &Path, connection: SharedHolographicConnection) {
+    let mut registry = shared_holographic_connections().lock();
+    if Arc::strong_count(&connection) == 1
+        && registry
+            .get(path)
+            .and_then(Weak::upgrade)
+            .is_some_and(|registered| Arc::ptr_eq(&registered, &connection))
+    {
+        registry.remove(path);
+    }
 }
 
 fn is_fts5_unavailable(error: &rusqlite::Error) -> bool {
@@ -552,7 +629,7 @@ fn extract_entities(text: &str) -> Vec<String> {
 
 /// Holographic memory with structured facts, entity resolution, and trust scoring.
 pub struct HolographicMemoryPlugin {
-    conn: Mutex<Option<Connection>>,
+    conn: Mutex<Option<SharedHolographicConnection>>,
     fts_enabled: Mutex<bool>,
     db_path: Mutex<Option<PathBuf>>,
     migration_report: Mutex<HolographicMigrationReport>,
@@ -572,9 +649,23 @@ impl HolographicMemoryPlugin {
         }
     }
 
+    fn shared_connection(&self) -> Option<SharedHolographicConnection> {
+        self.conn.lock().clone()
+    }
+
+    fn release_connection(&self) {
+        let connection = self.conn.lock().take();
+        let db_path = self.db_path.lock().take();
+        if let (Some(connection), Some(db_path)) = (connection, db_path) {
+            release_holographic_connection(&db_path, connection);
+        }
+        *self.fts_enabled.lock() = false;
+    }
+
     fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> R) -> Option<R> {
-        let guard = self.conn.lock();
-        guard.as_ref().map(f)
+        let connection = self.shared_connection()?;
+        let conn = connection.lock();
+        Some(f(&conn))
     }
 
     fn add_fact(
@@ -585,8 +676,8 @@ impl HolographicMemoryPlugin {
         category: &str,
         tags: &str,
     ) -> Result<i64, String> {
-        let mut guard = self.conn.lock();
-        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let connection = self.shared_connection().ok_or("Not initialized")?;
+        let mut conn = connection.lock();
         let content = content.trim();
         if content.is_empty() {
             return Err("content must not be empty".to_string());
@@ -652,23 +743,22 @@ impl HolographicMemoryPlugin {
         min_trust: f64,
         limit: usize,
     ) -> Vec<Value> {
-        let mut guard = self.conn.lock();
-        let conn = match guard.as_mut() {
-            Some(conn) => conn,
-            None => return Vec::new(),
+        let Some(connection) = self.shared_connection() else {
+            return Vec::new();
         };
+        let mut conn = connection.lock();
         if query.trim().is_empty() || limit == 0 {
             return Vec::new();
         }
 
         let fts_enabled = *self.fts_enabled.lock();
         let mut results = if fts_enabled {
-            self.search_facts_fts(conn, filter, query, category, min_trust, limit * 3)
+            self.search_facts_fts(&conn, filter, query, category, min_trust, limit * 3)
         } else {
             Vec::new()
         };
         if results.is_empty() {
-            results = self.search_facts_like(conn, filter, query, category, min_trust, limit * 3);
+            results = self.search_facts_like(&conn, filter, query, category, min_trust, limit * 3);
         }
 
         let query_tokens = tokenize_query(query);
@@ -879,8 +969,8 @@ impl HolographicMemoryPlugin {
         fact_id: i64,
         helpful: bool,
     ) -> Result<Value, String> {
-        let mut guard = self.conn.lock();
-        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let connection = self.shared_connection().ok_or("Not initialized")?;
+        let mut conn = connection.lock();
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
@@ -934,8 +1024,8 @@ impl HolographicMemoryPlugin {
     }
 
     fn subject_residue_count(&self, filter: &MemorySubjectStorageKey) -> Result<u64, String> {
-        let guard = self.conn.lock();
-        let conn = guard.as_ref().ok_or("Not initialized")?;
+        let connection = self.shared_connection().ok_or("Not initialized")?;
+        let conn = connection.lock();
         let mut total = 0_u64;
         for table in ["facts", "entities", "fact_entities"] {
             let count = conn
@@ -947,7 +1037,7 @@ impl HolographicMemoryPlugin {
                 .map_err(|error| error.to_string())?;
             total = total.saturating_add(count.max(0) as u64);
         }
-        if sqlite_table_exists(conn, "facts_fts")? {
+        if sqlite_table_exists(&conn, "facts_fts")? {
             let count = conn
                 .query_row(
                     "SELECT COUNT(*) FROM facts_fts WHERE subject_key = ?1",
@@ -961,9 +1051,9 @@ impl HolographicMemoryPlugin {
     }
 
     fn purge_subject(&self, filter: &MemorySubjectStorageKey) -> Result<u64, String> {
-        let mut guard = self.conn.lock();
-        let conn = guard.as_mut().ok_or("Not initialized")?;
-        let fts_exists = sqlite_table_exists(conn, "facts_fts")?;
+        let connection = self.shared_connection().ok_or("Not initialized")?;
+        let mut conn = connection.lock();
+        let fts_exists = sqlite_table_exists(&conn, "facts_fts")?;
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
@@ -998,8 +1088,8 @@ impl HolographicMemoryPlugin {
         filter: &MemorySubjectStorageKey,
         policy: &MemoryRetentionPolicy,
     ) -> Result<u64, String> {
-        let mut guard = self.conn.lock();
-        let conn = guard.as_mut().ok_or("Not initialized")?;
+        let connection = self.shared_connection().ok_or("Not initialized")?;
+        let mut conn = connection.lock();
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
@@ -1068,6 +1158,12 @@ impl HolographicMemoryPlugin {
     }
 }
 
+impl Drop for HolographicMemoryPlugin {
+    fn drop(&mut self) {
+        self.release_connection();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MemoryProviderPlugin implementation
 // ---------------------------------------------------------------------------
@@ -1093,12 +1189,10 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("create holographic memory directory: {error}"))?;
         }
-        let mut conn = Connection::open(&db_path)
-            .map_err(|error| format!("open holographic memory database: {error}"))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|error| format!("enable holographic WAL: {error}"))?;
-        let (migration_report, fts_enabled) = migrate_holographic_schema(&mut conn)?;
-        *self.db_path.lock() = Some(db_path);
+        self.release_connection();
+        let (conn, migration_report, fts_enabled, canonical_path) =
+            acquire_holographic_connection(&db_path)?;
+        *self.db_path.lock() = Some(canonical_path);
         *self.conn.lock() = Some(conn);
         *self.fts_enabled.lock() = fts_enabled;
         *self.migration_report.lock() = migration_report;
@@ -1209,10 +1303,10 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
         _actor: &MemoryAuditActor,
         sink: &mut dyn MemoryExportSink,
     ) -> Result<MemoryExportReceipt, MemoryProviderGovernanceError> {
-        let mut guard = self.conn.lock();
-        let conn = guard.as_mut().ok_or_else(|| {
+        let connection = self.shared_connection().ok_or_else(|| {
             MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Export)
         })?;
+        let mut conn = connection.lock();
         // The immediate transaction freezes this complete ordered inventory
         // before it is copied into an immutable, paginated snapshot.
         let transaction = conn
@@ -1262,7 +1356,7 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
         })?;
         // The immutable rows are copied; do not hold the provider mutex while
         // an external transactional sink receives pages.
-        drop(guard);
+        drop(conn);
         let snapshot_bytes = serde_json::to_vec(&records).map_err(|error| {
             tracing::warn!("Holographic export snapshot serialization failed: {error}");
             MemoryProviderGovernanceError::failed(self.name(), MemoryGovernanceOperation::Export)
@@ -1422,8 +1516,7 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
     }
 
     fn shutdown(&self) {
-        *self.conn.lock() = None;
-        *self.fts_enabled.lock() = false;
+        self.release_connection();
         tracing::debug!("Holographic memory plugin shutdown");
     }
 
@@ -1501,11 +1594,10 @@ impl HolographicMemoryPlugin {
             Some(fact_id) => fact_id,
             None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
         };
-        let mut guard = self.conn.lock();
-        let conn = match guard.as_mut() {
-            Some(conn) => conn,
-            None => return json!({"error": "Not initialized"}).to_string(),
+        let Some(connection) = self.shared_connection() else {
+            return json!({"error": "Not initialized"}).to_string();
         };
+        let mut conn = connection.lock();
         let transaction = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
             Ok(transaction) => transaction,
             Err(error) => return json!({"error": error.to_string()}).to_string(),
@@ -1565,11 +1657,10 @@ impl HolographicMemoryPlugin {
             Some(fact_id) => fact_id,
             None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
         };
-        let mut guard = self.conn.lock();
-        let conn = match guard.as_mut() {
-            Some(conn) => conn,
-            None => return json!({"error": "Not initialized"}).to_string(),
+        let Some(connection) = self.shared_connection() else {
+            return json!({"error": "Not initialized"}).to_string();
         };
+        let mut conn = connection.lock();
         let transaction = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
             Ok(transaction) => transaction,
             Err(error) => return json!({"error": error.to_string()}).to_string(),
@@ -1593,11 +1684,10 @@ impl HolographicMemoryPlugin {
     }
 
     fn list_facts(&self, filter: &MemorySubjectStorageKey, args: &Value) -> String {
-        let guard = self.conn.lock();
-        let conn = match guard.as_ref() {
-            Some(conn) => conn,
-            None => return json!({"error": "Not initialized"}).to_string(),
+        let Some(connection) = self.shared_connection() else {
+            return json!({"error": "Not initialized"}).to_string();
         };
+        let conn = connection.lock();
         let category = args.get("category").and_then(Value::as_str);
         let min_trust = args
             .get("min_trust")
@@ -1891,6 +1981,35 @@ mod tests {
             worker.join().expect("worker");
         }
         assert_eq!(first.fact_count(&key), 24);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_database_aliases_share_connection_and_survive_peer_shutdown() {
+        let real_home = tempfile::tempdir().expect("real home");
+        let alias_root = tempfile::tempdir().expect("alias root");
+        let alias_home = alias_root.path().join("database-home");
+        std::os::unix::fs::symlink(real_home.path(), &alias_home).expect("directory symlink");
+        let (subject, key) = subject("symlink-session");
+        let first = HolographicMemoryPlugin::new();
+        let second = HolographicMemoryPlugin::new();
+        initialize(&first, &subject, &key, real_home.path());
+        initialize(&second, &subject, &key, &alias_home);
+
+        let first_connection = first.shared_connection().expect("first connection");
+        let second_connection = second.shared_connection().expect("second connection");
+        assert!(Arc::ptr_eq(&first_connection, &second_connection));
+        drop(first_connection);
+        drop(second_connection);
+
+        first
+            .add_fact(&subject, &key, "first alias fact", "test", "")
+            .expect("first alias write");
+        MemoryProviderPlugin::shutdown(&first);
+        second
+            .add_fact(&subject, &key, "second alias fact", "test", "")
+            .expect("surviving alias write");
+        assert_eq!(second.fact_count(&key), 2);
     }
 
     #[test]
