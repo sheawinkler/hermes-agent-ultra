@@ -11,10 +11,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Fetch upstream parity reference
         run: |
           git remote add upstream https://github.com/NousResearch/hermes-agent.git || true
-          git fetch upstream main --depth=1
+          git fetch --no-tags upstream main
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
@@ -28,7 +32,12 @@ jobs:
           python3 scripts/generate-adapter-matrix.py
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-shared-diff-backlog.py --local-ref HEAD --no-fetch
-          python3 scripts/generate-upstream-patch-queue.py --local-ref HEAD --max-commits 0
+          python3 scripts/generate-upstream-patch-queue.py \
+            --local-ref HEAD \
+            --fork-url "$(git remote get-url origin)" \
+            --fork-branch "${{ github.head_ref || github.ref_name }}" \
+            --max-commits 0
+          python3 scripts/generate-upstream-workstreams.py --check
           python3 scripts/generate-global-parity-proof.py
       - name: Format check
         run: cargo fmt --all --check
@@ -62,6 +71,7 @@ jobs:
           python3 -m py_compile scripts/generate-shared-diff-backlog.py
           python3 -m py_compile scripts/generate-test-coverage-audit.py
           python3 -m py_compile scripts/generate-release-readiness-summary.py
+          python3 -m py_compile scripts/generate-upstream-workstreams.py
           python3 -m py_compile scripts/release_secret_scan.py
 
   cross-build:
