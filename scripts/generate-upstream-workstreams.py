@@ -159,6 +159,7 @@ WORKSTREAMS: tuple[dict[str, Any], ...] = (
             "hermes_cli/cron",
             "plugins/cron/",
             "plugins/cron_providers/",
+            "tools/delegate",
         ),
         "terms": ("cron", "schedule", "delegat", "subagent", "background", "worker"),
     },
@@ -246,7 +247,20 @@ WORKSTREAMS: tuple[dict[str, Any], ...] = (
     },
 )
 
-IGNORED_PRIMARY_PREFIXES = ("tests/", "docs/", "locales/", ".github/")
+IGNORED_PRIMARY_PREFIXES = (
+    "tests/",
+    "docs/",
+    "website/docs/",
+    "locales/",
+    ".github/",
+    "infographic/",
+)
+IGNORED_PRIMARY_PATHS = {
+    ".gitignore",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+}
 
 
 def _normalized_paths(commit: dict[str, Any]) -> list[str]:
@@ -279,7 +293,8 @@ def classify_workstream(commit: dict[str, Any]) -> str:
     primary_paths = [
         path
         for path in paths
-        if not any(path.startswith(prefix) for prefix in IGNORED_PRIMARY_PREFIXES)
+        if path not in IGNORED_PRIMARY_PATHS
+        and not any(path.startswith(prefix) for prefix in IGNORED_PRIMARY_PREFIXES)
     ]
     scored_paths = primary_paths or paths
     subject = str(commit.get("subject", "")).lower()

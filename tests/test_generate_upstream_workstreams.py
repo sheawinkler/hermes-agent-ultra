@@ -95,6 +95,23 @@ def test_routes_shared_app_and_repository_metadata() -> None:
     )
 
 
+def test_runtime_path_wins_over_docs_and_metadata_companions() -> None:
+    mixed = _commit(
+        "8",
+        "feat(delegation): let subagents use execute_code",
+        [
+            "AGENTS.md",
+            "tests/tools/test_delegate.py",
+            "tools/delegate_tool.py",
+            "website/docs/guides/delegation-patterns.md",
+        ],
+    )
+    docs_only = _commit("9", "docs: update agent guidance", ["AGENTS.md"])
+
+    assert module.classify_workstream(mixed) == "scheduler-delegation"
+    assert module.classify_workstream(docs_only) == "docs-localization"
+
+
 def test_code_path_wins_over_companion_test_path() -> None:
     commit = _commit(
         "d",
