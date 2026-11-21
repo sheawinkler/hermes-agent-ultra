@@ -20,6 +20,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
+llm-prices = { version = "1.8.0", default-features = false }
 strsim = "0.11"
 dirs = "6"
 tempfile = "3"
