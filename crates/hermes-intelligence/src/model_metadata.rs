@@ -390,7 +390,14 @@ pub fn get_model_info(model_name: &str) -> Option<ModelInfo> {
         }
     }
 
-    best.cloned()
+    best.cloned().map(|mut info| {
+        // Prices come from llm-prices, which tracks the providers' published list prices.
+        if let Some(p) = llm_prices::lookup(model_name).or_else(|| llm_prices::lookup(&info.name)) {
+            info.input_cost_per_million = p.input;
+            info.output_cost_per_million = p.output;
+        }
+        info
+    })
 }
 
 /// Check if a model supports vision.
@@ -820,6 +827,19 @@ mod tests {
         assert_eq!(mimo.provider, "xiaomi");
         assert_eq!(mimo.context_window, 1_000_000);
         assert!(mimo.supports_vision);
+    }
+
+    #[test]
+    fn test_get_model_info_uses_list_prices() {
+        let opus = get_model_info("claude-opus-4-6").unwrap();
+        assert_eq!(opus.input_cost_per_million, Some(5.0));
+        assert_eq!(opus.output_cost_per_million, Some(25.0));
+        let o3 = get_model_info("o3").unwrap();
+        assert_eq!(o3.input_cost_per_million, Some(2.0));
+        assert_eq!(o3.output_cost_per_million, Some(8.0));
+        let flash = get_model_info("gemini-2.5-flash").unwrap();
+        assert_eq!(flash.input_cost_per_million, Some(0.30));
+        assert_eq!(flash.output_cost_per_million, Some(2.50));
     }
 
     #[test]
